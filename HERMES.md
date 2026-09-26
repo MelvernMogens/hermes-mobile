@@ -20,7 +20,13 @@ server lain yang tidak melihat session desktop dan update-nya lambat.
 - **Backend**: LaunchAgent `com.hermes.mobile-serve` = `hermes serve --port 8788`
   + `dashboard.public_url` (Tailscale) + basic auth + `ws_orphan_reap_grace_s 900`.
   Expose via `tailscale serve --bg 8788`. *Ditolak: hermes-webui (beda dunia,
-  session desktop tidak kelihatan); API key gateway (beda protokol).*
+  session desktop tidak kelihatan — filter `show_cli_sessions` default off,
+  profile scoping, polling yang berhenti saat screen mati); API-server gateway
+  :8642 (REST/SSE, documented — tapi beda protokol dari desktop: gak bisa
+  resume runtime session desktop, gak ada event fan-out tui_gateway, dan
+  butuh `hermes gateway` + flag baru. Dipilih serve karena Melvern minta
+  "functionnya kaya desktop app" = protokol yang sama, dan sudah dibuktikan
+  E2E + verifier independen 5/5 PASS).*
 
 ## Commands
 ```bash
