@@ -16,6 +16,12 @@ jaringan yang sama dengan HP.
   (mode 600) untuk setup.
 - Rate limit login bawaan dashboard auth (429 setelah beberapa percobaan).
 
+## Catatan hardening (temuan verifier 26 Sep)
+- Server tidak memberlakukan subprotocol WS — upgrade 101 jalan juga tanpa
+  `Sec-WebSocket-Protocol`. Auth gate tetap utuh (ticket wajib), jadi ini bukan
+  lubang, tapi kalau mau pinning versi protokol, itu urusan sisi server
+  (upstream Hermes), bukan app ini.
+
 ## Yang perlu diperhatikan
 - Jangan pernah set `HERMES_SERVE_INSECURE` / bind 0.0.0.0.
 - Password app di DataStore = root device bisa baca; ancaman fisik di luar scope.
