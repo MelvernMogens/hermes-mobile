@@ -1,0 +1,60 @@
+# hermes-mobile
+
+## What this is
+Client Android native untuk Hermes Agent yang jalan di Mac Melvern — target
+backend yang SAMA dengan desktop app (`hermes serve` JSON-RPC/WebSocket), bukan
+server pihak ketiga. Semua session (desktop/CLI/bot) muncul, chat streaming
+real-time. Dibuat karena Hermex (port Android dari hermes-webui) ngomong ke
+server lain yang tidak melihat session desktop dan update-nya lambat.
+
+## Stack
+- **Kotlin + Jetpack Compose** (minSdk 26, compileSdk 36, JVM 17), single-activity,
+  tanpa DI/Room — state di DataStore. Alasan: sama dengan Blokees (proven di
+  mesin ini), ringan, dan UI-nya memang Compose.
+- **OkHttp WebSocket + kotlinx-serialization** — protokol JSON-RPC 2.0 di-port
+  dari `apps/shared` Hermes desktop (heartbeat `gateway.ping` 15s/45s deadline,
+  reconnect full-jitter 300ms→15s, replay `session.events.since`).
+- **Auth**: basic auth dashboard (`/auth/password-login` → cookie →
+  `/api/auth/ws-ticket` single-use 30s → WS `?ticket=`) — jalur native-app resmi.
+  Password disimpan di DataStore (private app storage).
+- **Backend**: LaunchAgent `com.hermes.mobile-serve` = `hermes serve --port 8788`
+  + `dashboard.public_url` (Tailscale) + basic auth + `ws_orphan_reap_grace_s 900`.
+  Expose via `tailscale serve --bg 8788`. *Ditolak: hermes-webui (beda dunia,
+  session desktop tidak kelihatan); API key gateway (beda protokol).*
+
+## Commands
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+cd app-android
+./gradlew :app:assembleDebug        # APK → app/build/outputs/apk/debug/
+adb -s emulator-5580 install -r app/build/outputs/apk/debug/app-debug.apk
+```
+Server: `bash server/install.sh` (idempotent; set LaunchAgent + tailscale serve).
+Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
+
+## Milestones — status
+| # | Scope | Status | Model / effort |
+|---|---|---|---|
+| M1 | Slice E2E: connect (auth+ticket+WS), session list desktop, buka chat + transcript, kirim pesan, jawaban live streaming | done (emulator 5580, 26 Sep) | GLM 5.3 / high |
+| M2 | UI premium pass: markdown render, reasoning collapsible, approval cards, interrupt UI, session search | todo | — |
+| M3 | Notifications (foreground service), share target, quick tile | todo | — |
+| M4 | Signed release APK + update path | todo | — |
+
+## Konvensi
+- Bahasa kode/komentar Indonesia; UI string Indonesia.
+- Satu GatewayClient process-wide (HermesApp) — jangan bikin client kedua.
+- Wire contract: `~/.hermes/hermes-agent/apps/shared/src/gateway-contract.openrpc.json`
+  (219 method) — sumber kebenaran untuk field.
+
+## Pelajaran keras (jangan diulang)
+- **Frame event JSON-RPC tidak punya `id`** — dispatch harus match `method`
+  dulu, bukan `id&&method`. Bug ini bikin semua event dibuang senyap.
+- `session.resume` dengan `defer_history:true` balikin `messages: []` —
+  SELALU resume tanpa defer (187 msg = 694KB, aman).
+- `ws_orphan_reap_grace_s` default 20s terlalu pendek buat mobile —
+  sudah dinaikin ke 900s via config.
+- connectLoop tidak boleh bikin socket baru sebelum yang lama mati total
+  (jangan complete-kan deferred di `onOpen`).
+- Emulator: `adb -s emulator-5580` (AVD Blokees dipakai bareng — jangan
+  `adb kill-server`).
