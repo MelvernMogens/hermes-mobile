@@ -16,15 +16,23 @@ import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.R
 
 /**
- * Type system monochrome (M3.1): dua voice —
+ * Type system (M3.1, font M3.3): dua voice —
  *  - "bill" (sans bold, tracking, uppercase) untuk chrome/header/meta:
- *    header screen, session title, label tool, tombol.
- *  - "prose" (sans regular) untuk konten assistant — diganti dari serif
- *    italic ke sans 16/24 (user 27 Sep: "pusing dibaca"). Kontras role
- *    cukup dari layout: user pill kanan vs assistant full-width.
+ *    header screen, session title, label tool, tombol. Sans = system default
+ *    (Roboto) — SAMA dengan desktop Hermes yang pakai system font.
+ *  - "prose" (sans regular) untuk konten assistant — sans 16/24.
+ * Code block + inline code pakai JetBrains Mono (M3.3, match desktop) —
+ * bundel res/font, TTF resmi github.com/JetBrains/JetBrainsMono v2.304.
  */
-
 val BillSans: FontFamily = FontFamily.SansSerif
+
+/** JetBrains Mono — match desktop Hermes (M3.3). */
+val JetBrainsMono: FontFamily = FontFamily(
+    Font(R.font.jetbrainsmono_regular, FontWeight.Normal),
+    Font(R.font.jetbrainsmono_italic, FontWeight.Normal, FontStyle.Italic),
+    Font(R.font.jetbrainsmono_bold, FontWeight.Bold),
+    Font(R.font.jetbrainsmono_bold_italic, FontWeight.Bold, FontStyle.Italic),
+)
 
 val HermesType = Typography(
     // prose assistant — sans regular, ukuran baca nyaman

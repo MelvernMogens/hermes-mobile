@@ -39,6 +39,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.ui.theme.F
+import id.melvern.hermesmobile.ui.theme.JetBrainsMono
 import id.melvern.hermesmobile.ui.theme.Shape
 
 /**
@@ -326,9 +327,9 @@ private fun CodeBlockView(block: MdBlock.CodeBlock, last: Boolean) {
         SelectionContainer {
             Text(
                 block.code,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = JetBrainsMono,
                 fontSize = 13.sp,
-                lineHeight = 19.sp,
+                lineHeight = 20.sp,
                 color = F.CreamDim,
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
@@ -347,8 +348,8 @@ private fun buildMd(spans: List<MdSpan>, context: Context): AnnotatedString = bu
             is MdSpan.Italic -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(span.text) }
             is MdSpan.InlineCode -> withStyle(
                 SpanStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
+                    fontFamily = JetBrainsMono,
+                    fontSize = 13.sp,
                     background = F.CodeBg,
                     color = F.CreamDim,
                 )

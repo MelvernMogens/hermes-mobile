@@ -71,6 +71,9 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     var running by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(preattachedRuntime == null) }
     var input by remember { mutableStateOf("") }
+    // M3.3: thinking indicator — event thinking.delta / reasoning.delta
+    var thinking by remember { mutableStateOf(false) }
+    var thinkingText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
@@ -141,7 +144,14 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
         app.client?.inbound?.collect { ev ->
             when (ev) {
                 is GatewayInbound.RpcEvent -> if (ev.sessionId == runtimeId || ev.sessionId.isEmpty()) when (ev.type) {
+                    "thinking.delta", "reasoning.delta" -> {
+                        // M3.3: stream reasoning — tampil SELAMA assistant belum mulai jawab
+                        val chunk = ev.payload?.get("text")?.jsonStr() ?: ev.payload?.get("delta")?.jsonStr() ?: ""
+                        if (chunk.isNotEmpty()) thinkingText = (thinkingText + chunk).takeLast(500)
+                        thinking = true
+                    }
                     "message.delta" -> {
+                        thinking = false; thinkingText = ""
                         val delta = ev.payload?.get("delta")?.jsonStr() ?: ev.payload?.get("text")?.jsonStr() ?: ""
                         if (delta.isNotEmpty()) {
                             val last = items.lastOrNull()
@@ -152,14 +162,16 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                         }
                     }
                     "message.complete" -> {
+                        thinking = false
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
                         items = items.filterNot { it is ChatItem.Assistant && !it.done }
                         if (text.isNotEmpty()) items = items + ChatItem.Assistant(text, done = true, time = Fmt.clock(nowEpoch()))
                         running = false
                         if (!atBottom) hasNew = true
                     }
-                    "message.start" -> running = true
+                    "message.start" -> { running = true; thinking = false; thinkingText = "" }
                     "message.interim" -> {
+                        thinking = false
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
                         if (text.isNotEmpty()) {
                             items = items.filterNot { it is ChatItem.Assistant && !it.done }
@@ -167,7 +179,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                         }
                     }
                     "tool.start" -> {
-                        running = true
+                        running = true; thinking = false; thinkingText = ""
                         val name = ev.payload?.get("tool")?.jsonStr() ?: ev.payload?.get("name")?.jsonStr() ?: "tool"
                         items = items + ChatItem.Tool(name, "run")
                     }
@@ -202,6 +214,12 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     }
     // balik ke bottom manual → badge "baru" reset
     LaunchedEffect(atBottom) { if (atBottom) hasNew = false }
+    // M3.3: thinking block muncul tanpa items berubah — scroll manual ke ujung
+    LaunchedEffect(thinking, thinkingText) {
+        if (thinking && (atBottom || forceScroll)) {
+            listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(F.Bg).statusBarsPadding()) {
         // Header tipis — bill type
@@ -245,6 +263,12 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 items(items) { item -> ChatItemView(item, onLongPress = { copyTarget = it }) }
+                // M3.3: thinking indicator — hanya kalau belum ada Assistant streaming
+                // (Assistant done dari turn sebelumnya tidak menghalangi)
+                val streamingAssistant = (items.lastOrNull() as? ChatItem.Assistant)?.done == false
+                if (thinking && !streamingAssistant) {
+                    item { ThinkingBlock(thinkingText) }
+                }
             }
             // M3.2: chip scroll-to-bottom — muncul saat scroll up dari bottom
             if (!atBottom) {
@@ -361,7 +385,7 @@ private fun ChatItemView(item: ChatItem, onLongPress: (String) -> Unit = {}) {
                     modifier = Modifier
                         .widthIn(max = 300.dp)
                         .combinedClickable(onClick = {}, onLongClick = { onLongPress(item.text) })
-                        .background(F.Surface1, Shape.M)
+                        .background(F.UserBubble, Shape.M)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                 )
                 // M3.2: jam kecil di bawah pesan — gaya WhatsApp
@@ -427,6 +451,42 @@ private fun VermillionCaret() {
         label = "caret",
     )
     Box(Modifier.padding(top = 6.dp).size(width = 4.dp, height = 20.dp).background(F.Vermillion.copy(alpha = alpha)))
+}
+
+/**
+ * M3.3: blok "Berpikir…" — tampil saat reasoning.delta/thinking.delta stream
+ * dan assistant belum mulai menjawab. Dot accent 6dp pulse alpha, teks reasoning
+ * 2 baris max ellipsis (tail 500 char sudah di-cap di event handler).
+ */
+@Composable
+private fun ThinkingBlock(text: String) {
+    val alpha by rememberInfiniteTransition().animateFloat(
+        initialValue = 1f, targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(tween(750), RepeatMode.Reverse),
+        label = "thinkDot",
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+        Box(
+            Modifier
+                .padding(top = 4.dp)
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(F.Vermillion.copy(alpha = alpha))
+        )
+        Column {
+            Text(
+                "BERPIKIR…",
+                style = MaterialTheme.typography.labelSmall,
+                color = F.Lavender,
+            )
+            if (text.isNotBlank()) Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = F.Lavender,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 /**
