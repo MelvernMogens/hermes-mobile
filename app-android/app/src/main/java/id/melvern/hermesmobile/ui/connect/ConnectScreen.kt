@@ -63,7 +63,10 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
                 testing = true; error = null
                 scope.launch {
                     try {
-                        val settings = ConnectionSettings(baseUrl = url, username = user, password = pass)
+                        // Toleransi input: hostname polos auto-dapat https://
+                        val rawUrl = url.trim()
+                        val fixedUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
+                        val settings = ConnectionSettings(baseUrl = fixedUrl, username = user, password = pass)
                         if (!settings.configured) throw Exception("URL, username, dan password wajib diisi")
                         val client = app.buildClient(settings)
                         client.start()

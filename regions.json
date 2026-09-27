@@ -1,0 +1,54 @@
+{
+ "regions": [
+  {
+   "id": "bg-splitfountain",
+   "kind": "texture",
+   "grid": "A0:J9",
+   "note": "indigo split-fountain ground #131A33 flat; programmatic color, no plate needed",
+   "allowUncovered": true
+  },
+  {
+   "id": "header-title",
+   "kind": "text",
+   "grid": "B0:I0",
+   "note": "condensed tracked sans screen title 'STEAMDECK' cream + small 'runtime' label right"
+  },
+  {
+   "id": "header-rule",
+   "kind": "chrome",
+   "grid": "B1:I1",
+   "note": "hairline divider indigo-light 1dp"
+  },
+  {
+   "id": "user-pill",
+   "kind": "control",
+   "grid": "E2:J2",
+   "note": "user message pill: surface indigo #1B2A52 rounded 44r, light text, right-aligned"
+  },
+  {
+   "id": "tool-row",
+   "kind": "text",
+   "grid": "B3:I3",
+   "note": "tool activity row: 16dp vermillion dot + tracked sans label 'terminal \u00b7 2m' muted lavender"
+  },
+  {
+   "id": "assistant-prose",
+   "kind": "text",
+   "grid": "B4:I5",
+   "note": "assistant message: serif italic cream 44sp full-width multi-line prose block, vermillion caret block after last line"
+  },
+  {
+   "id": "caret",
+   "kind": "control",
+   "grid": "B6:C6",
+   "note": "streaming caret: 14x44 vermillion rectangle"
+  },
+  {
+   "id": "composer-ticket",
+   "kind": "control",
+   "grid": "B8:I8",
+   "note": "composer ticket strip: surface indigo, vermillion outline 3px, radius 26, side notches, placeholder text, vermillion circular send button 94dp with cream triangle"
+  }
+ ],
+ "allowUncovered": true
+}

@@ -286,4 +286,7 @@ class GatewayClient(
 
 class RpcException(val code: Int, message: String) : Exception(message)
 
+/** 4090: session di-hold surface lain (desktop app buka session itu). */
+class SessionNotOwnedException(message: String) : Exception(message)
+
 private const val TAG = "HermesGateway"

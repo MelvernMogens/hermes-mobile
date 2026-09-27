@@ -104,8 +104,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                     scope.launch {
                         try {
                             val c = app.client ?: return@launch
-                            val id = SessionRepo(c).createSession()
-                            onOpen(id)
+                            val (runtimeId, storedId) = SessionRepo(c).createSession()
+                            onOpen("$storedId|$runtimeId")
                         } catch (_: Throwable) {}
                     }
                 }

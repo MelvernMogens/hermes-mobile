@@ -3,6 +3,7 @@ package id.melvern.hermesmobile.core.repo
 import id.melvern.hermesmobile.core.model.SessionRow
 import id.melvern.hermesmobile.core.model.TranscriptMessage
 import id.melvern.hermesmobile.core.rpc.GatewayClient
+import id.melvern.hermesmobile.core.rpc.SessionNotOwnedException
 import id.melvern.hermesmobile.core.rpc.RpcException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,10 +61,19 @@ class SessionRepo(private val client: GatewayClient) {
 
     /**
      * Submit dengan jaminan runtime hidup: kalau prompt.submit kena error session
-     * (4001/4006 atau not-found), re-resume sekali lalu ulangi submit dengan
-     * runtime id baru. Return runtime id yang dipakai (untuk sinkron filter event).
+     * (4001/4006/not-found/"live owner"/"already active"), re-resume sekali lalu
+     * ulangi submit dengan runtime id baru. Return runtime id yang dipakai.
+     *
+     * 4090 SESSION_NOT_OWNED (session masih di-hold surface lain — desktop app
+     * buka session itu) TIDAK bisa diambil alih by design (#106217): dilempar
+     * ke UI dengan reason utk pesan yang jelas.
      */
     suspend fun sendPromptResilient(storedSessionId: String, lastKnownRuntimeId: String, text: String): String {
+        fun retryable(e: RpcException): Boolean {
+            val m = (e.message ?: "").lowercase()
+            return listOf("live owner", "already", "active", "owner", "409", "4001", "4006", "not found")
+                .any { it in m }
+        }
         return try {
             client.call(
                 "prompt.submit",
@@ -72,7 +82,9 @@ class SessionRepo(private val client: GatewayClient) {
             )
             lastKnownRuntimeId
         } catch (e: RpcException) {
-            // coba re-resume pakai stored id, lalu submit ke runtime baru
+            if (e.code == 4090) throw SessionNotOwnedException(e.message ?: "session dipegang surface lain")
+            if (!retryable(e)) throw e
+            // runtime mati/nempel owner mati — ambil alih dengan resume baru
             val out = resume(storedSessionId)
             client.call(
                 "prompt.submit",
@@ -88,12 +100,15 @@ class SessionRepo(private val client: GatewayClient) {
         catch (_: RpcException) {}
     }
 
-    suspend fun createSession(title: String? = null): String {
+    suspend fun createSession(title: String? = null): Pair<String, String> {
+        // return (runtimeId, storedId) — session baru punya runtime beda dari stored
         val res = client.call("session.create", buildJsonObject {
             if (!title.isNullOrBlank()) put("title", title)
         })
-        return res["session_id"]?.jsonPrimitive?.contentOrNull
+        val runtimeId = res["session_id"]?.jsonPrimitive?.contentOrNull
             ?: throw RpcException(-1, "session.create: no session_id in result")
+        val storedId = res["stored_session_id"]?.jsonPrimitive?.contentOrNull ?: runtimeId
+        return runtimeId to storedId
     }
 }
 

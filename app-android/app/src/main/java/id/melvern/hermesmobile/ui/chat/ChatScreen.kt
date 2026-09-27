@@ -52,11 +52,16 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatScreen(app: HermesApp, storedSessionId: String) {
     val scope = rememberCoroutineScope()
-    var runtimeId by remember { mutableStateOf(storedSessionId) }
+    // Format arg: "storedId" (dari list) atau "storedId|runtimeId" (dari NEW GIG —
+    // session baru: skip resume, langsung pakai runtime yang udah nempel di koneksi kita)
+    val parts = storedSessionId.split("|")
+    val actualStoredId = parts[0]
+    val preattachedRuntime = parts.getOrNull(1)
+    var runtimeId by remember { mutableStateOf(preattachedRuntime ?: actualStoredId) }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
-    var title by remember { mutableStateOf(storedSessionId.take(22)) }
+    var title by remember { mutableStateOf(actualStoredId.take(22)) }
     var running by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember { mutableStateOf(preattachedRuntime == null) }
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val client = app.client
@@ -77,7 +82,12 @@ fun ChatScreen(app: HermesApp, storedSessionId: String) {
         }
     }
 
-    LaunchedEffect(storedSessionId) {
+    LaunchedEffect(actualStoredId, preattachedRuntime) {
+        if (preattachedRuntime != null) {
+            // NEW GIG: session baru kosong — gak ada transcript buat di-resume
+            loading = false
+            return@LaunchedEffect
+        }
         val c = app.client ?: return@LaunchedEffect
         var waited = 0
         while (c.state.value != ConnState.OPEN && waited < 25000) { delay(250); waited += 250 }
@@ -86,7 +96,7 @@ fun ChatScreen(app: HermesApp, storedSessionId: String) {
             loading = false; return@LaunchedEffect
         }
         try {
-            val out = SessionRepo(c).resume(storedSessionId)
+            val out = SessionRepo(c).resume(actualStoredId)
             runtimeId = out.runtimeId
             running = out.running
             items = mapTranscript(out.messages)
@@ -192,12 +202,15 @@ fun ChatScreen(app: HermesApp, storedSessionId: String) {
                 scope.launch {
                     try {
                         val repo = SessionRepo(app.client ?: return@launch)
-                        val newRuntime = repo.sendPromptResilient(storedSessionId, runtimeId, text)
+                        val newRuntime = repo.sendPromptResilient(actualStoredId, runtimeId, text)
                         if (newRuntime != runtimeId) runtimeId = newRuntime
                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
                     } catch (e: Throwable) {
                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
-                        items = items + ChatItem.NoticeLine("Gagal kirim: ${e.message}")
+                        val msg = if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException)
+                            "Session ini lagi dibuka di desktop app — tutup dulu di sana, atau mulai GIG baru."
+                        else "Gagal kirim: ${e.message}"
+                        items = items + ChatItem.NoticeLine(msg)
                         input = text
                     }
                 }
