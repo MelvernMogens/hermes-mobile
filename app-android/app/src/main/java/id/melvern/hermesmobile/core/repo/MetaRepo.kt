@@ -120,6 +120,47 @@ class MetaRepo(private val client: GatewayClient) {
         )
     }
 
+    // ── profiles.get_asset (M5c: avatar per-profile) ───────────────────
+
+    data class ProfileAsset(
+        val found: Boolean,
+        val mime: String? = null,
+        val size: Int? = null,
+        /** Hasil parse data URL (base64 → bytes); null kalau found=false. */
+        val bytes: ByteArray? = null,
+    )
+
+    /**
+     * `profiles.get_asset` — avatar profile sebagai data URL.
+     * PERHATIAN: field params-nya `name` (nama profile), BUKAN `profile` —
+     * terverifikasi kontrak (ProfilesGetAssetParams) + probe Megatron 28 Sep.
+     * found=false BUKAN error (profil tanpa avatar → placeholder inisial).
+     */
+    suspend fun profileAvatar(name: String): ProfileAsset {
+        val res = client.call("profiles.get_asset", buildJsonObject {
+            put("name", name)
+            put("asset", "avatar")
+        })
+        val found = res["found"]?.jsonPrimitive?.booleanOrNull ?: false
+        // data URL "data:image/png;base64,XXXX" → bytes.
+        // Fallback URL-alphabet decoder: beberapa producer data URL pakai base64url.
+        val bytes = res["data"]?.jsonPrimitive?.contentOrNull
+            ?.substringAfter(',', "")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { b64 ->
+                try { java.util.Base64.getDecoder().decode(b64) }
+                catch (_: Throwable) {
+                    try { java.util.Base64.getUrlDecoder().decode(b64) } catch (_: Throwable) { null }
+                }
+            }
+        return ProfileAsset(
+            found = found,
+            mime = res["mime"]?.jsonPrimitive?.contentOrNull,
+            size = res["size"]?.jsonPrimitive?.intOrNull,
+            bytes = if (found) bytes else null,
+        )
+    }
+
     // ── Aksi session (context menu) ────────────────────────────────────
     suspend fun renameSession(runtimeId: String, title: String, profile: String? = null) {
         client.call("session.title", buildJsonObject {

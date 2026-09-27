@@ -53,6 +53,7 @@ import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
 import id.melvern.hermesmobile.core.rpc.RpcException
 import id.melvern.hermesmobile.ui.components.MarkdownText
+import id.melvern.hermesmobile.ui.components.ProfileAvatar
 import id.melvern.hermesmobile.ui.theme.F
 import id.melvern.hermesmobile.ui.theme.JetBrainsMono
 import id.melvern.hermesmobile.ui.theme.Shape
@@ -409,6 +410,9 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // M5c: avatar profile aktif 24dp kiri judul
+                ProfileAvatar(app, app.profile.value, 24.dp)
+                Spacer(Modifier.width(10.dp))
                 Text(
                     title.uppercase(),
                     style = MaterialTheme.typography.labelLarge,

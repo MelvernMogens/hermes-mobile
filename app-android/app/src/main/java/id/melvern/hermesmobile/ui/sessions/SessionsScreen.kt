@@ -32,6 +32,7 @@ import id.melvern.hermesmobile.core.repo.Fmt
 import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
+import id.melvern.hermesmobile.ui.components.ProfileAvatar
 import id.melvern.hermesmobile.ui.theme.F
 import id.melvern.hermesmobile.ui.theme.Shape
 import id.melvern.hermesmobile.ui.theme.pressClickable
@@ -113,6 +114,9 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // M5c: avatar profile aktif — kiri wordmark (geser kanan 8dp)
+                ProfileAvatar(app, profile, 28.dp)
+                Spacer(Modifier.width(8.dp))
                 Text("H E R M E S", style = MaterialTheme.typography.labelLarge, color = F.Cream)
                 Spacer(Modifier.weight(1f))
                 Text(
@@ -358,6 +362,9 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                                 .padding(vertical = 12.dp, horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // M5c: leading avatar 40dp tiap row profile
+                            ProfileAvatar(app, p.name, 40.dp)
+                            Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     (p.displayName.ifBlank { p.name }),
