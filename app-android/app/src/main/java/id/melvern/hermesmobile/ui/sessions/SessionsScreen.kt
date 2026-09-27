@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.style.TextOverflow
+import android.net.Uri
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.HermesApp
@@ -37,6 +38,7 @@ import java.time.LocalDate
 fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var sessions by remember { mutableStateOf<List<SessionRow>>(emptyList()) }
+    var active by remember { mutableStateOf<Set<String>>(emptySet()) }
     var loading by remember { mutableStateOf(true) }
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
@@ -46,6 +48,10 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             app.client?.let { c ->
                 if (c.state.value == ConnState.OPEN) {
                     try { sessions = SessionRepo(c).listSessions() } catch (_: Throwable) {}
+                    // M3.2: running indicator real — session.list rows gak punya
+                    // field running, ambil dari session.active_list (match via
+                    // session_key/stored id — runtime id gak nyambung ke list).
+                    try { active = SessionRepo(c).activeStoredIds() } catch (_: Throwable) {}
                     // finally-style: jangan biarkan spinner gantung kalau list gagal
                     loading = false
                 }
@@ -87,7 +93,10 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
         } else {
             LazyColumn(Modifier.weight(1f)) {
                 items(sessions, key = { it.id }) { s ->
-                    SessionRowView(s, onClick = { onOpen(s.id) })
+                    SessionRowView(s, running = s.id in active, onClick = {
+                        // M3.2: bawa displayTitle — ChatScreen gak boleh nampilin ID mentah
+                        onOpen("${s.id}|t=${Uri.encode(s.displayTitle)}")
+                    })
                     HorizontalDivider(color = F.Stroke, thickness = 1.dp, modifier = Modifier.padding(horizontal = 20.dp))
                 }
             }
@@ -150,7 +159,7 @@ private fun Modifier.dashedBorder(): Modifier = drawBehind {
 }
 
 @Composable
-private fun SessionRowView(s: SessionRow, onClick: () -> Unit) {
+private fun SessionRowView(s: SessionRow, running: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().pressClickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -162,14 +171,20 @@ private fun SessionRowView(s: SessionRow, onClick: () -> Unit) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(6.dp))
+            // M3.2: meta lengkap — source (Desktop/CLI/Bot) · msg · waktu
             Text(
-                "${s.messageCount} MSG · ${Fmt.timeAgo(s.updatedAt ?: s.startedAt)}".uppercase(),
+                "${s.sourceLabel} · ${s.messageCount} MSG · ${Fmt.timeAgo(s.updatedAt ?: s.startedAt)}".uppercase(),
                 style = MaterialTheme.typography.labelSmall,
                 color = F.Lavender,
             )
-        }
-        if (s.running == true) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(F.Vermillion))
+            if (running) {
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    "● SEDANG JALAN",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = F.Warn,
+                )
+            }
         }
     }
 }

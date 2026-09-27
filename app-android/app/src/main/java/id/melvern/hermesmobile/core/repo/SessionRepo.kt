@@ -25,6 +25,27 @@ class SessionRepo(private val client: GatewayClient) {
         }
     }
 
+    /**
+     * M3.2: stored-id session yang lagi live — dari `session.active_list`.
+     * PENTING: `sessions[].id` itu RUNTIME id (uuid acak per resume), yang
+     * cocok sama session.list itu `sessions[].session_key` (stored id) —
+     * dibuktikan desktop app (use-background-sync.ts rehydrateLiveSessionStatuses:
+     * runtimeSessionId=session.id, storedSessionId=session.session_key).
+     * Filter status != idle (idle = cuma nempel, gak jalan).
+     * Fail-open: kosong.
+     */
+    suspend fun activeStoredIds(): Set<String> = try {
+        val res = client.call("session.active_list", buildJsonObject { })
+        res["sessions"]?.jsonArray
+            ?.mapNotNull { el ->
+                val o = el.jsonObject
+                val stored = o["session_key"]?.jsonPrimitive?.contentOrNull?.trim()
+                val status = o["status"]?.jsonPrimitive?.contentOrNull ?: ""
+                stored?.takeIf { it.isNotEmpty() && status.isNotEmpty() && status != "idle" }
+            }
+            ?.toSet() ?: emptySet()
+    } catch (_: Throwable) { emptySet() }
+
     suspend fun resume(sessionId: String): ResumeOutcome {
         // defer_history HARUS false — true mengembalikan messages kosong (server
         // menganggap history di-hydrate terpisah). 694KB/187 msg terverifikasi.
@@ -124,4 +145,9 @@ object Fmt {
             else -> SimpleDateFormat("d MMM", Locale.getDefault()).format(Date((epochSec * 1000).toLong()))
         }
     }
+
+    /** M3.2: jam chat "HH.mm" (gaya WhatsApp Indonesia) dari epoch detik. */
+    fun clock(epochSec: Double?): String =
+        if (epochSec == null || epochSec <= 0) ""
+        else SimpleDateFormat("HH.mm", Locale("id", "ID")).format(Date((epochSec * 1000).toLong()))
 }

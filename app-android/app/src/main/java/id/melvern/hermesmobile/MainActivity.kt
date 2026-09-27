@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import android.net.Uri
 import id.melvern.hermesmobile.ui.chat.ChatScreen
 import id.melvern.hermesmobile.ui.connect.ConnectScreen
 import id.melvern.hermesmobile.ui.sessions.SessionsScreen
@@ -47,7 +48,19 @@ fun AppNav(app: HermesApp) {
                 composable("connect") { ConnectScreen(app, onConnected = { nav.navigate("sessions") { popUpTo("connect") { inclusive = true } } }) }
                 composable("sessions") { SessionsScreen(app, onOpen = { id -> nav.navigate("chat/$id") }) }
                 composable("chat/{sessionId}") { entry ->
-                    ChatScreen(app, entry.arguments?.getString("sessionId") ?: return@composable)
+                    // M3.2: arg = "storedId" | "storedId|runtimeId" (NEW GIG) |
+                    // "storedId|t=<encoded title>" (dari list). Title diencode
+                    // penuh (Uri.encode) jadi gak mungkin nyampur '|' mentah.
+                    val raw = entry.arguments?.getString("sessionId") ?: return@composable
+                    val segs = raw.split("|")
+                    val storedId = segs.first()
+                    val second = segs.getOrNull(1)
+                    val initialTitle = second
+                        ?.takeIf { it.startsWith("t=") }
+                        ?.substring(2)
+                        ?.let { runCatching { Uri.decode(it) }.getOrNull() }
+                    val runtime = second?.takeIf { initialTitle == null }
+                    ChatScreen(app, storedId, runtime, initialTitle)
                 }
             }
         }
