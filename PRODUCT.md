@@ -44,7 +44,7 @@ sinkron dengan desktop karena satu state.db.
 ## Evidence on Hand
 - Screenshot M1: docs/assets/hm-sessions.png, docs/assets/hm-chat.png
 - Teardown Hermex (anti-pattern): docs/m2-ui-notes.md
-- Riset desain AI chat 2025-2026: /tmp/ui-research-finding.md (subagent)
+- Riset desain AI chat 2025-2026: docs/ui-research-2026.md (subagent, disimpan permanen)
 
 ## Product Principles
 1. Connection itu invisible — user gak boleh nunggu/n mikirin state koneksi.
