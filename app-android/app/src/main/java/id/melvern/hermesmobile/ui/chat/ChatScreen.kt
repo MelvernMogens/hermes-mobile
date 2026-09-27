@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,6 +40,7 @@ import id.melvern.hermesmobile.core.model.TranscriptMessage
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
+import id.melvern.hermesmobile.ui.components.MarkdownText
 import id.melvern.hermesmobile.ui.theme.F
 import id.melvern.hermesmobile.ui.theme.Shape
 import kotlinx.coroutines.delay
@@ -250,7 +252,11 @@ private fun ChatItemView(item: ChatItem) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
-            Text(item.text, style = MaterialTheme.typography.bodyLarge)
+            // M3.1: jawaban assistant dirender markdown (bold/italic/code/list/
+            // heading/link/blockquote). User tetap plain (pill).
+            SelectionContainer {
+                MarkdownText(item.text, style = MaterialTheme.typography.bodyLarge)
+            }
             if (!item.done) VermillionCaret()
         }
         is ChatItem.Tool -> Row(

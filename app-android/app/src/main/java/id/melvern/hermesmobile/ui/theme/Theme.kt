@@ -16,26 +16,21 @@ import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.R
 
 /**
- * Type system Fillmore: dua voice —
- *  - "bill" (sans condensed-tracking, uppercase) untuk chrome/header/meta:
- *    header screen, session title kecil-nya, label tool, tombol.
- *  - "prose" (serif italic) untuk konten assistant — signature rasa handbill.
- * User message = sans regular di pill (kontras role).
- *
- * Font bundling: serif = Times New Roman Bold Italic look (fallback serif
- * italic system), sans = default. TANPA font file eksternal dulu —
- * keputusan M2.1: pakai generic serif italic + default sans supaya APK
- * tetap kecil; upgrade ke font file di polish pass kalau perlu.
+ * Type system monochrome (M3.1): dua voice —
+ *  - "bill" (sans bold, tracking, uppercase) untuk chrome/header/meta:
+ *    header screen, session title, label tool, tombol.
+ *  - "prose" (sans regular) untuk konten assistant — diganti dari serif
+ *    italic ke sans 16/24 (user 27 Sep: "pusing dibaca"). Kontras role
+ *    cukup dari layout: user pill kanan vs assistant full-width.
  */
 
-val ProseSerif: FontFamily = FontFamily.Serif
 val BillSans: FontFamily = FontFamily.SansSerif
 
 val HermesType = Typography(
-    // prose assistant — serif italic 17sp, nyaman panjang
+    // prose assistant — sans regular, ukuran baca nyaman
     bodyLarge = TextStyle(
-        fontFamily = ProseSerif, fontStyle = FontStyle.Italic,
-        fontWeight = FontWeight.Medium, fontSize = 17.sp, lineHeight = 26.sp,
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+        fontSize = 16.sp, lineHeight = 24.sp,
         color = F.Cream,
     ),
     // user message + composer input
@@ -48,16 +43,16 @@ val HermesType = Typography(
         fontFamily = BillSans, fontWeight = FontWeight.Medium,
         fontSize = 12.sp, lineHeight = 17.sp, letterSpacing = 0.8.sp, color = F.Lavender,
     ),
-    // empty state greeting / TONIGHT
+    // empty state greeting / TONIGHT — sans Bold (ikut monochrome M3.1)
     titleLarge = TextStyle(
-        fontFamily = ProseSerif, fontStyle = FontStyle.Italic,
+        fontFamily = BillSans,
         fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 40.sp,
         color = F.Cream,
     ),
-    // session row title (bill type)
+    // session row title — sans SemiBold (bukan serif italic, M3.1)
     titleMedium = TextStyle(
-        fontFamily = ProseSerif, fontStyle = FontStyle.Italic,
-        fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp,
+        fontFamily = BillSans, fontWeight = FontWeight.SemiBold,
+        fontSize = 19.sp, lineHeight = 25.sp,
         color = F.Cream,
     ),
     // header wordmark / condensed labels
