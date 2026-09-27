@@ -57,6 +57,10 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var profileSheet by remember { mutableStateOf(false) }
     var actionTarget by remember { mutableStateOf<SessionRow?>(null) }
+    // M5: toggle session tersembunyi (Bot Chat hidden=1 by design di backend)
+    var showHidden by remember { mutableStateOf(false) }
+    // M5: hint pertama kali — "tap to switch profile" 3 detik (flag SharedPreferences)
+    var showProfileHint by remember { mutableStateOf(false) }
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
     val profile by app.profile.collectAsState()
@@ -65,17 +69,32 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
         val c = app.client ?: return
         if (c.state.value != ConnState.OPEN) return
         scope.launch {
-            try { sessions = SessionRepo(c, profile).listSessions() } catch (_: Throwable) {}
+            try { sessions = SessionRepo(c, profile).listSessions(includeHidden = showHidden) } catch (_: Throwable) {}
             try { active = SessionRepo(c, profile).activeStoredIds() } catch (_: Throwable) {}
             loading = false
         }
     }
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) {
+        // M5: hint sekali seumur app-install (flag di SharedPreferences)
+        val prefs = ctx.getSharedPreferences("hermes_mobile", android.content.Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("hint_profile_done", false)) {
+            showProfileHint = true
+            delay(3000)
+            showProfileHint = false
+            prefs.edit().putBoolean("hint_profile_done", true).apply()
+        }
         while (true) {
             refresh()
             delay(10_000)
         }
+    }
+    // M5: toggle hidden → refresh
+    var sawInitialHidden by remember { mutableStateOf(false) }
+    LaunchedEffect(showHidden) {
+        if (!sawInitialHidden) { sawInitialHidden = true; return@LaunchedEffect }
+        loading = true; sessions = emptyList(); refresh()
     }
     // M4: ganti profile → refresh list langsung (list profile beda).
     // Skip siklus pertama (Unit effect sudah refresh di atas — hindari double fetch).
@@ -103,10 +122,26 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                 )
             }
             // M4: nama profile aktif — labelSmall di bawah wordmark
-            Text(
-                profile.uppercase(),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    profile.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = F.LavenderDim,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                // M5: toggle hidden — pelan & kecil, kanan label profile
+                Text(
+                    if (showHidden) "· hidden ON" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = F.Warn,
+                    modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                )
+            }
+            // M5: hint pertama kali — auto hilang 3 detik
+            if (showProfileHint) Text(
+                "tap to switch profile",
                 style = MaterialTheme.typography.labelSmall,
-                color = F.LavenderDim,
+                color = F.Vermillion,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
@@ -124,7 +159,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             ) {
                 Text("tonight", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(8.dp))
-                Text("belum ada gig — mulai dari bawah", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
+                Text("no chats yet — start one below", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
             }
         } else {
             LazyColumn(Modifier.weight(1f)) {
@@ -163,13 +198,18 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
-            Text("+  N E W   G I G", style = MaterialTheme.typography.labelLarge, color = F.Cream)
+            Text("+  N E W   C H A T", style = MaterialTheme.typography.labelLarge, color = F.Cream)
         }
     }
 
-    // M4: sheet profile switcher
+    // M4: sheet profile switcher — M5: + toggle session tersembunyi
     if (profileSheet) {
-        ProfileSheet(app, onDismiss = { profileSheet = false })
+        ProfileSheet(
+            app,
+            showHidden = showHidden,
+            onToggleHidden = { showHidden = it },
+            onDismiss = { profileSheet = false },
+        )
     }
     // M4: context menu session
     actionTarget?.let { target ->
@@ -242,7 +282,7 @@ private fun SessionRowView(s: SessionRow, running: Boolean, onClick: () -> Unit,
             if (running) {
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    "● SEDANG JALAN",
+                    "● RUNNING",
                     style = MaterialTheme.typography.labelSmall,
                     color = F.Warn,
                 )
@@ -257,7 +297,7 @@ private fun SessionRowView(s: SessionRow, running: Boolean, onClick: () -> Unit,
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileSheet(app: HermesApp, onDismiss: () -> Unit) {
+private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (Boolean) -> Unit, onDismiss: () -> Unit) {
     var rows by remember { mutableStateOf<List<MetaRepo.ProfileRow>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val current by app.profile.collectAsState()
@@ -273,11 +313,36 @@ private fun ProfileSheet(app: HermesApp, onDismiss: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
             Text("PROFILE", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim)
             Spacer(Modifier.height(10.dp))
+            // M5: toggle session tersembunyi (default off) — Bot Chat muncul kalau ON
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(Shape.S)
+                    .background(F.Surface2, Shape.S)
+                    .clickable { onToggleHidden(!showHidden) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(if (showHidden) F.Vermillion else F.Surface1)
+                        .border(1.dp, if (showHidden) F.Vermillion else F.LavenderDim, androidx.compose.foundation.shape.CircleShape)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Show hidden sessions" + if (showHidden) " · ON" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (showHidden) F.Cream else F.Lavender,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             when {
                 rows == null && error == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
                 }
-                error != null -> Text("Gagal memuat: $error", style = MaterialTheme.typography.bodySmall, color = F.Error)
+                error != null -> Text("Failed to load: $error", style = MaterialTheme.typography.bodySmall, color = F.Error)
                 else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
                     items(rows!!, key = { it.name }) { p ->
                         val selected = p.name == current
@@ -302,7 +367,7 @@ private fun ProfileSheet(app: HermesApp, onDismiss: () -> Unit) {
                                 val meta = listOfNotNull(
                                     p.name.takeIf { it != "default" },
                                     p.model?.takeIf { it.isNotBlank() },
-                                    if (p.isDefault) "utama" else null,
+                                    if (p.isDefault) "primary" else null,
                                 ).joinToString(" · ")
                                 if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.labelSmall, color = F.Lavender)
                                 if (p.description.isNotBlank()) Text(
@@ -380,11 +445,11 @@ private fun SessionActionSheet(
                         enabled = newName.isNotBlank() && !busy,
                         colors = ButtonDefaults.buttonColors(containerColor = F.Vermillion, contentColor = F.BgDeep, disabledContainerColor = F.Surface2, disabledContentColor = F.LavenderDim),
                         shape = Shape.S,
-                    ) { Text("Simpan") }
+                    ) { Text("Save") }
                 }
             } else {
-                SheetAction("Ganti nama", enabled = !busy) { renaming = true }
-                SheetAction("Cabang baru", enabled = !busy) {
+                SheetAction("Rename", enabled = !busy) { renaming = true }
+                SheetAction("New branch", enabled = !busy) {
                     run {
                         // branch butuh session live — attach lazy dulu (session.resume lazy)
                         val c = app.client!!
@@ -396,8 +461,8 @@ private fun SessionActionSheet(
                         onOpenBranch(out.runtimeId, out.storedId)
                     }
                 }
-                SheetAction("Sembunyikan", enabled = !busy) { run { MetaRepo(app.client!!).hideSession(row.id, profile) } }
-                SheetAction("Hapus", danger = true, enabled = !busy) { confirmingDelete = true }
+                SheetAction("Hide", enabled = !busy) { run { MetaRepo(app.client!!).hideSession(row.id, profile) } }
+                SheetAction("Delete", danger = true, enabled = !busy) { confirmingDelete = true }
                 if (confirmingDelete) {
                     Spacer(Modifier.height(12.dp))
                     Column(
@@ -408,7 +473,7 @@ private fun SessionActionSheet(
                             .padding(14.dp),
                     ) {
                         Text(
-                            "Hapus \"${row.displayTitle}\" beserta transcript? Gak bisa dibatalkan.",
+                            "Delete \"${row.displayTitle}\" and its transcript? This cannot be undone.",
                             style = MaterialTheme.typography.bodySmall, color = F.Cream,
                         )
                         Spacer(Modifier.height(10.dp))
@@ -418,7 +483,7 @@ private fun SessionActionSheet(
                                 modifier = Modifier.weight(1f).height(44.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = F.Surface2, contentColor = F.Cream),
                                 shape = Shape.S,
-                            ) { Text("Batal") }
+                            ) { Text("Cancel") }
                             Button(
                                 onClick = {
                                     run {
@@ -442,7 +507,7 @@ private fun SessionActionSheet(
                                 modifier = Modifier.weight(1f).height(44.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = F.Error, contentColor = F.BgDeep),
                                 shape = Shape.S,
-                            ) { Text("Hapus") }
+                            ) { Text("Delete") }
                         }
                     }
                 }

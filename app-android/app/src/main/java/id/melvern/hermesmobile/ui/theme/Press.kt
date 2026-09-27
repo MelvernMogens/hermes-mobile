@@ -17,7 +17,7 @@ import androidx.compose.ui.graphics.graphicsLayer
  * Tanpa ripple (indication null) — dunia Fillmore pakai scale, bukan ripple.
  * clickable tetap dipakai → semantics/Role.Clickable utk aksesibilitas.
  */
-fun Modifier.pressClickable(onClick: () -> Unit): Modifier = composed {
+fun Modifier.pressClickable(enabled: Boolean = true, onClick: () -> Unit): Modifier = composed {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -33,5 +33,5 @@ fun Modifier.pressClickable(onClick: () -> Unit): Modifier = composed {
             scaleX = scale
             scaleY = scale
         }
-        .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+        .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
 }

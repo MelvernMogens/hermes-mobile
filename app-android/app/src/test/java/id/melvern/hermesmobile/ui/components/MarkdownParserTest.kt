@@ -1,6 +1,7 @@
 package id.melvern.hermesmobile.ui.components
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -120,5 +121,46 @@ class MarkdownParserTest {
         val blocks = MarkdownParser.parse("* a\n* b")
         assertEquals(1, blocks.size)
         assertEquals(2, (blocks[0] as MdBlock.BulletList).items.size)
+    }
+
+    // ── M5: path gambar ────────────────────────────────────────────────
+
+    @Test
+    fun `M5 baris path png jadi ImageRef`() {
+        val blocks = MarkdownParser.parse("/Users/melvern/.hermes/images/upload_20260928_101010_1.png")
+        assertEquals(1, blocks.size)
+        assertTrue(blocks[0] is MdBlock.ImageRef)
+        assertEquals(
+            "/Users/melvern/.hermes/images/upload_20260928_101010_1.png",
+            (blocks[0] as MdBlock.ImageRef).path,
+        )
+    }
+
+    @Test
+    fun `M5 path gambar dalam markdown image juga keparse`() {
+        val blocks = MarkdownParser.parse("![hasil](/Users/melvern/.hermes/images/scan_1.jpg)")
+        assertEquals(1, blocks.size)
+        assertTrue(blocks[0] is MdBlock.ImageRef)
+    }
+
+    @Test
+    fun `M5 path dalam kalimat panjang gak jadi block gambar`() {
+        val blocks = MarkdownParser.parse("file ada di /Users/melvern/.hermes/images/a.png ya")
+        // path nempel di kalimat → tetap paragraf (render inline, bukan foto)
+        assertTrue(blocks[0] is MdBlock.Paragraph)
+    }
+
+    @Test
+    fun `M5 containsImagePath deteksi`() {
+        assertTrue(MarkdownParser.containsImagePath("lihat /tmp/x.webp ya"))
+        assertTrue(MarkdownParser.containsImagePath("![x](/a/b/c.jpeg)"))
+        assertFalse(MarkdownParser.containsImagePath("file /tmp/notes.txt"))
+        assertFalse(MarkdownParser.containsImagePath("kotlin file Main.kt"))
+    }
+
+    @Test
+    fun `M5 imagePathsIn distinct dan urut`() {
+        val paths = MarkdownParser.imagePathsIn("a /x/1.png b /x/2.jpg c /x/1.png")
+        assertEquals(listOf("/x/1.png", "/x/2.jpg"), paths)
     }
 }

@@ -49,7 +49,7 @@ Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
 | M5 | Signed release APK + update path | todo | — |
 
 ## Konvensi
-- Bahasa kode/komentar Indonesia; UI string Indonesia.
+- Bahasa kode/komentar Indonesia; UI string English (user request 28 Sep).
 - Satu GatewayClient process-wide (HermesApp) — jangan bikin client kedua.
 - Wire contract: `~/.hermes/hermes-agent/apps/shared/src/gateway-contract.openrpc.json`
   (219 method) — sumber kebenaran untuk field.

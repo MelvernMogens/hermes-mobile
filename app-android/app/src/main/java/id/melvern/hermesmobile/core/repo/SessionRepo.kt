@@ -27,8 +27,12 @@ class SessionRepo(
         if (!p.isNullOrEmpty() && p != "default") put("profile", p)
     }
 
-    suspend fun listSessions(limit: Int = 60): List<SessionRow> {
-        val res = client.call("session.list", buildJsonObject { put("limit", limit); putProfile() })
+    suspend fun listSessions(limit: Int = 60, includeHidden: Boolean = false): List<SessionRow> {
+        val res = client.call("session.list", buildJsonObject {
+            put("limit", limit)
+            if (includeHidden) put("include_hidden", true) // M5: toggle session tersembunyi (Bot Chat)
+            putProfile()
+        })
         val arr = res["sessions"]?.jsonArray ?: return emptyList()
         return arr.mapNotNull { el ->
             try { json.decodeFromJsonElement(SessionRow.serializer(), el.jsonObject) } catch (_: Throwable) { null }
@@ -106,39 +110,57 @@ class SessionRepo(
         )
     }
 
+    /** Status balikan prompt.submit: "streaming" (turn langsung jalan) atau "queued" (server antri/steer). */
+    enum class SubmitStatus { STREAMING, QUEUED }
+
+    /**
+     * Submit biasa yang balikin status — M5: kalau server balik "queued"
+     * (busy path: diantrekan/steered), user bubble tampil "DIANTREKAN".
+     * Return runtime id yang dipakai (result kadang bawa session_id baru).
+     */
+    suspend fun submitStatus(sessionId: String, text: String): SubmitStatus {
+        val res = client.call(
+            "prompt.submit",
+            buildJsonObject { put("session_id", sessionId); put("text", text); putProfile() },
+            timeoutMs = 120_000,
+        )
+        return if (res["status"]?.jsonPrimitive?.contentOrNull == "queued") SubmitStatus.QUEUED
+        else SubmitStatus.STREAMING
+    }
+
     /**
      * Submit dengan jaminan runtime hidup: kalau prompt.submit kena error session
      * (4001/4006/not-found/"live owner"/"already active"), re-resume sekali lalu
-     * ulangi submit dengan runtime id baru. Return runtime id yang dipakai.
+     * ulangi submit dengan runtime id baru. Return (runtime id, status submit —
+     * M5: "queued" kalau server antri/steer, selain itu streaming).
      *
      * 4090 SESSION_NOT_OWNED (session masih di-hold surface lain — desktop app
      * buka session itu) TIDAK bisa diambil alih by design (#106217): dilempar
      * ke UI dengan reason utk pesan yang jelas.
      */
-    suspend fun sendPromptResilient(storedSessionId: String, lastKnownRuntimeId: String, text: String): String {
+    suspend fun sendPromptResilient(storedSessionId: String, lastKnownRuntimeId: String, text: String): Pair<String, SubmitStatus> {
         fun retryable(e: RpcException): Boolean {
             val m = (e.message ?: "").lowercase()
             return listOf("live owner", "already", "active", "owner", "409", "4001", "4006", "not found")
                 .any { it in m }
         }
-        return try {
-            client.call(
+        suspend fun submitOn(runtimeId: String): SubmitStatus {
+            val res = client.call(
                 "prompt.submit",
-                buildJsonObject { put("session_id", lastKnownRuntimeId); put("text", text); putProfile() },
+                buildJsonObject { put("session_id", runtimeId); put("text", text); putProfile() },
                 timeoutMs = 120_000,
             )
-            lastKnownRuntimeId
+            return if (res["status"]?.jsonPrimitive?.contentOrNull == "queued") SubmitStatus.QUEUED
+            else SubmitStatus.STREAMING
+        }
+        return try {
+            lastKnownRuntimeId to submitOn(lastKnownRuntimeId)
         } catch (e: RpcException) {
             if (e.code == 4090) throw SessionNotOwnedException(e.message ?: "session dipegang surface lain")
             if (!retryable(e)) throw e
             // runtime mati/nempel owner mati — ambil alih dengan resume baru
             val out = resume(storedSessionId)
-            client.call(
-                "prompt.submit",
-                buildJsonObject { put("session_id", out.runtimeId); put("text", text); putProfile() },
-                timeoutMs = 120_000,
-            )
-            out.runtimeId
+            out.runtimeId to submitOn(out.runtimeId)
         }
     }
 
@@ -163,10 +185,17 @@ class SessionRepo(
         res["session_id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: storedId
     } catch (_: Throwable) { null }
 
-    suspend fun createSession(title: String? = null): Pair<String, String> {
+    suspend fun createSession(
+        title: String? = null,
+        // M5: "GIG baru dengan model ini" — SessionCreateParams punya model+provider.
+        model: String? = null,
+        provider: String? = null,
+    ): Pair<String, String> {
         // return (runtimeId, storedId) — session baru punya runtime beda dari stored
         val res = client.call("session.create", buildJsonObject {
             if (!title.isNullOrBlank()) put("title", title)
+            if (!model.isNullOrBlank()) put("model", model)
+            if (!provider.isNullOrBlank()) put("provider", provider)
             putProfile()
         })
         val runtimeId = res["session_id"]?.jsonPrimitive?.contentOrNull

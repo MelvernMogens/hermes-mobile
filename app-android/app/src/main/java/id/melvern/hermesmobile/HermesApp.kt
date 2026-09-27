@@ -26,6 +26,10 @@ class HermesApp : Application() {
     @Volatile var auth: DashboardAuth? = null
         private set
 
+    /** M5: settings koneksi aktif — dipakai MediaRepo (base URL + kredensial /api/media). */
+    @Volatile var connection: ConnectionSettings? = null
+        private set
+
     override fun onCreate() {
         super.onCreate()
         appScope.launch {
@@ -33,6 +37,7 @@ class HermesApp : Application() {
             settings.value = loaded
             profile.value = loaded.profile.ifBlank { "default" }
             if (loaded.configured) {
+                connection = loaded
                 val c = buildClient(loaded)
                 c.start()
             }
@@ -54,6 +59,7 @@ class HermesApp : Application() {
 
     fun buildClient(settings: ConnectionSettings): GatewayClient {
         client?.stop()
+        connection = settings
         val base = settings.baseUrl.trim().trimEnd('/')
         val auth = DashboardAuth(base)
         this.auth = auth

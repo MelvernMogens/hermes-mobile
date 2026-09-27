@@ -9,7 +9,7 @@ android
 ## Users
 Melvern (pemilik tunggal). Situation: jauh dari Mac (-mobile), butuh ngontrol
 agent Hermes yang jalan di Mac-nya: lihat session yang sama kayak desktop,
-kirim chat, pantau jawaban streaming. Bahasa UI: Indonesia santai.
+kirim chat, pantau jawaban streaming. Bahasa UI: English (user request 28 Sep).
 
 ## Product Purpose
 Client Android native untuk Hermes Agent pribadi di Mac — backend resmi yang
@@ -51,7 +51,7 @@ sinkron dengan desktop karena satu state.db.
 2. Info density tinggi, chrome tipis — konten dulu, kontrol micro.
 3. Satu sumber kebenaran visual — design tokens terpusat, gak ada nilai hardcode di screen.
 4. Presisi literal — yang di-preview = yang jadi.
-5. Indonesia santai di semua copy UI.
+5. English di semua copy UI (user request 28 Sep).
 
 ## Accessibility & Inclusion
 Touch target 48dp minimum; sp units (ikuti font scale sistem); dark theme

@@ -12,7 +12,7 @@ WebSocket, protokol yang sama dengan desktop app (219 method, contract OpenRPC
 generated). Koneksi via Tailscale; auth via dashboard basic-auth + ws-ticket.
 
 ## 3. User
-Melvern (tunggal). Bahasa UI: Indonesia.
+Melvern (tunggal). UI language: English (user request 28 Sep).
 
 ## 4. Non-goals (M1)
 - Multi-user / akun.

@@ -69,9 +69,58 @@ class MetaRepo(private val client: GatewayClient) {
         } ?: emptyList()
     }
 
-    // ── Aksi session (context menu) ────────────────────────────────────
+    // ── M5: file/image attach (methods_prompt.py) ──────────────────────
 
-    /** `session.title` SET — params: session_id (live), title, profile. */
+    data class FileAttachResult(
+        val refText: String,
+        val name: String,
+        val path: String,
+    )
+
+    /**
+     * `file.attach` — file non-gambar via `data_url` (base64 data:...).
+     * Balik `ref_text` "@file:..." yang HARUS diselipin ke prompt.submit.
+     */
+    suspend fun attachFileDataUrl(sessionId: String, dataUrl: String, name: String, profile: String? = null): FileAttachResult {
+        val res = client.call("file.attach", buildJsonObject {
+            put("session_id", sessionId)
+            put("data_url", dataUrl)
+            put("name", name)
+            if (profile != null && profile != "default") put("profile", profile)
+        }, timeoutMs = 60_000)
+        return FileAttachResult(
+            refText = res["ref_text"]?.jsonPrimitive?.contentOrNull
+                ?: throw RpcException(-1, "file.attach: no ref_text"),
+            name = res["name"]?.jsonPrimitive?.contentOrNull ?: name,
+            path = res["path"]?.jsonPrimitive?.contentOrNull ?: "",
+        )
+    }
+
+    data class ImageAttachResult(
+        val attached: Boolean,
+        val path: String,
+    )
+
+    /**
+     * `image.attach_bytes` — gambar via base64. Server men-queue gambar buat
+     * submit BERIKUTNYA (gak butuh ref di prompt); `path` = lokasi di Mac
+     * (dipakai buat render balik via /api/media).
+     */
+    suspend fun attachImageBytes(sessionId: String, base64: String, filename: String, ext: String, profile: String? = null): ImageAttachResult {
+        val res = client.call("image.attach_bytes", buildJsonObject {
+            put("session_id", sessionId)
+            put("content_base64", base64)
+            put("filename", filename)
+            if (ext.isNotBlank()) put("ext", ext)
+            if (profile != null && profile != "default") put("profile", profile)
+        }, timeoutMs = 60_000)
+        return ImageAttachResult(
+            attached = res["attached"]?.jsonPrimitive?.booleanOrNull ?: false,
+            path = res["path"]?.jsonPrimitive?.contentOrNull ?: "",
+        )
+    }
+
+    // ── Aksi session (context menu) ────────────────────────────────────
     suspend fun renameSession(runtimeId: String, title: String, profile: String? = null) {
         client.call("session.title", buildJsonObject {
             put("session_id", runtimeId); put("title", title)

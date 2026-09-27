@@ -35,8 +35,8 @@ data class SessionRow(
 
     private fun fallbackSessionDate(): String {
         val at = startedAt
-        if (at == null || at <= 0) return "Sesi baru"
-        return SimpleDateFormat("Sesi d MMM HH:mm", Locale("id", "ID")).format(Date((at * 1000).toLong()))
+        if (at == null || at <= 0) return "New session"
+        return SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date((at * 1000).toLong()))
     }
 
     /** Label Indonesia untuk source session (desktop/cli/bot/dst). */
@@ -74,6 +74,8 @@ sealed interface ChatItem {
         val text: String,
         val rowId: Int? = null,
         val pending: Boolean = false,
+        /** M5: submit balik status "queued" — pesan dijamin server, muncul setelah turn jalan. */
+        val queued: Boolean = false,
         val time: String = "",
     ) : ChatItem
     data class Assistant(
@@ -85,3 +87,14 @@ sealed interface ChatItem {
     data class Tool(val name: String, val status: String, val detail: String? = null) : ChatItem
     data class NoticeLine(val text: String) : ChatItem
 }
+
+/**
+ * M5: hasil attach di composer — `refText` diselipin ke prompt saat kirim
+ * (file: "@file:..." — image gak butuh ref, auto-queued server, tapi tetap
+ * dicatat biar chip-nya jelas dan prompt bisa nyebut namanya).
+ */
+data class Attachment(
+    val refText: String,
+    val name: String,
+    val isImage: Boolean,
+)

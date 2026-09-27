@@ -34,7 +34,7 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
         Spacer(Modifier.height(72.dp))
         Text("Hermes", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Kontrol penuh agen Hermes di Mac-mu, dari HP.\nSama persis dengan desktop — session, chat, tool, semuanya.",
+            "Full control of the Hermes agent on your Mac, from your phone.\nExactly like desktop — sessions, chat, tools, everything.",
             style = MaterialTheme.typography.bodySmall,
         )
         Spacer(Modifier.height(12.dp))
@@ -67,7 +67,7 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
                         val rawUrl = url.trim()
                         val fixedUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
                         val settings = ConnectionSettings(baseUrl = fixedUrl, username = user, password = pass)
-                        if (!settings.configured) throw Exception("URL, username, dan password wajib diisi")
+                        if (!settings.configured) throw Exception("URL, username, and password are required")
                         val client = app.buildClient(settings)
                         client.start()
                         var waited = 0
@@ -78,10 +78,10 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
                                 app.settings.value = settings
                                 onConnected()
                             }
-                            else -> throw AuthException("WebSocket tidak terbuka — cek URL/password atau jalankan server/install.sh di Mac")
+                            else -> throw AuthException("WebSocket not open — check URL/password or run server/install.sh on your Mac")
                         }
                     } catch (e: Throwable) {
-                        error = e.message ?: "Gagal terhubung"
+                        error = e.message ?: "Connection failed"
                     } finally { testing = false }
                 }
             },
@@ -89,10 +89,10 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {
             if (testing) CircularProgressIndicator(Modifier.size(20.dp), color = F.Cream, strokeWidth = 2.dp)
-            else Text("Hubungkan")
+            else Text("Connect")
         }
         Text(
-            "Sekali setup di Mac: bash server/install.sh\n(serve :8788 + Tailscale + password).",
+            "One-time setup on your Mac: bash server/install.sh\n(serve :8788 + Tailscale + password).",
             style = MaterialTheme.typography.labelSmall, color = F.LavenderDim,
         )
         Spacer(Modifier.height(32.dp))

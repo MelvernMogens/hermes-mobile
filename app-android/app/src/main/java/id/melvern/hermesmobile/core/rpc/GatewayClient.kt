@@ -104,7 +104,7 @@ class GatewayClient(
             _state.value = if (attempt == 0) ConnState.CONNECTING else ConnState.RECONNECTING
             val closed = CompletableDeferred<Unit>()
             val ticket = try { ticketSupplier.freshTicket() } catch (e: Throwable) {
-                Log.w(TAG, "ticket mint gagal: ${e.message}")
+                Log.w(TAG, "ticket mint failed: ${e.message}")
                 null
             }
             if (ticket != null) {

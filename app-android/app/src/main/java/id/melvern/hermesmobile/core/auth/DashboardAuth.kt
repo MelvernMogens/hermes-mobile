@@ -65,8 +65,8 @@ class DashboardAuth(private val baseUrl: String) {
             .post(loginBody.toRequestBody("application/json".toMediaType()))
             .build()
         http.newCall(loginReq).execute().use { resp ->
-            if (resp.code == 401) throw AuthException("Username atau password salah")
-            if (resp.code == 429) throw AuthException("Terlalu banyak percobaan — coba lagi nanti")
+            if (resp.code == 401) throw AuthException("Wrong username or password")
+            if (resp.code == 429) throw AuthException("Too many attempts — try again later")
             if (!resp.isSuccessful) throw AuthException("login: HTTP ${resp.code}")
         }
 
@@ -76,7 +76,7 @@ class DashboardAuth(private val baseUrl: String) {
             .post("{}".toRequestBody("application/json".toMediaType()))
             .build()
         http.newCall(ticketReq).execute().use { resp ->
-            if (!resp.isSuccessful) throw AuthException("ws-ticket: HTTP ${resp.code} — login ulang")
+            if (!resp.isSuccessful) throw AuthException("ws-ticket: HTTP ${resp.code} — log in again")
             val body = resp.body?.string() ?: throw AuthException("ws-ticket: empty")
             json.parseToJsonElement(body).jsonObject["ticket"]?.jsonPrimitive?.contentOrNull2()
                 ?: throw AuthException("ws-ticket: no ticket")
@@ -88,6 +88,53 @@ class DashboardAuth(private val baseUrl: String) {
         try {
             http.newCall(Request.Builder().url("$baseUrl/api/health").build()).execute().use { it.isSuccessful }
         } catch (_: Throwable) { false }
+    }
+
+    /**
+     * M5: pastikan cookie login ada (password-login saja, tanpa minta tiket WS) —
+     * dipanggil MediaRepo sebelum GET /api/media. Return true kalau cookie siap.
+     */
+    suspend fun ensureLogin(username: String, password: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            // providers → provider password (sama seperti loginTicket)
+            val provReq = Request.Builder().url("$baseUrl/api/auth/providers").build()
+            val provBody = http.newCall(provReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext false
+                resp.body?.string() ?: return@withContext false
+            }
+            val providers = json.parseToJsonElement(provBody).jsonObject["providers"]
+                ?.let { it as? kotlinx.serialization.json.JsonArray } ?: return@withContext false
+            var provider: String? = null
+            for (el in providers) {
+                val obj = el.jsonObject
+                val id = obj["name"]?.jsonPrimitive?.contentOrNull2() ?: obj["id"]?.jsonPrimitive?.contentOrNull2()
+                val supports = obj["supports_password"]?.jsonPrimitive?.booleanOrNull2()
+                if (supports == true || id == "basic") { provider = id; break }
+            }
+            val loginBody = buildJsonObject {
+                put("username", JsonPrimitive(username))
+                put("password", JsonPrimitive(password))
+                put("provider", JsonPrimitive(provider ?: "basic"))
+            }.toString()
+            val loginReq = Request.Builder()
+                .url("$baseUrl/auth/password-login")
+                .post(loginBody.toRequestBody("application/json".toMediaType()))
+                .build()
+            http.newCall(loginReq).execute().use { resp ->
+                // 409/200 = sudah login (cookie masih hidup) — keduanya OK
+                resp.isSuccessful || resp.code == 409
+            }
+        } catch (_: Throwable) { false }
+    }
+
+    /** M5: GET auth-gated (cookie ikut via cookieJar client). Return body JSON atau null. */
+    suspend fun getJson(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                resp.body?.string()
+            }
+        } catch (_: Throwable) { null }
     }
 }
 

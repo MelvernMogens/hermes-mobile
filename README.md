@@ -63,4 +63,4 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   untuk turn berjalan belum (butuh server yang sama persis; sekarang port 8788
   terpisah dari desktop app port-nya sendiri).
 - Tidak ada offline cache (M2+).
-- Bahasa UI Indonesia (untuk pemilik tunggal).
+- UI language English (user request 28 Sep).
