@@ -45,14 +45,23 @@ import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.model.ChatItem
 import id.melvern.hermesmobile.core.model.TranscriptMessage
 import id.melvern.hermesmobile.core.repo.Fmt
+import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
+import id.melvern.hermesmobile.core.rpc.RpcException
 import id.melvern.hermesmobile.ui.components.MarkdownText
 import id.melvern.hermesmobile.ui.theme.F
+import id.melvern.hermesmobile.ui.theme.JetBrainsMono
 import id.melvern.hermesmobile.ui.theme.Shape
+import id.melvern.hermesmobile.ui.theme.pressClickable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Chat screen — "backstage": prose serif cream full-width, user pill kanan,
@@ -74,6 +83,12 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     // M3.3: thinking indicator — event thinking.delta / reasoning.delta
     var thinking by remember { mutableStateOf(false) }
     var thinkingText by remember { mutableStateOf("") }
+    // M4: model aktif — baris meta kecil di header (dari model.options).
+    var activeModel by remember { mutableStateOf("") }
+    // M4: approval + clarify card — server→client request.
+    var approval by remember { mutableStateOf<AskApproval?>(null) }
+    var clarify by remember { mutableStateOf<AskClarify?>(null) }
+    var modelSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
@@ -131,10 +146,33 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
             loading = false; return@LaunchedEffect
         }
         try {
-            val out = SessionRepo(c).resume(actualStoredId)
+            val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
             runtimeId = out.runtimeId
             running = out.running
             items = mapTranscript(out.messages)
+            // M4: restored server→client request (replay open_requests) —
+            // card dimunculkan lagi; jawab via request.answer RPC (frame id
+            // dari socket lama sudah mati).
+            out.openRequests.forEach { req ->
+                when (req.method) {
+                    "approval" -> approval = AskApproval(
+                        id = req.id,
+                        requestId = req.params?.get("request_id")?.jsonStr(),
+                        title = req.params?.get("tool_name")?.jsonStr()?.takeIf { it.isNotBlank() } ?: "PERINTAH",
+                        command = req.params?.get("command")?.jsonStr() ?: req.params?.get("description")?.jsonStr() ?: "",
+                    )
+                    "clarify" -> {
+                        val qArr = req.params?.get("questions")?.jsonArray
+                        clarify = AskClarify(
+                            id = req.id,
+                            question = req.params?.get("question")?.jsonStr()
+                                ?: qArr?.firstOrNull()?.jsonObject?.get("question")?.jsonStr()
+                                ?: "Ada yang mau dikonfirmasi",
+                            questionId = qArr?.firstOrNull()?.jsonObject?.get("qid")?.jsonStr(),
+                        )
+                    }
+                }
+            }
         } catch (e: Throwable) {
             items = listOf(ChatItem.NoticeLine("Gagal memuat transcript: ${e.message}"))
         } finally { loading = false }
@@ -143,7 +181,51 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     LaunchedEffect(runtimeId) {
         app.client?.inbound?.collect { ev ->
             when (ev) {
+                is GatewayInbound.ServerAsk -> when (ev.method) {
+                    "approval" -> {
+                        val p = ev.params
+                        approval = AskApproval(
+                            id = ev.id,
+                            requestId = p?.get("request_id")?.jsonStr(),
+                            title = p?.get("tool_name")?.jsonStr()?.takeIf { it.isNotBlank() } ?: "PERINTAH",
+                            command = p?.get("command")?.jsonStr() ?: p?.get("description")?.jsonStr() ?: "",
+                            // respond frame return Boolean terkirim (sendRaw) — false = socket mati
+                            respondRaw = { choice -> ev.respond(buildJsonObject { put("choice", choice) }) },
+                        )
+                        running = true // agent nunggu jawaban — jangan biarkan composer bunuh turn
+                    }
+                    "clarify" -> {
+                        val p = ev.params
+                        // batch: {questions:[{qid,question,...}]} — single: {question}
+                        val qArr = p?.get("questions")?.jsonArray
+                        val qid = qArr?.firstOrNull()?.jsonObject?.get("qid")?.jsonStr()
+                        clarify = AskClarify(
+                            id = ev.id,
+                            question = p?.get("question")?.jsonStr()
+                                ?: qArr?.firstOrNull()?.jsonObject?.get("question")?.jsonStr()
+                                ?: "Ada yang mau dikonfirmasi",
+                            questionId = qid,
+                            respondRaw = { answer ->
+                                if (qid != null) {
+                                    // batch: lock jawaban pertanyaan ini
+                                    ev.respond(buildJsonObject { put("answers", buildJsonObject { put(qid, answer) }) })
+                                } else {
+                                    ev.respond(buildJsonObject { put("answer", answer) })
+                                }
+                            },
+                        )
+                        running = true
+                    }
+                    else -> ev.fail(-32601, "no handler: ${ev.method}")
+                }
                 is GatewayInbound.RpcEvent -> if (ev.sessionId == runtimeId || ev.sessionId.isEmpty()) when (ev.type) {
+                    "request.cancel" -> {
+                        // server menarik request (timeout/withdraw) — buang card
+                        // yang belum dijawab; card yang sudah dijawab (dim) biarkan.
+                        val cid = ev.payload?.get("id")?.jsonStr()
+                        if (approval?.id == cid && approval?.responded == null) { approval = null; running = false }
+                        if (clarify?.id == cid && clarify?.responded == null) { clarify = null; running = false }
+                    }
                     "thinking.delta", "reasoning.delta" -> {
                         // M3.3: stream reasoning — tampil SELAMA assistant belum mulai jawab
                         val chunk = ev.payload?.get("text")?.jsonStr() ?: ev.payload?.get("delta")?.jsonStr() ?: ""
@@ -220,24 +302,51 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
             listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
     }
+    // M4: model aktif buat header meta — model.options layered over session live.
+    LaunchedEffect(runtimeId) {
+        val c = app.client ?: return@LaunchedEffect
+        var waited = 0
+        while (c.state.value != ConnState.OPEN && waited < 15000) { delay(250); waited += 250 }
+        if (c.state.value != ConnState.OPEN) return@LaunchedEffect
+        try {
+            val prof = app.profile.value
+            val opt = MetaRepo(c).modelOptions(sessionId = runtimeId, profile = prof)
+            activeModel = listOfNotNull(
+                opt.model.takeIf { it.isNotBlank() },
+                opt.provider.takeIf { it.isNotBlank() },
+            ).joinToString(" · ")
+        } catch (_: Throwable) { /* header meta opsional */ }
+    }
 
     Column(Modifier.fillMaxSize().background(F.Bg).statusBarsPadding()) {
-        // Header tipis — bill type
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // Header tipis — bill type. M4: tap judul → sheet Model (read-only,
+        // aktif + inventaris — contract gak punya set-model per-session).
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .pressClickable { modelSheet = true }
+                .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
-            Text(
-                title.uppercase(),
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (connState != ConnState.OPEN) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(F.Error))
-            } else if (running) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(F.Vermillion))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (connState != ConnState.OPEN) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(F.Error))
+                } else if (running) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(F.Vermillion))
+                }
             }
+            if (activeModel.isNotBlank()) Text(
+                activeModel,
+                style = MaterialTheme.typography.labelSmall,
+                color = F.Lavender,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 3.dp),
+            )
         }
         HorizontalDivider(color = F.Stroke, thickness = 1.dp)
 
@@ -268,6 +377,57 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 val streamingAssistant = (items.lastOrNull() as? ChatItem.Assistant)?.done == false
                 if (thinking && !streamingAssistant) {
                     item { ThinkingBlock(thinkingText) }
+                }
+                // M4: approval card — security boundary. Setelah respond → dim, bukan hilang.
+                approval?.let { ap ->
+                    item {
+                        ApprovalCard(
+                            ap,
+                            onChoice = { choice ->
+                                if (ap.responded != null) return@ApprovalCard
+                                approval = ap.copy(responded = choice)
+                                scope.launch {
+                                    // rute 1: respond frame id-based (request hidup di socket ini)
+                                    if (ap.respondRaw(choice)) return@launch
+                                    // rute 2 fallback: request.answer — jawab open request
+                                    // by frame id (bekerja utk restored + socket ganti).
+                                    val c = app.client ?: return@launch
+                                    try {
+                                        c.call("request.answer", buildJsonObject {
+                                            put("id", ap.id)
+                                            put("result", buildJsonObject { put("choice", choice) })
+                                            val prof = app.profile.value
+                                            if (prof.isNotBlank() && prof != "default") put("profile", prof)
+                                        })
+                                    } catch (_: Throwable) { /* dim tetap — server kirim ulang kalau belum resolved */ }
+                                }
+                            },
+                        )
+                    }
+                }
+                // M4: clarify card — pertanyaan + input teks + Jawab.
+                clarify?.let { cq ->
+                    item { ClarifyCard(cq, onSubmit = { answer ->
+                        if (cq.responded != null) return@ClarifyCard
+                        clarify = cq.copy(responded = answer)
+                        scope.launch {
+                            // rute 1: respond frame id-based (request hidup di socket ini)
+                            if (cq.respondRaw(answer)) return@launch
+                            // rute 2 fallback: request.answer — sama untuk restored/lost frame
+                            val c = app.client ?: return@launch
+                            try {
+                                c.call("request.answer", buildJsonObject {
+                                    put("id", cq.id)
+                                    put("result", buildJsonObject {
+                                        if (cq.questionId != null) put("answers", buildJsonObject { put(cq.questionId, answer) })
+                                        else put("answer", answer)
+                                    })
+                                    val prof = app.profile.value
+                                    if (prof.isNotBlank() && prof != "default") put("profile", prof)
+                                })
+                            } catch (_: Throwable) {}
+                        }
+                    }) }
                 }
             }
             // M3.2: chip scroll-to-bottom — muncul saat scroll up dari bottom
@@ -339,6 +499,17 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
             }
         }
 
+        // M4: sheet Model — aktif (read-only; contract gak punya set-model
+        // per-session, hanya session.create) + inventaris provider/model.
+        if (modelSheet) {
+            ModelSheet(
+                app = app,
+                sessionId = runtimeId,
+                activeModel = activeModel,
+                onDismiss = { modelSheet = false },
+            )
+        }
+
         TicketComposer(
             value = input, onValueChange = { input = it },
             running = running, connected = connState == ConnState.OPEN,
@@ -349,7 +520,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 items = items + ChatItem.User(text, pending = true, time = Fmt.clock(nowEpoch()))
                 scope.launch {
                     try {
-                        val repo = SessionRepo(app.client ?: return@launch)
+                        val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
                         val newRuntime = repo.sendPromptResilient(actualStoredId, runtimeId, text)
                         if (newRuntime != runtimeId) runtimeId = newRuntime
                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
@@ -363,7 +534,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                     }
                 }
             },
-            onStop = { scope.launch { app.client?.let { SessionRepo(it).interrupt(runtimeId) } } },
+            onStop = { scope.launch { app.client?.let { SessionRepo(it, app.profile.value).interrupt(runtimeId) } } },
         )
     }
 }
@@ -451,6 +622,207 @@ private fun VermillionCaret() {
         label = "caret",
     )
     Box(Modifier.padding(top = 6.dp).size(width = 4.dp, height = 20.dp).background(F.Vermillion.copy(alpha = alpha)))
+}
+
+// ── M4: approval / clarify / model sheet ────────────────────────────
+
+/** State approval card. `respondRaw` = jawab via respond frame; return Boolean: frame terkirim. */
+data class AskApproval(
+    val id: String,
+    val requestId: String?,
+    val title: String,
+    val command: String,
+    val responded: String? = null,
+    val respondRaw: (String) -> Boolean = { false },
+)
+
+/** State clarify card. `questionId` = qid pertanyaan batch pertama (null = single). */
+data class AskClarify(
+    val id: String,
+    val question: String,
+    val questionId: String? = null,
+    val responded: String? = null,
+    val respondRaw: (String) -> Boolean = { false },
+)
+
+/**
+ * M4: approval card — SECURITY BOUNDARY. Tombol IZINKAN harus disengaja:
+ * warna accent + label eksplisit, TOLAK netral, gak ada default-focus.
+ * Setelah respond → dim (alpha rendah, tombol hilang) — jejak keputusan tetap ada.
+ */
+@Composable
+private fun ApprovalCard(ap: AskApproval, onChoice: (String) -> Unit) {
+    val answered = ap.responded != null
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(F.Surface1, Shape.M)
+            .border(1.dp, if (answered) F.Stroke else F.Warn.copy(alpha = 0.6f), Shape.M)
+            .padding(16.dp),
+    ) {
+        Text(
+            if (answered) "PERINTAH — ${if (ap.responded == "once") "DIIZINKAN" else "DITOLAK"}"
+            else "MINTA IZIN — ${ap.title.uppercase()}",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (answered) F.LavenderDim else F.Warn,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            ap.command.ifBlank { "—" },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (answered) F.LavenderDim else F.CreamDim,
+            fontFamily = JetBrainsMono,
+            maxLines = 4, overflow = TextOverflow.Ellipsis,
+        )
+        if (!answered) {
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // TOLAK dulu (kiri) — Izinkan = aksi berat, harus dicari.
+                Button(
+                    onClick = { onChoice("deny") },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = F.Surface3, contentColor = F.Cream),
+                    shape = Shape.S,
+                ) { Text("Tolak", style = MaterialTheme.typography.labelLarge) }
+                Button(
+                    onClick = { onChoice("once") },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = F.Vermillion, contentColor = F.BgDeep),
+                    shape = Shape.S,
+                ) { Text("Izinkan", style = MaterialTheme.typography.labelLarge) }
+            }
+        }
+    }
+}
+
+/** M4: clarify card — pertanyaan + input + Jawab; setelah jawab → dim. */
+@Composable
+private fun ClarifyCard(cq: AskClarify, onSubmit: (String) -> Unit) {
+    var answer by remember(cq.id) { mutableStateOf("") }
+    val answered = cq.responded != null
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(F.Surface1, Shape.M)
+            .border(1.dp, if (answered) F.Stroke else F.StrokeBright, Shape.M)
+            .padding(16.dp),
+    ) {
+        Text(
+            if (answered) "DRAFT — TERJAWAB" else "KONFIRMASI",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (answered) F.LavenderDim else F.Lavender,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            cq.question,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (answered) F.LavenderDim else F.Cream,
+        )
+        if (answered) {
+            Spacer(Modifier.height(6.dp))
+            Text(cq.responded ?: "", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
+        } else {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(
+                    value = answer,
+                    onValueChange = { answer = it },
+                    textStyle = TextStyle(color = F.Cream, fontSize = 15.sp),
+                    cursorBrush = SolidColor(F.Vermillion),
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(F.BgDeep, Shape.S)
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    decorationBox = { inner ->
+                        Box {
+                            if (answer.isEmpty()) Text("jawaban…", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
+                            inner()
+                        }
+                    },
+                )
+                Button(
+                    onClick = { if (answer.isNotBlank()) onSubmit(answer.trim()) },
+                    modifier = Modifier.height(44.dp),
+                    enabled = answer.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = F.Vermillion, contentColor = F.BgDeep,
+                        disabledContainerColor = F.Surface3, disabledContentColor = F.LavenderDim,
+                    ),
+                    shape = Shape.S,
+                ) { Text("Jawab", style = MaterialTheme.typography.labelLarge) }
+            }
+        }
+    }
+}
+
+/** M4: sheet "Model" — read-only: model aktif + inventaris model.options. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSheet(app: HermesApp, sessionId: String, activeModel: String, onDismiss: () -> Unit) {
+    var options by remember { mutableStateOf<MetaRepo.ModelOptions?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val c = app.client ?: return@LaunchedEffect
+        try { options = MetaRepo(c).modelOptions(sessionId = sessionId, profile = app.profile.value) }
+        catch (e: Throwable) { error = e.message }
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = F.Surface3,
+        shape = Shape.Ticket,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
+            Text("MODEL", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                activeModel.ifBlank { options?.let { listOfNotNull(it.model.ifBlank { null }, it.provider.ifBlank { null }).joinToString(" · ") } ?: "—" },
+                style = MaterialTheme.typography.titleMedium, color = F.Cream,
+            )
+            Text(
+                "aktif di sesi ini — penggantian model per-sesi belum ada di contract (hanya via sesi baru)",
+                style = MaterialTheme.typography.labelSmall, color = F.LavenderDim,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Spacer(Modifier.height(14.dp))
+            HorizontalDivider(color = F.Stroke, thickness = 1.dp)
+            Spacer(Modifier.height(10.dp))
+            when {
+                options == null && error == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                }
+                error != null -> Text("Gagal memuat: $error", style = MaterialTheme.typography.bodySmall, color = F.Error)
+                else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                    options!!.providers.forEach { p ->
+                        item(key = p.slug) {
+                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        p.name.ifBlank { p.slug },
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = F.Cream,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (p.isCurrent == true) Text(
+                                        "AKTIF", style = MaterialTheme.typography.labelSmall, color = F.Vermillion,
+                                    )
+                                }
+                                Text(
+                                    "${p.models.size} model · ${p.slug}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = F.Lavender,
+                                )
+                                // daftar model: featured dulu (kalau ada), sisanya
+                                val models = (p.featuredModels.orEmpty() + p.models.filter { it !in (p.featuredModels ?: emptyList()) }).distinct()
+                                models.take(12).forEach { m -> Text("· $m", style = MaterialTheme.typography.bodySmall, color = F.Lavender, modifier = Modifier.padding(start = 8.dp, top = 2.dp)) }
+                                if (models.size > 12) Text("+${models.size - 12} lagi", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**

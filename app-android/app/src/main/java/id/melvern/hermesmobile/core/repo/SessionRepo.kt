@@ -12,13 +12,23 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class SessionRepo(private val client: GatewayClient) {
+class SessionRepo(
+    private val client: GatewayClient,
+    /** M4: profile aktif — dikirim sebagai params.profile (nullable, default = profile server). */
+    private val profile: String? = null,
+) {
 
     /** Lenient decode — server kirim field ekstra (mis. reasoning_content); strict default buang pesan senyap. */
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** Helper params.profile — null/"default" gak dikirim (server default = profile utama). */
+    private fun JsonObjectBuilder.putProfile() {
+        val p = profile?.trim()
+        if (!p.isNullOrEmpty() && p != "default") put("profile", p)
+    }
+
     suspend fun listSessions(limit: Int = 60): List<SessionRow> {
-        val res = client.call("session.list", buildJsonObject { put("limit", limit) })
+        val res = client.call("session.list", buildJsonObject { put("limit", limit); putProfile() })
         val arr = res["sessions"]?.jsonArray ?: return emptyList()
         return arr.mapNotNull { el ->
             try { json.decodeFromJsonElement(SessionRow.serializer(), el.jsonObject) } catch (_: Throwable) { null }
@@ -51,25 +61,41 @@ class SessionRepo(private val client: GatewayClient) {
         // menganggap history di-hydrate terpisah). 694KB/187 msg terverifikasi.
         val res = client.call(
             "session.resume",
-            buildJsonObject { put("session_id", sessionId) },
+            buildJsonObject { put("session_id", sessionId); putProfile() },
             timeoutMs = 45_000,
         )
         val messages = res["messages"]?.jsonArray?.mapNotNull { el ->
             try { json.decodeFromJsonElement(TranscriptMessage.serializer(), el.jsonObject) } catch (_: Throwable) { null }
+        } ?: emptyList()
+        // M4: open_requests — server→client request yang belum dijawab (approval /
+        // clarify), di-replay saat resume. Card di-restored dari sini.
+        val openRequests = res["open_requests"]?.jsonArray?.mapNotNull { el ->
+            val o = el.jsonObject
+            val method = o["method"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            OpenRequest(
+                id = o["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                method = method,
+                params = o["params"]?.jsonObject,
+            )
         } ?: emptyList()
         return ResumeOutcome(
             runtimeId = res["session_id"]?.jsonPrimitive?.contentOrNull ?: sessionId,
             messages = messages,
             running = res["running"]?.jsonPrimitive?.booleanOrNull ?: false,
             hydrated = !(res["hydrating"]?.jsonPrimitive?.booleanOrNull ?: false),
+            openRequests = openRequests,
         )
     }
+
+    /** Satu server→client request belum dijawab (OpenRequestEntry contract). */
+    data class OpenRequest(val id: String, val method: String, val params: JsonObject?)
 
     data class ResumeOutcome(
         val runtimeId: String,
         val messages: List<TranscriptMessage>,
         val running: Boolean,
         val hydrated: Boolean,
+        val openRequests: List<OpenRequest> = emptyList(),
     )
 
     suspend fun sendPrompt(sessionId: String, text: String) {
@@ -98,7 +124,7 @@ class SessionRepo(private val client: GatewayClient) {
         return try {
             client.call(
                 "prompt.submit",
-                buildJsonObject { put("session_id", lastKnownRuntimeId); put("text", text) },
+                buildJsonObject { put("session_id", lastKnownRuntimeId); put("text", text); putProfile() },
                 timeoutMs = 120_000,
             )
             lastKnownRuntimeId
@@ -109,7 +135,7 @@ class SessionRepo(private val client: GatewayClient) {
             val out = resume(storedSessionId)
             client.call(
                 "prompt.submit",
-                buildJsonObject { put("session_id", out.runtimeId); put("text", text) },
+                buildJsonObject { put("session_id", out.runtimeId); put("text", text); putProfile() },
                 timeoutMs = 120_000,
             )
             out.runtimeId
@@ -117,14 +143,31 @@ class SessionRepo(private val client: GatewayClient) {
     }
 
     suspend fun interrupt(sessionId: String) {
-        try { client.call("session.interrupt", buildJsonObject { put("session_id", sessionId) }) }
+        try { client.call("session.interrupt", buildJsonObject { put("session_id", sessionId); putProfile() }) }
         catch (_: RpcException) {}
     }
+
+    /**
+     * M4: attach lazy tanpa history (session.resume lazy+omit_messages) — return
+     * runtime id buat aksi yang butuh session live (session.title SET, session.branch),
+     * tanpa build agent / transfer transcript. Fail → null (pemanggil pakai stored id).
+     */
+    suspend fun resumeAttachLazy(storedId: String): String? = try {
+        val res = client.call(
+            "session.resume",
+            buildJsonObject {
+                put("session_id", storedId); put("lazy", true); put("omit_messages", true); putProfile()
+            },
+            timeoutMs = 20_000,
+        )
+        res["session_id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: storedId
+    } catch (_: Throwable) { null }
 
     suspend fun createSession(title: String? = null): Pair<String, String> {
         // return (runtimeId, storedId) — session baru punya runtime beda dari stored
         val res = client.call("session.create", buildJsonObject {
             if (!title.isNullOrBlank()) put("title", title)
+            putProfile()
         })
         val runtimeId = res["session_id"]?.jsonPrimitive?.contentOrNull
             ?: throw RpcException(-1, "session.create: no session_id in result")

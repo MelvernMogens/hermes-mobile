@@ -17,6 +17,8 @@ data class ConnectionSettings(
     val username: String = "",
     /** Password basic auth — di DataStore (private app storage). */
     val password: String = "",
+    /** M4: profile aktif — dipakai semua RPC yang support params.profile. */
+    val profile: String = "default",
 ) {
     val configured: Boolean get() = baseUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank()
 }

@@ -17,7 +17,17 @@ enum class ConnState { CONNECTING, OPEN, RECONNECTING, CLOSED }
 /** Event inbound selain RPC response. */
 sealed interface GatewayInbound {
     data class RpcEvent(val type: String, val sessionId: String, val payload: JsonObject?) : GatewayInbound
-    data class ServerAsk(val id: String, val method: String, val params: JsonObject?, val respond: (JsonObject) -> Unit, val fail: (Int, String) -> Unit) : GatewayInbound
+    /**
+     * Server→client request. respond/fail balikin Boolean dari socket send —
+     * false = frame gak terkirim (socket mati) → pemanggil harus fallback RPC.
+     */
+    data class ServerAsk(
+        val id: String,
+        val method: String,
+        val params: JsonObject?,
+        val respond: (JsonObject) -> Boolean,
+        val fail: (Int, String) -> Boolean,
+    ) : GatewayInbound
     data class Ready(val payload: JsonObject?) : GatewayInbound
 }
 

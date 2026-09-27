@@ -18,6 +18,9 @@ class HermesApp : Application() {
     /** null = belum selesai load dari DataStore; setelah itu selalu ada nilai. */
     val settings = MutableStateFlow<ConnectionSettings?>(null)
 
+    /** M4: profile aktif — semua RPC session kirim params.profile=<ini>. */
+    val profile = MutableStateFlow("default")
+
     @Volatile var client: GatewayClient? = null
         private set
     @Volatile var auth: DashboardAuth? = null
@@ -28,10 +31,24 @@ class HermesApp : Application() {
         appScope.launch {
             val loaded = SettingsStore.load(this@HermesApp)
             settings.value = loaded
+            profile.value = loaded.profile.ifBlank { "default" }
             if (loaded.configured) {
                 val c = buildClient(loaded)
                 c.start()
             }
+        }
+    }
+
+    /**
+     * M4: ganti profile aktif — persist ke DataStore. Koneksi WS gak perlu
+     * di-rebuild (profile adalah param per-RPC, bukan per-socket — sesuai
+     * schema SessionListParams/PromptSubmitParams: field `profile` nullable).
+     */
+    fun setProfile(name: String) {
+        profile.value = name
+        appScope.launch {
+            val cur = settings.value ?: return@launch
+            SettingsStore.save(this@HermesApp, cur.copy(profile = name))
         }
     }
 
