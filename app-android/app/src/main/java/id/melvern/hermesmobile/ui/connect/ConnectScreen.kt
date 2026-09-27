@@ -9,13 +9,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.auth.AuthException
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.store.ConnectionSettings
 import id.melvern.hermesmobile.core.store.SettingsStore
-import id.melvern.hermesmobile.ui.theme.*
+import id.melvern.hermesmobile.ui.theme.F
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -33,10 +32,10 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Spacer(Modifier.height(72.dp))
-        Text("Hermes", style = MaterialTheme.typography.headlineMedium, color = TextPrimary)
+        Text("Hermes", style = MaterialTheme.typography.titleLarge)
         Text(
             "Kontrol penuh agen Hermes di Mac-mu, dari HP.\nSama persis dengan desktop — session, chat, tool, semuanya.",
-            style = MaterialTheme.typography.bodyMedium, color = TextSecondary,
+            style = MaterialTheme.typography.bodySmall,
         )
         Spacer(Modifier.height(12.dp))
 
@@ -57,7 +56,7 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
             modifier = Modifier.fillMaxWidth(), singleLine = true,
         )
 
-        if (error != null) Text(error!!, color = Danger, style = MaterialTheme.typography.bodySmall)
+        if (error != null) Text(error!!, style = MaterialTheme.typography.labelSmall, color = F.Error)
 
         Button(
             onClick = {
@@ -86,12 +85,12 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
             enabled = !testing && url.isNotBlank() && user.isNotBlank() && pass.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {
-            if (testing) CircularProgressIndicator(Modifier.size(20.dp), color = Bg, strokeWidth = 2.dp)
+            if (testing) CircularProgressIndicator(Modifier.size(20.dp), color = F.Cream, strokeWidth = 2.dp)
             else Text("Hubungkan")
         }
         Text(
             "Sekali setup di Mac: bash server/install.sh\n(serve :8788 + Tailscale + password).",
-            style = MaterialTheme.typography.bodySmall, color = TextTertiary, lineHeight = 18.sp,
+            style = MaterialTheme.typography.labelSmall, color = F.LavenderDim,
         )
         Spacer(Modifier.height(32.dp))
     }

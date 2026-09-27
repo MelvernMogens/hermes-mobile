@@ -13,11 +13,14 @@ import java.util.Locale
 
 class SessionRepo(private val client: GatewayClient) {
 
+    /** Lenient decode — server kirim field ekstra (mis. reasoning_content); strict default buang pesan senyap. */
+    private val json = Json { ignoreUnknownKeys = true }
+
     suspend fun listSessions(limit: Int = 60): List<SessionRow> {
         val res = client.call("session.list", buildJsonObject { put("limit", limit) })
         val arr = res["sessions"]?.jsonArray ?: return emptyList()
         return arr.mapNotNull { el ->
-            try { Json.decodeFromJsonElement(SessionRow.serializer(), el.jsonObject) } catch (_: Throwable) { null }
+            try { json.decodeFromJsonElement(SessionRow.serializer(), el.jsonObject) } catch (_: Throwable) { null }
         }
     }
 
@@ -30,7 +33,7 @@ class SessionRepo(private val client: GatewayClient) {
             timeoutMs = 45_000,
         )
         val messages = res["messages"]?.jsonArray?.mapNotNull { el ->
-            try { Json.decodeFromJsonElement(TranscriptMessage.serializer(), el.jsonObject) } catch (_: Throwable) { null }
+            try { json.decodeFromJsonElement(TranscriptMessage.serializer(), el.jsonObject) } catch (_: Throwable) { null }
         } ?: emptyList()
         return ResumeOutcome(
             runtimeId = res["session_id"]?.jsonPrimitive?.contentOrNull ?: sessionId,
