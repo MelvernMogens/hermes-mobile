@@ -39,7 +39,7 @@ data class SessionRow(
         return SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date((at * 1000).toLong()))
     }
 
-    /** Label Indonesia untuk source session (desktop/cli/bot/dst). */
+    /** Label English untuk source session (desktop/cli/bot/dst) — M5b. */
     val sourceLabel: String
         get() = when (source?.trim()?.lowercase()) {
             "desktop", "desktop_app" -> "Desktop"
