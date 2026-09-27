@@ -45,7 +45,8 @@ Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
 | M1 | Slice E2E: connect (auth+ticket+WS), session list desktop, buka chat + transcript, kirim pesan, jawaban live streaming | done (emulator 5580, 26 Sep) | GLM 5.3 / high |
 | M2 | UI premium pass: markdown render, reasoning collapsible, approval cards, interrupt UI, session search | todo | — |
 | M3 | Notifications (foreground service), share target, quick tile | todo | — |
-| M4 | Signed release APK + update path | todo | — |
+| M4 | Parity fitur desktop (model picker, approval, aksi session, profile) | done (27 Sep) | GLM 5.3 + 1 subagent reviewer |
+| M5 | Signed release APK + update path | todo | — |
 
 ## Konvensi
 - Bahasa kode/komentar Indonesia; UI string Indonesia.
