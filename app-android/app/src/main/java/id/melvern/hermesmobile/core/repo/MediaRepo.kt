@@ -26,7 +26,10 @@ class MediaRepo(private val settings: ConnectionSettings) {
         // cookie login: login ringan (idempotent — server 409 kalau sudah login)
         val ok = auth.ensureLogin(settings.username, settings.password)
         if (!ok) return@withContext null
-        val body = auth.getJson(mediaUrl(settings.baseUrl, path)) ?: return@withContext null
+        // Hermes media roots first; images elsewhere (agent MEDIA:/path) via the
+        // proxy's guarded /api/mobile-media (path must appear in a chat).
+        auth.getJson(mediaUrl(settings.baseUrl, path))?.let { parseImageDataUrl(it) }?.let { return@withContext it }
+        val body = auth.getJson(mobileMediaUrl(settings.baseUrl, path)) ?: return@withContext null
         parseImageDataUrl(body)
     }
 
@@ -35,6 +38,11 @@ class MediaRepo(private val settings: ConnectionSettings) {
         fun mediaUrl(baseUrl: String, path: String): String {
             val base = baseUrl.trim().trimEnd('/')
             return "$base/api/media?path=" + URLEncoder.encode(path, "UTF-8")
+        }
+
+        fun mobileMediaUrl(baseUrl: String, path: String): String {
+            val base = baseUrl.trim().trimEnd('/')
+            return "$base/api/mobile-media?path=" + URLEncoder.encode(path, "UTF-8")
         }
 
         /** Pure: body {"data_url": "data:image/png;base64,...."} → ImageBitmap. */

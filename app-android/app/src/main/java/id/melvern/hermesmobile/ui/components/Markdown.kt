@@ -128,7 +128,7 @@ object MarkdownParser {
      *   ![nama](/path/ke/file.jpg)
      */
     private val IMAGE_PATH_LINE = Regex(
-        """^\s*(?:!\[[^\]]*\]\(|\[[^\]]*\]\()?\s*[`'"]?((?:/[\w.\-]+)+\.(?:png|jpe?g|webp|gif|bmp))[`'"]?\s*\)?\s*$""",
+        """^\s*(?:MEDIA:\s*|!\[[^\]]*\]\(|\[[^\]]*\]\()?\s*[`'"]?((?:/[\w.\-]+)+\.(?:png|jpe?g|webp|gif|bmp))[`'"]?\s*\)?\s*$""",
         RegexOption.IGNORE_CASE,
     )
 

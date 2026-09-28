@@ -148,6 +148,63 @@ async def _ticket_valid(ticket: str, subproto: str, session: aiohttp.ClientSessi
 
 
 
+_IMG_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+             ".gif": "image/gif", ".bmp": "image/bmp"}
+_MEDIA_MAX = 20 * 1024 * 1024
+
+
+def _path_in_transcripts(path: str) -> bool:
+    """True if some chat message literally mentions this path (any profile's state.db).
+    That is the guard: the phone may only fetch files the agent actually put in a chat."""
+    import sqlite3
+    hermes = Path.home() / ".hermes"
+    dbs = [hermes / "state.db", *sorted((hermes / "profiles").glob("*/state.db"))]
+    for db in dbs:
+        if not db.exists():
+            continue
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=3)
+            try:
+                hit = con.execute("SELECT 1 FROM messages WHERE instr(content, ?) > 0 LIMIT 1", (path,)).fetchone()
+            finally:
+                con.close()
+            if hit:
+                return True
+        except sqlite3.Error:
+            continue
+    return False
+
+
+async def handle_mobile_media(request: web.Request) -> web.Response:
+    """GET /api/mobile-media?path=<abs> → {"data_url": ...} (same shape as /api/media).
+    For images the agent sent via MEDIA:/path that live outside Hermes' media roots.
+    Requires a logged-in mobile cookie, an image suffix, a file under $HOME, a size cap,
+    and the path appearing in a stored chat message."""
+    session: aiohttp.ClientSession = request.app["client"]
+    if not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    raw = request.query.get("path", "")
+    if not raw.startswith("/"):
+        return web.json_response({"detail": "absolute path required"}, status=400)
+    try:
+        target = Path(raw).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return web.json_response({"detail": "not found"}, status=404)
+    mime = _IMG_MIME.get(target.suffix.lower())
+    home = Path.home().resolve()
+    if mime is None or not target.is_file() or home not in target.parents:
+        return web.json_response({"detail": "not an allowed image"}, status=403)
+    if target.stat().st_size > _MEDIA_MAX:
+        return web.json_response({"detail": "too large"}, status=413)
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, _path_in_transcripts, raw) and \
+            not await loop.run_in_executor(None, _path_in_transcripts, str(target)):
+        return web.json_response({"detail": "path not referenced in any chat"}, status=403)
+    import base64
+    data = await loop.run_in_executor(None, target.read_bytes)
+    return web.json_response({"data_url": f"data:{mime};base64," + base64.b64encode(data).decode()})
+
+
 async def handle_desktop_port(request: web.Request) -> web.Response:
     port, pid = await asyncio.get_running_loop().run_in_executor(None, _desktop_alive)
     if port == 0 and DESKTOP_HINT_PORT:
@@ -285,6 +342,7 @@ def main() -> None:
                         format="%(asctime)s %(name)s %(message)s")
     app = web.Application()
     app.router.add_get("/api/desktop-port", handle_desktop_port)
+    app.router.add_get("/api/mobile-media", handle_mobile_media)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
     app.on_startup.append(on_startup)
