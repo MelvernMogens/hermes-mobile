@@ -104,6 +104,49 @@ async def _desktop_token(port: int, session: aiohttp.ClientSession) -> str | Non
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
                "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
 
+# ── Auth gate (security fix 28 Sep) ──────────────────────────────────────
+# Desktop-bound traffic carries the desktop's own loopback token, so the proxy
+# MUST prove the caller is a logged-in mobile user first. Proof = mobile-serve
+# (8788) accepts it: HTTP → cookie valid on /api/auth/me; WS → single-use
+# ticket accepted by a WS handshake on 8788 (then closed; ticket is consumed).
+_AUTH_TTL = 60.0
+_cookie_ok: dict[str, float] = {}
+
+
+async def _cookie_authed(request: web.Request, session: aiohttp.ClientSession) -> bool:
+    cookie = request.headers.get("Cookie", "")
+    if not cookie:
+        return False
+    now = time.monotonic()
+    if now - _cookie_ok.get(cookie, -1e9) < _AUTH_TTL:
+        return True
+    try:
+        async with session.get(_loopback_url(MOBILE_PORT) / "api" / "auth" / "me",
+                               headers={"Cookie": cookie, "Host": f"127.0.0.1:{MOBILE_PORT}"}) as r:
+            ok = r.status == 200
+    except Exception:
+        ok = False
+    if ok:
+        if len(_cookie_ok) > 256:
+            _cookie_ok.clear()
+        _cookie_ok[cookie] = now
+    return ok
+
+
+async def _ticket_valid(ticket: str, subproto: str, session: aiohttp.ClientSession) -> bool:
+    if not ticket:
+        return False
+    url = _loopback_url(MOBILE_PORT).with_path("/api/ws").with_query({"ticket": ticket})
+    try:
+        ws = await session.ws_connect(url, headers={"Host": f"127.0.0.1:{MOBILE_PORT}"},
+                                      protocols=[subproto] if subproto else None,
+                                      autoping=False, heartbeat=None)
+    except Exception:
+        return False
+    await ws.close()
+    return True
+
+
 
 async def handle_desktop_port(request: web.Request) -> web.Response:
     port, pid = await asyncio.get_running_loop().run_in_executor(None, _desktop_alive)
@@ -128,6 +171,8 @@ async def proxy_http(request: web.Request) -> web.StreamResponse:
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     headers["Host"] = f"127.0.0.1:{port}"
     session: aiohttp.ClientSession = request.app["client"]
+    if target == "desktop" and not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated", "reason": "proxy_auth"}, status=401)
     if target == "desktop":
         tok = await _desktop_token(port, session)
         if not tok:
@@ -175,6 +220,9 @@ async def proxy_ws(request: web.Request) -> web.WebSocketResponse:
             target = "desktop"
     # credential: desktop → ?token= ; mobile → ?ticket= dari app (udah ada di query)
     if target == "desktop":
+        if not await _ticket_valid(request.query.get("ticket", ""),
+                                   request.headers.get("Sec-WebSocket-Protocol", "hermes-gateway-v1"), session):
+            return web.json_response({"error": "unauthenticated", "reason": "proxy_ticket"}, status=401)
         q = dict(request.query)
         q.pop("ticket", None)
         q["token"] = tok

@@ -109,10 +109,11 @@ class GatewayClient(
         while (!stopped && scope.isActive) {
             _state.value = if (attempt == 0) ConnState.CONNECTING else ConnState.RECONNECTING
             val closed = CompletableDeferred<Unit>()
-            // M6: desktop mode = tanpa kredensial (proxy inject token loopback);
-            // mobile mode = tiket single-use dari /api/auth/ws-ticket.
-            val queryCred: String? = if (desktopMode) ""
-                else try { "ticket=${ticketSupplier.freshTicket()}" } catch (e: Throwable) {
+            // Both modes send a single-use ticket from /api/auth/ws-ticket. In desktop
+            // mode the proxy validates it against mobile-serve before injecting the
+            // desktop loopback token (security fix 28 Sep — no unauthenticated relay).
+            val queryCred: String? =
+                try { "ticket=${ticketSupplier.freshTicket()}" } catch (e: Throwable) {
                     Log.w(TAG, "ticket mint failed: ${e.message}")
                     null
                 }
