@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -216,29 +217,73 @@ fun AttachSheet(onDismiss: () -> Unit, onPhoto: () -> Unit, onFile: () -> Unit) 
 }
 
 /**
- * M4→M8 sheet "Model": row model + provider (meta), Check di model aktif.
- * Tap model = chat baru dengan model itu (kontrak tidak punya set-model
- * per-session, hanya session.create).
+ * Model sheet: row model + provider (meta), Check on the active model.
+ * Live chat → tap switches THIS chat's model in place (config.set … --session,
+ * same as desktop). Only a chat with no session yet falls back to creating one.
  */
 @Composable
 fun ModelSheet(
     app: HermesApp,
     sessionId: String,
     onDismiss: () -> Unit,
+    onSwitched: (model: String, deferred: Boolean) -> Unit,
     onNewChat: (String, String) -> Unit,
 ) {
     var options by remember { mutableStateOf<MetaRepo.ModelOptions?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var creating by remember { mutableStateOf<String?>(null) }
-    var createError by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var actionError by remember { mutableStateOf<String?>(null) }
+    // expensive-model guard from the gateway: (model, provider, message)
+    var confirm by remember { mutableStateOf<Triple<String, String, String>?>(null) }
     LaunchedEffect(Unit) {
         val c = app.client ?: return@LaunchedEffect
-        try { options = MetaRepo(c).modelOptions(sessionId = sessionId, profile = app.profile.value) }
+        try { options = MetaRepo(c).modelOptions(sessionId = sessionId.ifBlank { null }, profile = app.profile.value) }
         catch (e: Throwable) { error = e.message }
     }
+
+    fun pick(model: String, provider: String, confirmed: Boolean = false) {
+        busy = "$provider/$model"; actionError = null
+        app.appScope.launch {
+            val c = app.client ?: run { busy = null; return@launch }
+            try {
+                if (sessionId.isBlank()) {
+                    val (newRuntime, _) = SessionRepo(c, app.profile.value).createSession(model = model, provider = provider)
+                    onDismiss(); onNewChat(newRuntime, "")
+                    return@launch
+                }
+                val r = MetaRepo(c).switchModel(sessionId, model, provider, confirm = confirmed)
+                if (r.confirmRequired) {
+                    busy = null
+                    confirm = Triple(model, provider, r.confirmMessage.ifBlank { "$model is an expensive model. Switch anyway?" })
+                    return@launch
+                }
+                onDismiss(); onSwitched(r.value.ifBlank { model }, r.deferred)
+            } catch (e: Throwable) {
+                busy = null
+                actionError = "Couldn't switch to $model: ${e.message}"
+            }
+        }
+    }
+
     QuietSheet(onDismiss = onDismiss, title = "Model") {
-        createError?.let {
+        actionError?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
+        }
+        confirm?.let { (m, prov, msg) ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH, vertical = 8.dp)) {
+                Text(msg, style = Type.Callout.copy(color = Ink.Text))
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                    Text(
+                        "Cancel", style = Type.Callout.copy(color = Ink.Text2),
+                        modifier = Modifier.heightIn(min = 44.dp).pressClickable { confirm = null }.padding(horizontal = 12.dp, vertical = 12.dp),
+                    )
+                    Text(
+                        "Switch", style = Type.Callout.copy(color = Ink.Text, fontWeight = FontWeight.SemiBold),
+                        modifier = Modifier.heightIn(min = 44.dp).pressClickable { confirm = null; pick(m, prov, confirmed = true) }.padding(horizontal = 12.dp, vertical = 12.dp),
+                    )
+                }
+            }
+            Hairline()
         }
         when {
             options == null && error == null -> {
@@ -265,20 +310,7 @@ fun ModelSheet(
                                     Modifier
                                         .fillMaxWidth()
                                         .heightIn(min = 56.dp)
-                                        .pressClickable(enabled = creating == null) {
-                                            creating = key; createError = null
-                                            app.appScope.launch {
-                                                try {
-                                                    val (newRuntime, _) = SessionRepo(app.client ?: return@launch, app.profile.value)
-                                                        .createSession(model = m, provider = p.slug)
-                                                    onDismiss()
-                                                    onNewChat(newRuntime, "")
-                                                } catch (e: Throwable) {
-                                                    creating = null
-                                                    createError = "Couldn't start a chat with $m: ${e.message}"
-                                                }
-                                            }
-                                        }
+                                        .pressClickable(enabled = busy == null && !active) { pick(m, p.slug) }
                                         .padding(horizontal = Dim.ScreenH, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
@@ -287,7 +319,7 @@ fun ModelSheet(
                                         OneLine(providerName, Type.Meta)
                                     }
                                     when {
-                                        creating == key -> CircularProgressIndicator(Modifier.size(18.dp), color = Ink.Text2, strokeWidth = 2.dp)
+                                        busy == key -> CircularProgressIndicator(Modifier.size(18.dp), color = Ink.Text2, strokeWidth = 2.dp)
                                         active -> Icon(Icons.Rounded.Check, "Active model", tint = Ink.Text, modifier = Modifier.size(Dim.Icon))
                                     }
                                 }
@@ -306,7 +338,7 @@ fun ModelSheet(
         }
         Hairline(Modifier.padding(top = 4.dp))
         Text(
-            "Model applies to new chats",
+            if (sessionId.isBlank()) "Model for this new chat" else "Applies to this chat only",
             style = Type.Callout.copy(color = Ink.Text3),
             modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
         )

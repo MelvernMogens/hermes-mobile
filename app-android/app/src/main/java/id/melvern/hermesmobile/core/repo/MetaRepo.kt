@@ -50,6 +50,35 @@ class MetaRepo(private val client: GatewayClient) {
         )
     }
 
+    data class ModelSwitch(
+        val value: String,
+        val deferred: Boolean,
+        val confirmRequired: Boolean,
+        val confirmMessage: String,
+    )
+
+    /**
+     * Switch the model of a LIVE session — the exact call the desktop composer
+     * makes (`config.set key=model value="<model> --provider <slug> --session"`).
+     * `--session` keeps the pick scoped to this chat; it never rewrites the profile
+     * default. A pick during a running turn comes back `deferred` and lands at the
+     * next turn. Expensive models answer `confirm_required` → retry with confirm.
+     */
+    suspend fun switchModel(sessionId: String, model: String, provider: String, confirm: Boolean = false): ModelSwitch {
+        val res = client.call("config.set", buildJsonObject {
+            put("session_id", sessionId)
+            put("key", "model")
+            put("value", "$model --provider $provider --session")
+            if (confirm) put("confirm_expensive_model", true)
+        }, timeoutMs = 90_000)
+        return ModelSwitch(
+            value = res["value"]?.jsonPrimitive?.contentOrNull ?: model,
+            deferred = res["deferred"]?.jsonPrimitive?.booleanOrNull ?: false,
+            confirmRequired = res["confirm_required"]?.jsonPrimitive?.booleanOrNull ?: false,
+            confirmMessage = res["confirm_message"]?.jsonPrimitive?.contentOrNull ?: "",
+        )
+    }
+
     // ── profiles.list ──────────────────────────────────────────────────
 
     @Serializable

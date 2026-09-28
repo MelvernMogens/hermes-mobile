@@ -819,12 +819,16 @@ fun ChatScreen(
             onFile = { pickFile.launch("*/*") },
         )
     }
-    // M4: sheet Model — tap model = chat baru dengan model itu.
+    // Model sheet: live chat → switch this chat's model in place (desktop parity).
     if (modelSheet) {
         ModelSheet(
             app = app,
             sessionId = runtimeId,
             onDismiss = { modelSheet = false },
+            onSwitched = { m, deferred ->
+                activeModel = m
+                if (deferred) items = items + ChatItem.NoticeLine("Switching to $m after this reply")
+            },
             // M5 fix (review HIGH#3): stored id session baru WAJIB ikut — draft/attachment direset.
             onNewChat = { runtime, stored ->
                 runtimeId = runtime
