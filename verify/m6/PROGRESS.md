@@ -37,9 +37,27 @@
 
 ## Status
 - [x] Discovery infra
-- [ ] resolve-gateway.sh + verify output
-- [ ] proxy + LaunchAgent + tailscale serve
-- [ ] app changes (discovery, credential, read-only, live badge)
-- [ ] emulator E2E: buka eefc53, kirim pesan, bukti no-4090, screenshot
-- [ ] sqlite bukti pesan masuk
-- [ ] build + APK ~/Desktop + commit + push
+- [x] resolve-gateway.sh + verify output (`{"port":57840,"pid":84269,"surface":"desktop"}`)
+- [x] proxy + LaunchAgent + tailscale serve (serve → proxy :8790, bukan 8788 lagi)
+- [x] app changes (discovery, credential, read-only, live badge)
+- [x] emulator E2E: buka eefc53, kirim pesan, bukti no-4090, screenshot
+- [x] sqlite bukti pesan masuk (msg id 52360, jawaban 52364)
+- [x] build + APK ~/Desktop/hermes-mobile.apk + commit 4a6ffba + push
+
+## Bukti verifikasi (28 Sep 15:50-15:53)
+1. `bash server/resolve-gateway.sh` → `{"port": 57840, "pid": 84269, "surface": "desktop"}`
+   (juga via Tailscale: `curl https://melverns-macbook-pro.tail4588ae.ts.net/api/desktop-port` → sama).
+2. Emulator-5580 (APK M6): connect → badge "· desktop-linked" → buka "Hermes Android"
+   (= 20260926_141522_eefc53, lease desktop pid 84269) → transcript 262 msg termuat →
+   kirim "M6-verify-HP-via-gateway-desktop" → BERHASIL, BUKAN 4090.
+   Screenshots: 01-app-launch / 02-after-connect / 03-send-success / 04-reply-live.
+3. Bukti DB (state.db): user msg id 52360 masuk, assistant 52361/52364 balas —
+   dan itu session yang live dipegang desktop pid 84269 → multi-surface terbukti.
+   Bonus: badge "● RUNNING" muncul live di sessions list untuk session lain yang
+   lagi jalan (event message.* → refresh) → requirement #3 live update terpenuhi.
+4. Build `./gradlew :app:assembleDebug` BUILD SUCCESSFUL; APK ke ~/Desktop/hermes-mobile.apk
+   (12.8MB); commit 4a6ffba push ke MelvernMogens/hermes-mobile.
+
+## Catatan
+- Login screen emulator fresh (DataStore ke-wipe) → URL+password diisi manual saat verify.
+- Password basic-auth tidak pernah ditulis di repo (hash saja di ~/.hermes/config.yaml).
