@@ -32,6 +32,7 @@ import id.melvern.hermesmobile.core.repo.Fmt
 import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
+import id.melvern.hermesmobile.core.rpc.GatewayInbound
 import id.melvern.hermesmobile.ui.components.ProfileAvatar
 import id.melvern.hermesmobile.ui.theme.F
 import id.melvern.hermesmobile.ui.theme.Shape
@@ -65,6 +66,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
     val profile by app.profile.collectAsState()
+    // M6: mode gateway aktif — desktop = multi-surface (sama dengan desktop app)
+    val gatewayMode by app.gatewayMode.collectAsState()
 
     fun refresh() {
         val c = app.client ?: return
@@ -77,6 +80,30 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     }
 
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    // M6: multi-surface live update — dengarkan event stream utk session yang BUKAN
+    // active-view juga. Event membawa RUNTIME id sedangkan list match by STORED id,
+    // jadi badge via refresh() (session.active_list balikin session_key), di-debounce
+    // 2s biar streaming deras tidak spam RPC.
+    LaunchedEffect(Unit) {
+        val inbound = app.client?.inbound ?: return@LaunchedEffect
+        var lastRefresh = 0L
+        scope.launch {
+            inbound.collect { ev ->
+                if (ev is GatewayInbound.RpcEvent) {
+                    when (ev.type) {
+                        "message.start", "tool.start", "message.complete",
+                        "session.reclaimed", "session.title" -> {
+                            val now = System.currentTimeMillis()
+                            if (now - lastRefresh > 2_000) {
+                                lastRefresh = now
+                                refresh()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         // M5: hint sekali seumur app-install (flag di SharedPreferences)
         val prefs = ctx.getSharedPreferences("hermes_mobile", android.content.Context.MODE_PRIVATE)
@@ -134,10 +161,14 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                     modifier = Modifier.padding(top = 2.dp),
                 )
                 // M5: toggle hidden — pelan & kecil, kanan label profile
+                // M6: mode gateway — "desktop" kalau multi-surface aktif
                 Text(
-                    if (showHidden) "· hidden ON" else "",
+                    buildString {
+                        if (gatewayMode is id.melvern.hermesmobile.core.repo.GatewayDiscovery.Mode.Desktop) append("· desktop-linked")
+                        if (showHidden) append(if (isEmpty()) "· hidden ON" else " · hidden ON")
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    color = F.Warn,
+                    color = if (showHidden) F.Warn else F.Lavender,
                     modifier = Modifier.padding(start = 8.dp, top = 2.dp),
                 )
             }

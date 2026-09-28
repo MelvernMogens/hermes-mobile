@@ -47,6 +47,12 @@ class GatewayClient(
     private val wsBase: String,          // wss://host/api/ws
     private val ticketSupplier: TicketSupplier,
     private val scope: CoroutineScope,
+    /**
+     * M6: mode multi-surface — konek ke gateway desktop via proxy. Proxy inject
+     * ?token= (loopback) server-side, jadi client TIDAK minta tiket. Dispatch
+     * logic tidak berubah (method-first).
+     */
+    private val desktopMode: Boolean = false,
 ) {
     companion object {
         const val HEARTBEAT_INTERVAL_MS = 15_000L
@@ -103,14 +109,18 @@ class GatewayClient(
         while (!stopped && scope.isActive) {
             _state.value = if (attempt == 0) ConnState.CONNECTING else ConnState.RECONNECTING
             val closed = CompletableDeferred<Unit>()
-            val ticket = try { ticketSupplier.freshTicket() } catch (e: Throwable) {
-                Log.w(TAG, "ticket mint failed: ${e.message}")
-                null
-            }
-            if (ticket != null) {
+            // M6: desktop mode = tanpa kredensial (proxy inject token loopback);
+            // mobile mode = tiket single-use dari /api/auth/ws-ticket.
+            val queryCred: String? = if (desktopMode) ""
+                else try { "ticket=${ticketSupplier.freshTicket()}" } catch (e: Throwable) {
+                    Log.w(TAG, "ticket mint failed: ${e.message}")
+                    null
+                }
+            if (queryCred != null) {
+                val dialUrl = if (queryCred.isEmpty()) wsBase else "$wsBase?$queryCred"
                 val socket = client.newWebSocket(
                     Request.Builder()
-                        .url("$wsBase?ticket=$ticket")
+                        .url(dialUrl)
                         .header("Sec-WebSocket-Protocol", WS_SUBPROTOCOL)
                         .build(),
                     Listener(closed)

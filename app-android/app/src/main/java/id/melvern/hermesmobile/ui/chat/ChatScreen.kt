@@ -124,6 +124,10 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     // M3.2: long-press salin teks
     var copyTarget by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
+    // M6: read-only — session di-hold surface lain via gateway INI (jarang setelah
+    // multi-surface fix; masih mungkin kalau lease stale). Transcript tetap render,
+    // composer disabled + banner — bukan error gelap.
+    var readOnly by remember { mutableStateOf(false) }
 
     // M5: attach — picker Android, hasil jadi chip di atas composer.
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -438,6 +442,25 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
         }
         HorizontalDivider(color = F.Stroke, thickness = 1.dp)
 
+        // M6: banner read-only — session dipegang surface lain; transcript tetap tampil.
+        if (readOnly) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(F.Warn.copy(alpha = 0.08f))
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(F.Warn))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Open in desktop — read-only",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = F.Warn,
+                )
+            }
+        }
+
         Box(Modifier.weight(1f)) {
             if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
@@ -613,6 +636,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
         TicketComposer(
             value = input, onValueChange = { input = it },
             running = running, connected = connState == ConnState.OPEN,
+            readOnly = readOnly,
             attachment = attachment,
             attaching = attaching,
             attachError = attachError,
@@ -641,6 +665,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                     try {
                         val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
                         val (newRuntime, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, text)
+                        readOnly = false
                         if (newRuntime != runtimeId) runtimeId = newRuntime
                         // M5: status "queued" → server bilang pesan diantrekan/steered —
                         // bubble user tampil "QUEUED" (bukan pending forever).
@@ -652,10 +677,13 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                         if (status == SessionRepo.SubmitStatus.QUEUED) running = true // turn lanjut/drain queued
                     } catch (e: Throwable) {
                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
-                        val msg = if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException)
-                            "This session is open in the desktop app — close it there first, or start a new chat."
-                        else "Failed to send: ${e.message}"
-                        items = items + ChatItem.NoticeLine(msg)
+                        if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException) {
+                            // M6: read-only yang bener — transcript tetap, banner + composer mati
+                            readOnly = true
+                        } else {
+                            val msg = "Failed to send: ${e.message}"
+                            items = items + ChatItem.NoticeLine(msg)
+                        }
                         // M5 fix (review): gak nimpa draft baru yang user lagi ketik —
                         // restore cuma kalau input masih kosong.
                         if (input.isBlank()) input = text
@@ -1058,6 +1086,7 @@ private fun ThinkingBlock(text: String) {
 private fun TicketComposer(
     value: String, onValueChange: (String) -> Unit,
     running: Boolean, connected: Boolean,
+    readOnly: Boolean = false,
     attachment: id.melvern.hermesmobile.core.model.Attachment?,
     attaching: Boolean,
     attachError: String?,
@@ -1142,24 +1171,26 @@ private fun TicketComposer(
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
-                    textStyle = TextStyle(color = F.Cream, fontSize = 16.sp),
+                    textStyle = TextStyle(color = if (readOnly) F.LavenderDim else F.Cream, fontSize = 16.sp),
                     cursorBrush = SolidColor(F.Vermillion),
                     // M3.2: IME Send — cukup satu baris; multiline di-entry via paste
                     // atau Shift+Enter (keyboard yang support). Enter polos = kirim.
                     // M5: kirim SAAT running juga boleh (server antri/steer).
+                    // M6: read-only → composer mati total.
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (connected && value.isNotBlank()) onSend() }),
+                    keyboardActions = KeyboardActions(onSend = { if (connected && !readOnly && value.isNotBlank()) onSend() }),
                     modifier = Modifier.weight(1f),
                     decorationBox = { inner ->
                         Box {
                             if (value.isEmpty()) Text(
-                                if (running) "send while running…" else "Message…",
+                                if (readOnly) "read-only — open in desktop" else if (running) "send while running…" else "Message…",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = F.LavenderDim,
                             )
                             inner()
                         }
                     },
+                    enabled = !readOnly,
                 )
                 val interaction = remember { MutableInteractionSource() }
                 val pressed by interaction.collectIsPressedAsState()
@@ -1181,7 +1212,7 @@ private fun TicketComposer(
                         .clip(CircleShape)
                         .background(
                             when {
-                                connected && (value.isNotBlank() || attachment?.isImage == true) -> F.Vermillion
+                                connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true) -> F.Vermillion
                                 else -> F.Surface2.copy(alpha = 0.5f)
                             }
                         )
@@ -1190,8 +1221,9 @@ private fun TicketComposer(
                             indication = null,
                             // M5: chip foto tanpa teks tetap bisa dikirim (onSend jadiin
                             // "📎 nama" trigger turn); file non-gambar selalu bawa refText.
-                            enabled = connected && (value.isNotBlank() || attachment?.isImage == true),
-                            onClick = { if (connected && (value.isNotBlank() || attachment?.isImage == true)) onSend() },
+                            // M6: read-only → disabled.
+                            enabled = connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true),
+                            onClick = { if (connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true)) onSend() },
                         ),
                     contentAlignment = Alignment.Center,
                 ) {

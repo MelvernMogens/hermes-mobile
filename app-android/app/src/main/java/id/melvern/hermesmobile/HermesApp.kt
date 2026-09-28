@@ -2,6 +2,7 @@ package id.melvern.hermesmobile
 
 import android.app.Application
 import id.melvern.hermesmobile.core.auth.DashboardAuth
+import id.melvern.hermesmobile.core.repo.GatewayDiscovery
 import id.melvern.hermesmobile.core.rpc.GatewayClient
 import id.melvern.hermesmobile.core.store.ConnectionSettings
 import id.melvern.hermesmobile.core.store.SettingsStore
@@ -29,6 +30,9 @@ class HermesApp : Application() {
     /** M5: settings koneksi aktif — dipakai MediaRepo (base URL + kredensial /api/media). */
     @Volatile var connection: ConnectionSettings? = null
         private set
+
+    /** M6: mode discovery aktif — desktop (multi-surface) atau mobile (fallback 8788). */
+    val gatewayMode = MutableStateFlow<GatewayDiscovery.Mode>(GatewayDiscovery.Mode.Mobile)
 
     override fun onCreate() {
         super.onCreate()
@@ -65,10 +69,15 @@ class HermesApp : Application() {
         this.auth = auth
         val wsBase = if (base.startsWith("https://")) "wss://${base.removePrefix("https://")}/api/ws"
                      else "ws://${base.removePrefix("http://")}/api/ws"
+        // M6: discovery dulu — desktop mode = gateway yang sama dengan desktop app
+        // (multi-surface, tanpa 4090). Mobile mode = tiket seperti M1.
+        val mode = kotlinx.coroutines.runBlocking { GatewayDiscovery.resolve(base) }
+        gatewayMode.value = mode
         val c = GatewayClient(
             wsBase,
             ticketSupplier = { auth.loginTicket(settings.username, settings.password) },
             scope = appScope,
+            desktopMode = mode is GatewayDiscovery.Mode.Desktop,
         )
         client = c
         return c
