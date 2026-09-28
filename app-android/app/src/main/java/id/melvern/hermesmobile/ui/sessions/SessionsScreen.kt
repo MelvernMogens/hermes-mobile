@@ -59,8 +59,11 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var profileSheet by remember { mutableStateOf(false) }
     var actionTarget by remember { mutableStateOf<SessionRow?>(null) }
-    // M5: toggle session tersembunyi (Bot Chat hidden=1 by design di backend)
-    var showHidden by remember { mutableStateOf(false) }
+    // M5→M7: toggle session tersembunyi — persist di DataStore (key
+    // show_hidden_sessions, default TRUE sesuai request user; sebelumnya
+    // remember{} reset tiap buka app). Toggle → save; startup → load.
+    var showHidden by remember { mutableStateOf(true) }
+    var showHiddenLoaded by remember { mutableStateOf(false) }
     // M5: hint pertama kali — "tap to switch profile" 3 detik (flag SharedPreferences)
     var showProfileHint by remember { mutableStateOf(false) }
     val client = app.client
@@ -80,6 +83,31 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     }
 
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    // M7: load showHidden dari DataStore SEBELUM loop fetch — await di sini
+    // menahan refresh() pertama sampai nilai persisted siap, jadi list pertama
+    // tidak diambil pakai default true yang salah. (Review M7: load async
+    // terpisah membuat fetch pertama bisa pakai nilai salah + koreksi tertelan
+    // skip-first-cycle → hidden session salah tampil sampai poll 10s berikutnya.)
+    LaunchedEffect(Unit) {
+        showHidden = id.melvern.hermesmobile.core.store.SettingsStore.loadShowHidden(ctx)
+        showHiddenLoaded = true
+    }
+    // M7: fetch loop baru jalan setelah nilai persisted siap (showHiddenLoaded).
+    LaunchedEffect(showHiddenLoaded) {
+        if (!showHiddenLoaded) return@LaunchedEffect
+        // M5: hint sekali seumur app-install (flag di SharedPreferences)
+        val prefs = ctx.getSharedPreferences("hermes_mobile", android.content.Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("hint_profile_done", false)) {
+            showProfileHint = true
+            delay(3000)
+            showProfileHint = false
+            prefs.edit().putBoolean("hint_profile_done", true).apply()
+        }
+        while (true) {
+            refresh()
+            delay(10_000)
+        }
+    }
     // M6: multi-surface live update — dengarkan event stream utk session yang BUKAN
     // active-view juga. Event membawa RUNTIME id sedangkan list match by STORED id,
     // jadi badge via refresh() (session.active_list balikin session_key), di-debounce
@@ -105,22 +133,15 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
         }
     }
     LaunchedEffect(Unit) {
-        // M5: hint sekali seumur app-install (flag di SharedPreferences)
-        val prefs = ctx.getSharedPreferences("hermes_mobile", android.content.Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("hint_profile_done", false)) {
-            showProfileHint = true
-            delay(3000)
-            showProfileHint = false
-            prefs.edit().putBoolean("hint_profile_done", true).apply()
-        }
-        while (true) {
-            refresh()
-            delay(10_000)
-        }
+        // (hint + poll loop dipindah ke LaunchedEffect(showHiddenLoaded) — M7,
+        // lihat atas: fetch pertama menunggu nilai persisted siap.)
     }
-    // M5: toggle hidden → refresh
+    // M5: toggle hidden → refresh. M7: skip siklus pertama SEKARANG dua tahap —
+    // setelah load DataStore (showHiddenLoaded) — biar nilai persisted tidak
+    // memicu wipe list; toggle user setelah itu yang mentrigger refresh.
     var sawInitialHidden by remember { mutableStateOf(false) }
     LaunchedEffect(showHidden) {
+        if (!showHiddenLoaded) return@LaunchedEffect
         if (!sawInitialHidden) { sawInitialHidden = true; return@LaunchedEffect }
         loading = true; sessions = emptyList(); refresh()
     }
@@ -242,7 +263,11 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
         ProfileSheet(
             app,
             showHidden = showHidden,
-            onToggleHidden = { showHidden = it },
+            onToggleHidden = {
+                showHidden = it
+                // M7: persist pilihan — bertahan setelah app ditutup.
+                scope.launch { id.melvern.hermesmobile.core.store.SettingsStore.saveShowHidden(ctx, it) }
+            },
             onDismiss = { profileSheet = false },
         )
     }

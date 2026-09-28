@@ -1,6 +1,7 @@
 package id.melvern.hermesmobile.core.store
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.first
@@ -25,6 +26,8 @@ data class ConnectionSettings(
 
 object SettingsStore {
     private val KEY_JSON = stringPreferencesKey("connection_json")
+    // M7: toggle "show hidden sessions" — persist (default true, request user).
+    private val KEY_SHOW_HIDDEN = booleanPreferencesKey("show_hidden_sessions")
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun load(context: Context): ConnectionSettings = try {
@@ -34,5 +37,13 @@ object SettingsStore {
 
     suspend fun save(context: Context, value: ConnectionSettings) {
         context.dataStore.edit { it[KEY_JSON] = json.encodeToString(ConnectionSettings.serializer(), value) }
+    }
+
+    /** M7: showHidden — default TRUE (mau selalu on), tersimpan saat toggle. */
+    suspend fun loadShowHidden(context: Context): Boolean =
+        context.dataStore.data.first()[KEY_SHOW_HIDDEN] ?: true
+
+    suspend fun saveShowHidden(context: Context, value: Boolean) {
+        context.dataStore.edit { it[KEY_SHOW_HIDDEN] = value }
     }
 }

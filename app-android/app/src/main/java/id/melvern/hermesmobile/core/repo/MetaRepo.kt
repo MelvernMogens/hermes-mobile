@@ -142,17 +142,19 @@ class MetaRepo(private val client: GatewayClient) {
             put("asset", "avatar")
         })
         val found = res["found"]?.jsonPrimitive?.booleanOrNull ?: false
-        // data URL "data:image/png;base64,XXXX" → bytes.
-        // Fallback URL-alphabet decoder: beberapa producer data URL pakai base64url.
-        val bytes = res["data"]?.jsonPrimitive?.contentOrNull
-            ?.substringAfter(',', "")
-            ?.takeIf { it.isNotBlank() }
-            ?.let { b64 ->
-                try { java.util.Base64.getDecoder().decode(b64) }
-                catch (_: Throwable) {
-                    try { java.util.Base64.getUrlDecoder().decode(b64) } catch (_: Throwable) { null }
-                }
-            }
+        // M7 fix: probe 28 Sep — data bisa RAW base64 TANPA prefix "data:"
+        // (WEBP, magic VP8X). substringAfter(',', "") pada string tanpa koma
+        // = "" → bytes null → placeholder ungu selamanya. Parse dua bentuk.
+        val raw = res["data"]?.jsonPrimitive?.contentOrNull
+        val b64 = when {
+            raw == null -> null
+            raw.startsWith("data:") -> raw.substringAfter(',', "").trim()
+            else -> raw.trim()
+        }?.takeIf { it.isNotEmpty() }
+        val bytes = b64?.let { decodeB64Tolerant(it) }
+            // M7 fix: magic-byte gate — cuma format yang bisa di-decode
+            // BitmapFactory. SVG dsb → null → inisial (bukan kotak kosong).
+            ?.takeIf { isDecodableImage(it) }
         return ProfileAsset(
             found = found,
             mime = res["mime"]?.jsonPrimitive?.contentOrNull,
@@ -205,3 +207,42 @@ class MetaRepo(private val client: GatewayClient) {
         private val lenientJson = Json { ignoreUnknownKeys = true }
     }
 }
+
+// ── M7: helper decode base64 toleran + gate magic bytes ────────────
+
+/**
+ * Decode base64 toleran: MIME alphabet → URL alphabet fallback →
+ * padding '=' ditambah kalau len % 4 != 0 (beberapa producer strip padding).
+ * Null kalau dua dekoder gagal.
+ */
+internal fun decodeB64Tolerant(b64: String): ByteArray? {
+    val padded = if (b64.length % 4 != 0) b64 + "=".repeat(4 - b64.length % 4) else b64
+    return try { java.util.Base64.getDecoder().decode(padded) }
+    catch (_: Throwable) {
+        try { java.util.Base64.getUrlDecoder().decode(padded) } catch (_: Throwable) { null }
+    }
+}
+
+/**
+ * Gate format gambar via magic bytes — hanya yang bisa di-decode
+ * BitmapFactory yang dipakai (JPEG/PNG/WEBP/GIF/BMP). SVG dsb → false.
+ */
+internal fun isDecodableImage(bytes: ByteArray): Boolean {
+    if (bytes.size < 12) return false
+    fun be32(o: Int) = ((bytes[o].toInt() and 0xFF) shl 24) or ((bytes[o + 1].toInt() and 0xFF) shl 16) or
+        ((bytes[o + 2].toInt() and 0xFF) shl 8) or (bytes[o + 3].toInt() and 0xFF)
+    return when {
+        // PNG: 89 50 4E 47
+        bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() -> true
+        // JPEG: FF D8 FF
+        bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> true
+        // WEBP: "RIFF"...."WEBP"
+        be32(0) == 0x52494646 && be32(8) == 0x57454250 -> true
+        // GIF87a/GIF89a
+        be32(0) == 0x47494638 -> true
+        // BMP: "BM"
+        bytes[0] == 0x42.toByte() && bytes[1] == 0x4D.toByte() -> true
+        else -> false
+    }
+}
+

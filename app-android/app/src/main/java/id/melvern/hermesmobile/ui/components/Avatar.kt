@@ -133,11 +133,14 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp) {
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
-        } else if (failed) {
+        } else {
+            // M7 fix: loading & failed & svg-skip semua → inisial dim.
+            // (Sebelumnya loading tampil kotak Surface2 polos — "ungu" abadi
+            // kalau bytes null karena bug parse di MetaRepo.)
             Text(
                 profile.trim().take(1).uppercase(),
                 style = MaterialTheme.typography.labelLarge,
-                color = F.Cream,
+                color = if (failed) F.Cream else F.LavenderDim,
             )
         }
     }

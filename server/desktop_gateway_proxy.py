@@ -146,9 +146,15 @@ async def proxy_http(request: web.Request) -> web.StreamResponse:
         return web.json_response({"detail": f"upstream unreachable: {exc}"}, status=502)
     resp = web.StreamResponse(status=upstream.status, reason=upstream.reason)
     for k, v in upstream.headers.items():
-        if k.lower() in HOP_HEADERS or k.lower() == "content-encoding":
+        lk = k.lower()
+        if lk in HOP_HEADERS or lk == "content-encoding":
             continue
-        resp.headers[k] = v
+        if lk == "set-cookie":
+            # multi set-cookie: StreamResponse.headers[...] assignment is last-wins;
+            # use raw addpath so at/rt session cookies survive the proxy hop.
+            resp.headers.add(k, v)
+        else:
+            resp.headers[k] = v
     await resp.prepare(request)
     async for chunk in upstream.content.iter_any():
         await resp.write(chunk)

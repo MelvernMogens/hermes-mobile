@@ -64,6 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.jsonArray
@@ -102,6 +103,9 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     val listState = rememberLazyListState()
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
+    // M7: mode gateway aktif — dipakai derive readOnly (banner 4090 hanya
+    // relevan kalau error terjadi saat gateway mobile).
+    val gatewayMode by app.gatewayMode.collectAsState()
 
     // M3.2: pinned detection (toleransi 60dp) — autoscroll HANYA kalau user
     // dekat bottom; scroll up >60dp → chip muncul.
@@ -124,10 +128,24 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     // M3.2: long-press salin teks
     var copyTarget by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
-    // M6: read-only — session di-hold surface lain via gateway INI (jarang setelah
-    // multi-surface fix; masih mungkin kalau lease stale). Transcript tetap render,
-    // composer disabled + banner — bukan error gelap.
-    var readOnly by remember { mutableStateOf(false) }
+    // M6→M7: read-only — HANYA setelah error 4090 NYATA saat gateway mobile
+    // (desktop-linked = multi-surface normal, banner tidak boleh muncul
+    // preventively). Derived: sessionNotOwned && mode != Desktop.
+    var sessionNotOwned by remember { mutableStateOf(false) }
+    // M7 watchdog: prompt.submit sukses tapi message.start belum datang →
+    // setelah 20s refresh via session.events.since (bukan spinner selamanya).
+    // Counter monoton, BUKAN boolean: snapshot diambil SEBELUM submit — event
+    // yang datang duluan / reset dari send lain tidak bisa menimpa (race
+    // review M7: boolean di-reset setelah submit menimpa flag yang sudah true).
+    var turnStartCount by remember { mutableStateOf(0) }
+    // M7: derive banner — 4090 NYATA (sessionNotOwned) DAN gateway mobile.
+    // Desktop-linked = multi-surface, session bisa dipakai bareng → jangan
+    // tampilkan banner read-only preventive.
+    val readOnly by remember {
+        derivedStateOf {
+            sessionNotOwned && gatewayMode !is id.melvern.hermesmobile.core.repo.GatewayDiscovery.Mode.Desktop
+        }
+    }
 
     // M5: attach — picker Android, hasil jadi chip di atas composer.
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -337,7 +355,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                         running = false
                         if (!atBottom) hasNew = true
                     }
-                    "message.start" -> { running = true; thinking = false; thinkingText = "" }
+                    "message.start" -> { running = true; thinking = false; thinkingText = ""; turnStartCount++ }
                     "message.interim" -> {
                         thinking = false
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
@@ -664,8 +682,14 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 scope.launch {
                     try {
                         val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
+                        // M7: snapshot counter SEBELUM submit — kalau server kirim
+                        // message.start sebelum response RPC submit balik, event itu
+                        // sudah terhitung (tidak dimakan reset).
+                        val turnStartSnapshot = turnStartCount
                         val (newRuntime, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, text)
-                        readOnly = false
+                        // M7 fix: kondisi normal terbukti lewat submit sukses —
+                        // reset fakta 4090 lama (readOnly di-derive → false).
+                        sessionNotOwned = false
                         if (newRuntime != runtimeId) runtimeId = newRuntime
                         // M5: status "queued" → server bilang pesan diantrekan/steered —
                         // bubble user tampil "QUEUED" (bukan pending forever).
@@ -675,11 +699,30 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                             else it
                         }
                         if (status == SessionRepo.SubmitStatus.QUEUED) running = true // turn lanjut/drain queued
+                        // M7 watchdog: submit sukses tapi event streaming belum pasti
+                        // sampai. Kalau message.start (counter naik) gak datang dalam
+                        // 20s, refresh transcript via session.events.since (replay
+                        // RPC) — bukan spinner "running" tak berujung. Loop juga
+                        // berhenti kalau turn tamat (message.complete → running=false)
+                        // tanpa start (mis. jawaban kosong/turn direject) — tidak
+                        // menunggu penuh 20s sia-sia. (Review M7: versi boolean +
+                        // kondisi `running` exit instan saat submit turn baru.)
+                        val watchdogRuntime = runtimeId
+                        withTimeoutOrNull(20_000) {
+                            while (turnStartCount == turnStartSnapshot && running) delay(500)
+                        }
+                        if (turnStartCount == turnStartSnapshot && runtimeId == watchdogRuntime) {
+                            app.client?.replaySince(watchdogRuntime)
+                        }
                     } catch (e: Throwable) {
                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
                         if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException) {
-                            // M6: read-only yang bener — transcript tetap, banner + composer mati
-                            readOnly = true
+                            // M6: read-only yang bener — transcript tetap, banner + composer mati.
+                            // M7: simpan FAKTA error; readOnly (banner) di-derive dari
+                            // gateway mode — 4090 saat gateway mobile = session benar2
+                            // dipegang surface lain, tapi saat desktop-linked itu lease
+                            // stale yang sembuh sendiri lewat retry.
+                            sessionNotOwned = true
                         } else {
                             val msg = "Failed to send: ${e.message}"
                             items = items + ChatItem.NoticeLine(msg)

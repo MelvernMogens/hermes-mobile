@@ -46,7 +46,9 @@ Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
 | M2 | UI premium pass: markdown render, reasoning collapsible, approval cards, interrupt UI, session search | todo | — |
 | M3 | Notifications (foreground service), share target, quick tile | todo | — |
 | M4 | Parity fitur desktop (model picker, approval, aksi session, profile) | done (27 Sep) | GLM 5.3 + 1 subagent reviewer |
-| M5 | Signed release APK + update path | in progress (M5a/M5b done; M5c avatar per-profile done 28 Sep) | GLM 5.3 / high |
+| M5 | Signed release APK + update path | done (M5a/M5b/M5c 27-28 Sep) | GLM 5.3 / high |
+| M6 | Multi-surface HP+desktop via gateway desktop (proxy 8790) | done (28 Sep) | GLM 5.3 |
+| M7 | 3 fix UX dogfood: banner read-only derived (4090 nyata + gateway mobile), avatar WEBP raw-base64 parse + inisial loading, showHidden persist DataStore (default ON) | done (28 Sep) — reviewer subagent: watchdog race + race load DataStore, keduanya difix | GLM 5.3 + 1 subagent reviewer |
 
 ## Konvensi
 - Bahasa kode/komentar Indonesia; UI string English (user request 28 Sep).
