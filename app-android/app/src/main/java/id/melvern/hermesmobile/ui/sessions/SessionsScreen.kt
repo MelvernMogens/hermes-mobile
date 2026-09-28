@@ -1,117 +1,130 @@
 package id.melvern.hermesmobile.ui.sessions
 
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextOverflow
-import android.net.Uri
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.model.SessionRow
-import id.melvern.hermesmobile.core.repo.Fmt
 import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
+import id.melvern.hermesmobile.core.store.SettingsStore
+import id.melvern.hermesmobile.ui.components.Hairline
+import id.melvern.hermesmobile.ui.components.OneLine
 import id.melvern.hermesmobile.ui.components.ProfileAvatar
-import id.melvern.hermesmobile.ui.theme.F
-import id.melvern.hermesmobile.ui.theme.Shape
+import id.melvern.hermesmobile.ui.components.QuietIconButton
+import id.melvern.hermesmobile.ui.components.QuietSheet
+import id.melvern.hermesmobile.ui.components.RelTime
+import id.melvern.hermesmobile.ui.components.SkeletonSessionRow
+import id.melvern.hermesmobile.ui.components.StatusDot
+import id.melvern.hermesmobile.ui.components.shimmerAlpha
+import id.melvern.hermesmobile.ui.theme.Dim
+import id.melvern.hermesmobile.ui.theme.Ink
+import id.melvern.hermesmobile.ui.theme.Radius
+import id.melvern.hermesmobile.ui.theme.Type
+import id.melvern.hermesmobile.ui.theme.hairline
 import id.melvern.hermesmobile.ui.theme.pressClickable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import java.time.LocalDate
 
 /**
- * Session list — "kolom handbill": judul serif italic besar per gig,
- * meta tracked sans, hairline divider, running dot vermillion,
- * NEW GIG dashed row di bawah. Tanpa FAB (benci tombol gede).
- *
- * M4: tap wordmark "H E R M E S" → sheet profile switcher (profiles.list);
- * long-press row session → context menu (rename / branch / hide / delete).
+ * M8 "Chats" — gaya list WhatsApp/iMessage.
+ * Top bar: avatar profil 32 (dot status koneksi) + nama profil (meta), judul
+ * kecil yang muncul saat large title "Chats" ter-scroll lewat, Search + Edit.
+ * Row: avatar 44 · judul · preview/sumber · waktu relatif · "Running".
+ * Hidden session dikelompokkan di bawah header "Hidden".
  */
 @Composable
 fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var sessions by remember { mutableStateOf<List<SessionRow>>(emptyList()) }
+    // M8: id session yang hidden = ada di list include_hidden tapi tidak di list default
+    // (SessionListRow di kontrak tidak punya field hidden).
+    var hiddenIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var active by remember { mutableStateOf<Set<String>>(emptySet()) }
     var loading by remember { mutableStateOf(true) }
     var profileSheet by remember { mutableStateOf(false) }
     var actionTarget by remember { mutableStateOf<SessionRow?>(null) }
-    // M5→M7: toggle session tersembunyi — persist di DataStore (key
-    // show_hidden_sessions, default TRUE sesuai request user; sebelumnya
-    // remember{} reset tiap buka app). Toggle → save; startup → load.
+    // M5→M7: toggle session tersembunyi — persist di DataStore (default TRUE).
     var showHidden by remember { mutableStateOf(true) }
     var showHiddenLoaded by remember { mutableStateOf(false) }
-    // M5: hint pertama kali — "tap to switch profile" 3 detik (flag SharedPreferences)
-    var showProfileHint by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var creating by remember { mutableStateOf(false) }
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
     val profile by app.profile.collectAsState()
-    // M6: mode gateway aktif — desktop = multi-surface (sama dengan desktop app)
-    val gatewayMode by app.gatewayMode.collectAsState()
+    val ctx = LocalContext.current
 
     fun refresh() {
         val c = app.client ?: return
         if (c.state.value != ConnState.OPEN) return
         scope.launch {
-            try { sessions = SessionRepo(c, profile).listSessions(includeHidden = showHidden) } catch (_: Throwable) {}
+            try {
+                val repo = SessionRepo(c, profile)
+                val visible = repo.listSessions(includeHidden = false)
+                if (showHidden) {
+                    val all = repo.listSessions(includeHidden = true)
+                    val visibleIds = visible.map { it.id }.toSet()
+                    hiddenIds = all.map { it.id }.filterNot { it in visibleIds }.toSet()
+                    sessions = all
+                } else {
+                    hiddenIds = emptySet()
+                    sessions = visible
+                }
+            } catch (_: Throwable) {}
             try { active = SessionRepo(c, profile).activeStoredIds() } catch (_: Throwable) {}
             loading = false
         }
     }
 
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    // M7: load showHidden dari DataStore SEBELUM loop fetch — await di sini
-    // menahan refresh() pertama sampai nilai persisted siap, jadi list pertama
-    // tidak diambil pakai default true yang salah. (Review M7: load async
-    // terpisah membuat fetch pertama bisa pakai nilai salah + koreksi tertelan
-    // skip-first-cycle → hidden session salah tampil sampai poll 10s berikutnya.)
+    // M7: load showHidden dari DataStore SEBELUM loop fetch — fetch pertama
+    // menunggu nilai persisted siap (hindari list pertama pakai default salah).
     LaunchedEffect(Unit) {
-        showHidden = id.melvern.hermesmobile.core.store.SettingsStore.loadShowHidden(ctx)
+        showHidden = SettingsStore.loadShowHidden(ctx)
         showHiddenLoaded = true
     }
-    // M7: fetch loop baru jalan setelah nilai persisted siap (showHiddenLoaded).
     LaunchedEffect(showHiddenLoaded) {
         if (!showHiddenLoaded) return@LaunchedEffect
-        // M5: hint sekali seumur app-install (flag di SharedPreferences)
-        val prefs = ctx.getSharedPreferences("hermes_mobile", android.content.Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("hint_profile_done", false)) {
-            showProfileHint = true
-            delay(3000)
-            showProfileHint = false
-            prefs.edit().putBoolean("hint_profile_done", true).apply()
-        }
         while (true) {
             refresh()
             delay(10_000)
         }
     }
-    // M6: multi-surface live update — dengarkan event stream utk session yang BUKAN
-    // active-view juga. Event membawa RUNTIME id sedangkan list match by STORED id,
-    // jadi badge via refresh() (session.active_list balikin session_key), di-debounce
-    // 2s biar streaming deras tidak spam RPC.
+    // M6: multi-surface live update — event dari session lain → refresh (debounce 2s).
     LaunchedEffect(Unit) {
         val inbound = app.client?.inbound ?: return@LaunchedEffect
         var lastRefresh = 0L
@@ -132,133 +145,157 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             }
         }
     }
-    LaunchedEffect(Unit) {
-        // (hint + poll loop dipindah ke LaunchedEffect(showHiddenLoaded) — M7,
-        // lihat atas: fetch pertama menunggu nilai persisted siap.)
+    // Koneksi baru OPEN (startup / reconnect) → refresh langsung, jangan tunggu poll 10s.
+    LaunchedEffect(connState, showHiddenLoaded) {
+        if (connState == ConnState.OPEN && showHiddenLoaded) refresh()
     }
-    // M5: toggle hidden → refresh. M7: skip siklus pertama SEKARANG dua tahap —
-    // setelah load DataStore (showHiddenLoaded) — biar nilai persisted tidak
-    // memicu wipe list; toggle user setelah itu yang mentrigger refresh.
+    // M5/M7: toggle hidden → refresh; skip siklus pertama setelah load DataStore.
     var sawInitialHidden by remember { mutableStateOf(false) }
     LaunchedEffect(showHidden) {
         if (!showHiddenLoaded) return@LaunchedEffect
         if (!sawInitialHidden) { sawInitialHidden = true; return@LaunchedEffect }
         loading = true; sessions = emptyList(); refresh()
     }
-    // M4: ganti profile → refresh list langsung (list profile beda).
-    // Skip siklus pertama (Unit effect sudah refresh di atas — hindari double fetch).
+    // M4: ganti profile → refresh (skip siklus pertama).
     var sawInitialProfile by remember { mutableStateOf(false) }
     LaunchedEffect(profile) {
         if (!sawInitialProfile) { sawInitialProfile = true; return@LaunchedEffect }
         loading = true; sessions = emptyList(); refresh()
     }
 
-    Column(Modifier.fillMaxSize().background(F.Bg).statusBarsPadding()) {
-        // Header bill — M4: tap wordmark → sheet profile
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .pressClickable { profileSheet = true }
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                // M5c: avatar profile aktif — kiri wordmark (geser kanan 8dp)
-                ProfileAvatar(app, profile, 28.dp)
-                Spacer(Modifier.width(8.dp))
-                Text("H E R M E S", style = MaterialTheme.typography.labelLarge, color = F.Cream)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    billDate(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (connState == ConnState.OPEN) F.Lavender else F.Error,
-                )
-            }
-            // M4: nama profile aktif — labelSmall di bawah wordmark
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    profile.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = F.LavenderDim,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                // M5: toggle hidden — pelan & kecil, kanan label profile
-                // M6: mode gateway — "desktop" kalau multi-surface aktif
-                Text(
-                    buildString {
-                        if (gatewayMode is id.melvern.hermesmobile.core.repo.GatewayDiscovery.Mode.Desktop) append("· desktop-linked")
-                        if (showHidden) append(if (isEmpty()) "· hidden ON" else " · hidden ON")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (showHidden) F.Warn else F.Lavender,
-                    modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-                )
-            }
-            // M5: hint pertama kali — auto hilang 3 detik
-            if (showProfileHint) Text(
-                "tap to switch profile",
-                style = MaterialTheme.typography.labelSmall,
-                color = F.Vermillion,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        HorizontalDivider(color = F.Stroke, thickness = 1.dp)
-
-        if (loading && sessions.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
-            }
-        } else if (sessions.isEmpty()) {
-            // Empty state — TONIGHT
-            Column(
-                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("tonight", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(8.dp))
-                Text("no chats yet — start one below", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
-            }
-        } else {
-            LazyColumn(Modifier.weight(1f)) {
-                items(sessions, key = { it.id }) { s ->
-                    SessionRowView(
-                        s, running = s.id in active,
-                        onClick = {
-                            // M3.2: bawa displayTitle — ChatScreen gak boleh nampilin ID mentah
-                            onOpen("${s.id}|t=${Uri.encode(s.displayTitle)}")
-                        },
-                        onLongPress = { actionTarget = s },
-                    )
-                    HorizontalDivider(color = F.Stroke, thickness = 1.dp, modifier = Modifier.padding(horizontal = 20.dp))
-                }
-            }
-        }
-
-        // NEW GIG row — dashed border vermillion (tiket kosong di bawah rak poster)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 14.dp)
-                .height(52.dp)
-                .pressClickable {
-                    scope.launch {
-                        try {
-                            val c = app.client ?: return@launch
-                            val (runtimeId, storedId) = SessionRepo(c, profile).createSession()
-                            onOpen("$storedId|$runtimeId")
-                        } catch (_: Throwable) {}
-                    }
-                }
-                // dashed border TERAKHIR: ikut ke-scale saat press (drawBehind setelah graphicsLayer)
-                .dashedBorder(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Text("+  N E W   C H A T", style = MaterialTheme.typography.labelLarge, color = F.Cream)
+    fun newChat() {
+        if (creating) return
+        creating = true
+        scope.launch {
+            try {
+                val c = app.client ?: return@launch
+                val (runtimeId, storedId) = SessionRepo(c, profile).createSession()
+                onOpen("$storedId|$runtimeId")
+            } catch (_: Throwable) {
+            } finally { creating = false }
         }
     }
 
-    // M4: sheet profile switcher — M5: + toggle session tersembunyi
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    // Large title collapse: judul kecil di bar muncul saat item 0 (large title) lewat 60%.
+    val collapsed by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 ||
+                listState.firstVisibleItemScrollOffset > with(density) { 30.dp.toPx() }
+        }
+    }
+    val scrolled by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+    }
+    val smallTitleAlpha by animateFloatAsState(if (collapsed || searching) 1f else 0f, label = "smallTitle")
+
+    val filtered = remember(sessions, query) {
+        val q = query.trim()
+        if (q.isEmpty()) sessions else sessions.filter { it.displayTitle.contains(q, ignoreCase = true) }
+    }
+    val visibleRows = filtered.filterNot { it.id in hiddenIds }
+    val hiddenRows = filtered.filter { it.id in hiddenIds }
+
+    Column(Modifier.fillMaxSize().background(Ink.Bg).statusBarsPadding()) {
+        // ── Top bar ────────────────────────────────────────────────────
+        Box(Modifier.fillMaxWidth().height(Dim.TopBar)) {
+            if (searching) {
+                SearchBar(
+                    query = query,
+                    onQuery = { query = it },
+                    onClose = { searching = false; query = "" },
+                )
+            } else {
+                Row(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 8.dp)
+                        .clip(Radius.Full)
+                        .pressClickable { profileSheet = true }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AvatarWithStatus(app, profile, connState)
+                    Spacer(Modifier.width(8.dp))
+                    OneLine(profile, Type.MetaMedium)
+                }
+                Text(
+                    "Chats",
+                    style = Type.Title,
+                    modifier = Modifier.align(Alignment.Center).graphicsLayer { alpha = smallTitleAlpha },
+                )
+                Row(Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)) {
+                    QuietIconButton(Icons.Rounded.Search, "Search chats", onClick = { searching = true })
+                    QuietIconButton(Icons.Rounded.Edit, "New chat", onClick = { newChat() }, enabled = !creating)
+                }
+            }
+        }
+        if (scrolled || searching) Hairline() else Spacer(Modifier.height(hairline()))
+
+        // ── Isi ────────────────────────────────────────────────────────
+        val problem = when (connState) {
+            ConnState.OPEN -> null
+            ConnState.CLOSED -> "Offline — tap to retry"
+            else -> "Reconnecting…"
+        }
+        when {
+            loading && sessions.isEmpty() -> {
+                Column(Modifier.fillMaxSize()) {
+                    LargeTitle(problem, onRetry = { app.client?.start() })
+                    val a = shimmerAlpha()
+                    repeat(3) { SkeletonSessionRow(a) }
+                }
+            }
+            sessions.isEmpty() -> {
+                Column(Modifier.fillMaxSize()) {
+                    LargeTitle(problem, onRetry = { app.client?.start() })
+                    EmptyChats(Modifier.weight(1f))
+                }
+            }
+            else -> LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = WindowInsets.navigationBars.asPaddingValues(),
+            ) {
+                if (!searching) item(key = "title") { LargeTitle(problem, onRetry = { app.client?.start() }) }
+                items(visibleRows, key = { it.id }) { s ->
+                    SessionRowView(
+                        app, s,
+                        running = s.id in active || s.running == true,
+                        onClick = { onOpen("${s.id}|t=${Uri.encode(s.displayTitle)}") },
+                        onLongPress = { actionTarget = s },
+                    )
+                }
+                if (hiddenRows.isNotEmpty()) {
+                    item(key = "hidden-header") {
+                        Text(
+                            "Hidden",
+                            style = Type.MetaMedium,
+                            modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 20.dp, bottom = 6.dp),
+                        )
+                    }
+                    items(hiddenRows, key = { "h-" + it.id }) { s ->
+                        SessionRowView(
+                            app, s,
+                            running = s.id in active || s.running == true,
+                            onClick = { onOpen("${s.id}|t=${Uri.encode(s.displayTitle)}") },
+                            onLongPress = { actionTarget = s },
+                        )
+                    }
+                }
+                if (searching && filtered.isEmpty()) item(key = "no-results") {
+                    Text(
+                        "No chats match \"${query.trim()}\"",
+                        style = Type.Callout.copy(color = Ink.Text2),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 48.dp, start = Dim.ScreenH, end = Dim.ScreenH),
+                    )
+                }
+            }
+        }
+    }
+
     if (profileSheet) {
         ProfileSheet(
             app,
@@ -266,16 +303,16 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             onToggleHidden = {
                 showHidden = it
                 // M7: persist pilihan — bertahan setelah app ditutup.
-                scope.launch { id.melvern.hermesmobile.core.store.SettingsStore.saveShowHidden(ctx, it) }
+                scope.launch { SettingsStore.saveShowHidden(ctx, it) }
             },
             onDismiss = { profileSheet = false },
         )
     }
-    // M4: context menu session
     actionTarget?.let { target ->
         SessionActionSheet(
             app = app,
             row = target,
+            hidden = target.id in hiddenIds,
             onDone = { actionTarget = null; refresh() },
             onDismiss = { actionTarget = null },
             onOpenBranch = { runtimeId, storedId ->
@@ -286,76 +323,169 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     }
 }
 
-/**
- * Dashed border tiket NEW GIG: vermillion 1.5dp, dash 8dp gap 6dp.
- * drawBehind + PathEffect — rounded rect stroke dashed di tepi luar row.
- */
-private fun Modifier.dashedBorder(): Modifier = drawBehind {
-    val stroke = 1.5.dp.toPx()
-    val dash = 8.dp.toPx()
-    val gap = 6.dp.toPx()
-    val r = 8.dp.toPx() // radius kecil, sejajar Shape.Xs
-    val path = Path().apply {
-        addRoundRect(
-            androidx.compose.ui.geometry.RoundRect(
-                left = stroke / 2,
-                top = stroke / 2,
-                right = size.width - stroke / 2,
-                bottom = size.height - stroke / 2,
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
-            )
-        )
-    }
-    drawPath(
-        path,
-        color = F.Vermillion,
-        style = Stroke(
-            width = stroke,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(dash, gap)),
-        ),
-    )
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** Large title "Chats" (display 28) + subtitle kecil HANYA kalau ada masalah koneksi. */
 @Composable
-private fun SessionRowView(s: SessionRow, running: Boolean, onClick: () -> Unit, onLongPress: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                s.displayTitle,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(6.dp))
-            // M3.2: meta lengkap — source (Desktop/CLI/Bot) · msg · waktu
-            Text(
-                "${s.sourceLabel} · ${s.messageCount} MSG · ${Fmt.timeAgo(s.updatedAt ?: s.startedAt)}".uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = F.Lavender,
-            )
-            if (running) {
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    "● RUNNING",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = F.Warn,
-                )
+private fun LargeTitle(problem: String?, onRetry: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 4.dp, bottom = 8.dp)) {
+        Text("Chats", style = Type.Display)
+        if (problem != null) {
+            Row(
+                Modifier
+                    .padding(top = 2.dp)
+                    .then(if (problem.startsWith("Offline")) Modifier.pressClickable(onClick = onRetry) else Modifier)
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusDot(if (problem.startsWith("Offline")) Ink.Danger else Ink.Warn)
+                Spacer(Modifier.width(8.dp))
+                Text(problem, style = Type.Meta)
             }
         }
     }
 }
 
+/** Avatar profil 32dp + dot status koneksi 8dp di pojok kanan bawah (ring bg 2dp). */
+@Composable
+private fun AvatarWithStatus(app: HermesApp, profile: String, state: ConnState) {
+    val dot = when (state) {
+        ConnState.OPEN -> Ink.Live
+        ConnState.CLOSED -> Ink.Danger
+        else -> Ink.Warn
+    }
+    Box {
+        ProfileAvatar(app, profile, Dim.AvatarBar)
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 2.dp, y = 2.dp)
+                .size(Dim.Dot + 4.dp)
+                .clip(Radius.Full)
+                .background(Ink.Bg),
+            contentAlignment = Alignment.Center,
+        ) { StatusDot(dot) }
+    }
+}
+
+@Composable
+private fun SearchBar(query: String, onQuery: (String) -> Unit, onClose: () -> Unit) {
+    val fr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { fr.requestFocus() }
+    Row(
+        Modifier.fillMaxSize().padding(start = Dim.ScreenH, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier
+                .weight(1f)
+                .height(40.dp)
+                .clip(Radius.Chip)
+                .background(Ink.Surface1)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Search, null, tint = Ink.Text3, modifier = Modifier.size(Dim.Icon))
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                textStyle = Type.Callout,
+                cursorBrush = SolidColor(Ink.Text),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                modifier = Modifier.weight(1f).focusRequester(fr),
+                decorationBox = { inner ->
+                    Box {
+                        if (query.isEmpty()) Text("Search", style = Type.Callout.copy(color = Ink.Text3))
+                        inner()
+                    }
+                },
+            )
+        }
+        QuietIconButton(Icons.Rounded.Close, "Close search", onClick = onClose)
+    }
+}
+
+@Composable
+private fun EmptyChats(modifier: Modifier) {
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Rounded.ChatBubbleOutline, null, tint = Ink.Text3, modifier = Modifier.size(Dim.EmptyIcon))
+        Spacer(Modifier.height(16.dp))
+        Text("No chats yet", style = Type.Title)
+        Spacer(Modifier.height(4.dp))
+        Text("Start one from the pencil icon", style = Type.Callout.copy(color = Ink.Text2), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(64.dp)) // optik: sedikit di atas tengah
+    }
+}
+
+/** Baris ke-2: preview pesan terakhir; kalau kosong/sama dengan judul → "Desktop · 509 messages". */
+internal fun secondLine(s: SessionRow): String {
+    val preview = s.preview?.replace('\n', ' ')?.trim().orEmpty()
+    val title = s.displayTitle.removeSuffix("…").trim()
+    val usable = preview.isNotEmpty() && !preview.startsWith(title)
+    if (usable) return preview
+    val n = s.messageCount
+    return "${s.sourceLabel} · $n ${if (n == 1) "message" else "messages"}"
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SessionRowView(
+    app: HermesApp,
+    s: SessionRow,
+    running: Boolean,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+                .heightIn(min = Dim.RowMin)
+                .padding(horizontal = Dim.ScreenH, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // avatar 44 — ring 2dp live kalau running
+            Box(
+                Modifier
+                    .size(Dim.AvatarRow)
+                    .then(if (running) Modifier.border(Dim.RunningRing, Ink.Live, Radius.Full) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                ProfileAvatar(
+                    app, s.profile?.takeIf { it.isNotBlank() } ?: app.profile.value,
+                    if (running) Dim.AvatarRow - 8.dp else Dim.AvatarRow,
+                )
+            }
+            Spacer(Modifier.width(Dim.RowGap))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OneLine(s.displayTitle, Type.Title, Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    Text(RelTime.listStamp(s.updatedAt ?: s.startedAt), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1)
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OneLine(secondLine(s), Type.Callout.copy(color = Ink.Text2), Modifier.weight(1f))
+                    if (running) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("Running", style = Type.Meta.copy(color = Ink.Live), maxLines = 1)
+                    }
+                }
+            }
+        }
+        Hairline(Modifier.align(Alignment.BottomStart).padding(start = Dim.RowDividerInset))
+    }
+}
+
 /**
- * M4: sheet profile — profiles.list; pilih → app.setProfile (semua RPC
- * selanjutnya bawa params.profile) + list direfresh.
+ * M4→M8: sheet "Profiles" — row 64dp avatar 40 lingkaran, nama, model; aktif
+ * = Check. Toggle "Show hidden chats" (Switch) di bawah dengan divider.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (Boolean) -> Unit, onDismiss: () -> Unit) {
     var rows by remember { mutableStateOf<List<MetaRepo.ProfileRow>?>(null) }
@@ -365,258 +495,64 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
         val c = app.client ?: return@LaunchedEffect
         try { rows = MetaRepo(c).profiles() } catch (e: Throwable) { error = e.message }
     }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = F.Surface3,
-        shape = Shape.Ticket,
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
-            Text("PROFILE", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim)
-            Spacer(Modifier.height(10.dp))
-            // M5: toggle session tersembunyi (default off) — Bot Chat muncul kalau ON
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(Shape.S)
-                    .background(F.Surface2, Shape.S)
-                    .clickable { onToggleHidden(!showHidden) }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .size(14.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (showHidden) F.Vermillion else F.Surface1)
-                        .border(1.dp, if (showHidden) F.Vermillion else F.LavenderDim, androidx.compose.foundation.shape.CircleShape)
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "Show hidden sessions" + if (showHidden) " · ON" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (showHidden) F.Cream else F.Lavender,
-                )
+    QuietSheet(onDismiss = onDismiss, title = "Profiles") {
+        when {
+            rows == null && error == null -> {
+                val a = shimmerAlpha()
+                repeat(3) { SkeletonSessionRow(a) }
             }
-            Spacer(Modifier.height(12.dp))
-            when {
-                rows == null && error == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-                }
-                error != null -> Text("Failed to load: $error", style = MaterialTheme.typography.bodySmall, color = F.Error)
-                else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
-                    items(rows!!, key = { it.name }) { p ->
-                        val selected = p.name == current
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(Shape.S)
-                                .background(if (selected) F.Surface2 else androidx.compose.ui.graphics.Color.Transparent)
-                                .clickable {
-                                    app.setProfile(p.name)
-                                    onDismiss()
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // M5c: leading avatar 40dp tiap row profile
-                            ProfileAvatar(app, p.name, 40.dp)
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    (p.displayName.ifBlank { p.name }),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = if (selected) F.Cream else F.CreamDim,
-                                )
-                                val meta = listOfNotNull(
-                                    p.name.takeIf { it != "default" },
-                                    p.model?.takeIf { it.isNotBlank() },
-                                    if (p.isDefault) "primary" else null,
-                                ).joinToString(" · ")
-                                if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.labelSmall, color = F.Lavender)
-                                if (p.description.isNotBlank()) Text(
-                                    p.description, style = MaterialTheme.typography.labelSmall, color = F.LavenderDim,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (selected) Text("●", color = F.Vermillion)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * M4: context menu session — rename (session.title), branch (session.branch),
- * hide (session.set_hidden), delete (session.delete + konfirmasi merah).
- */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun SessionActionSheet(
-    app: HermesApp,
-    row: SessionRow,
-    onDone: () -> Unit,
-    onDismiss: () -> Unit,
-    onOpenBranch: (String, String) -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var renaming by remember { mutableStateOf(false) }
-    var newName by remember { mutableStateOf(row.displayTitle) }
-    var confirmingDelete by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
-    var notice by remember { mutableStateOf<String?>(null) }
-    val profile = app.profile.value
-
-    fun run(action: suspend () -> Unit) {
-        busy = true; notice = null
-        scope.launch {
-            try { action(); onDone() }
-            catch (e: Throwable) { notice = e.message; busy = false }
-        }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = F.Surface3,
-        shape = Shape.Ticket,
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
-            Text(row.displayTitle, style = MaterialTheme.typography.titleMedium, color = F.Cream, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            notice?.let {
-                Spacer(Modifier.height(6.dp))
-                Text(it, style = MaterialTheme.typography.labelSmall, color = F.Error)
-            }
-            Spacer(Modifier.height(12.dp))
-
-            if (renaming) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    BasicTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        textStyle = TextStyle(color = F.Cream, fontSize = 15.sp),
-                        cursorBrush = SolidColor(F.Vermillion),
-                        singleLine = true,
-                        keyboardActions = KeyboardActions(onDone = { if (newName.isNotBlank() && !busy) run { rename(app, row, newName.trim(), profile) } }),
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(F.BgDeep, Shape.S)
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                    )
-                    Button(
-                        onClick = { if (newName.isNotBlank() && !busy) run { rename(app, row, newName.trim(), profile) } },
-                        enabled = newName.isNotBlank() && !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = F.Vermillion, contentColor = F.BgDeep, disabledContainerColor = F.Surface2, disabledContentColor = F.LavenderDim),
-                        shape = Shape.S,
-                    ) { Text("Save") }
-                }
-            } else {
-                SheetAction("Rename", enabled = !busy) { renaming = true }
-                SheetAction("New branch", enabled = !busy) {
-                    run {
-                        // branch butuh session live — attach lazy dulu (session.resume lazy)
-                        val c = app.client!!
-                        val live = try {
-                            SessionRepo(c, profile).resumeAttachLazy(row.id)
-                        } catch (_: Throwable) { null }
-                        val target = live ?: row.id
-                        val out = MetaRepo(c).branchSession(target, profile)
-                        onOpenBranch(out.runtimeId, out.storedId)
-                    }
-                }
-                SheetAction("Hide", enabled = !busy) { run { MetaRepo(app.client!!).hideSession(row.id, profile) } }
-                SheetAction("Delete", danger = true, enabled = !busy) { confirmingDelete = true }
-                if (confirmingDelete) {
-                    Spacer(Modifier.height(12.dp))
-                    Column(
+            error != null -> Text(
+                "Couldn't load profiles: $error",
+                style = Type.Callout.copy(color = Ink.Danger),
+                modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
+            )
+            else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                items(rows!!, key = { it.name }) { p ->
+                    val selected = p.name == current
+                    Row(
                         Modifier
                             .fillMaxWidth()
-                            .background(F.Error.copy(alpha = 0.08f), Shape.M)
-                            .border(1.dp, F.Error.copy(alpha = 0.5f), Shape.M)
-                            .padding(14.dp),
+                            .heightIn(min = Dim.SheetRow)
+                            .pressClickable {
+                                app.setProfile(p.name)
+                                onDismiss()
+                            }
+                            .padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            "Delete \"${row.displayTitle}\" and its transcript? This cannot be undone.",
-                            style = MaterialTheme.typography.bodySmall, color = F.Cream,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = { confirmingDelete = false },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = F.Surface2, contentColor = F.Cream),
-                                shape = Shape.S,
-                            ) { Text("Cancel") }
-                            Button(
-                                onClick = {
-                                    run {
-                                        val c = app.client!!
-                                        try { MetaRepo(c).deleteSession(row.id, profile) }
-                                        catch (e: id.melvern.hermesmobile.core.rpc.RpcException) {
-                                            if (e.code == 4023) {
-                                                // session live di backend — close pakai RUNTIME id
-                                                // (session.close cuma resolve runtime id, bukan stored)
-                                                val runtime = SessionRepo(c, profile).resumeAttachLazy(row.id)
-                                                c.call("session.close", kotlinx.serialization.json.buildJsonObject {
-                                                    put("session_id", runtime ?: row.id)
-                                                    if (profile.isNotBlank() && profile != "default") put("profile", profile)
-                                                })
-                                                MetaRepo(c).deleteSession(row.id, profile)
-                                            } else throw e
-                                        }
-                                    }
-                                },
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = F.Error, contentColor = F.BgDeep),
-                                shape = Shape.S,
-                            ) { Text("Delete") }
+                        ProfileAvatar(app, p.name, Dim.AvatarSheet)
+                        Spacer(Modifier.width(Dim.RowGap))
+                        Column(Modifier.weight(1f)) {
+                            OneLine(p.displayName.ifBlank { p.name }, Type.Title)
+                            p.model?.takeIf { it.isNotBlank() }?.let { OneLine(it, Type.Meta) }
                         }
+                        if (selected) Icon(Icons.Rounded.Check, "Active profile", tint = Ink.Text, modifier = Modifier.size(Dim.Icon))
                     }
                 }
             }
         }
+        Hairline(Modifier.padding(top = 8.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = Dim.SheetRow)
+                .pressClickable { onToggleHidden(!showHidden) }
+                .padding(horizontal = Dim.ScreenH),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Show hidden chats", style = Type.Callout, modifier = Modifier.weight(1f))
+            Switch(
+                checked = showHidden,
+                onCheckedChange = { onToggleHidden(it) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Ink.Text,
+                    checkedTrackColor = Ink.Text.copy(alpha = 0.3f),
+                    checkedBorderColor = Ink.Transparent,
+                    uncheckedThumbColor = Ink.Text2,
+                    uncheckedTrackColor = Ink.Surface2,
+                    uncheckedBorderColor = Ink.HairlineStrong,
+                ),
+            )
+        }
     }
 }
-
-/** Item aksi di sheet context menu — bill type, teks besar, tanpa ikon. */
-@Composable
-private fun SheetAction(label: String, danger: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    Text(
-        label,
-        style = MaterialTheme.typography.titleMedium,
-        color = when {
-            !enabled -> F.LavenderDim
-            danger -> F.Error
-            else -> F.Cream
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(Shape.S)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 14.dp),
-    )
-}
-
-/**
- * Rename: session.title SET butuh runtime live — attach lazy via session.resume
- * (gak build agent, gak transfer history) lalu set title di runtime itu.
- */
-private suspend fun rename(app: HermesApp, row: SessionRow, newTitle: String, profile: String) {
-    val c = app.client!!
-    val live = try { SessionRepo(c, profile).resumeAttachLazy(row.id) } catch (_: Throwable) { null }
-    MetaRepo(c).renameSession(live ?: row.id, newTitle, profile)
-}
-
-private fun billDate(): String {
-    val today = LocalDate.now()
-    val dayName = DayNames[today.dayOfWeek.value - 1]
-    val monthName = MonthNames[today.monthValue - 1]
-    return "$dayName · ${today.dayOfMonth} $monthName"
-}
-
-// Locale("id") constructor deprecated (warning build) — hardcode nama pendek Indonesia.
-private val DayNames = listOf("SEN", "SEL", "RAB", "KAM", "JUM", "SAB", "MIN")
-private val MonthNames = listOf(
-    "JAN", "FEB", "MAR", "APR", "MEI", "JUN", "JUL", "AGU", "SEP", "OKT", "NOV", "DES",
-)

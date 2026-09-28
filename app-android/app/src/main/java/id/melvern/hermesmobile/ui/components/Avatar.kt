@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,10 +22,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
-import id.melvern.hermesmobile.ui.theme.F
+import id.melvern.hermesmobile.ui.theme.Ink
+import id.melvern.hermesmobile.ui.theme.Type
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -60,10 +61,10 @@ object AvatarCache {
  * M5c: avatar profil — lingkaran foto per-profile (profiles.get_asset).
  * Load async (RPC off main thread, decode di Dispatchers.Default dengan
  * downsampling), hasil di-cache process-wide. Placeholder kalau found=false /
- * gagal permanen: lingkaran Surface2 + huruf awal nama profil (Cream).
+ * gagal permanen: lingkaran Surface2 + huruf awal nama profil.
  */
 @Composable
-fun ProfileAvatar(app: HermesApp, profile: String, size: Dp) {
+fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier = Modifier) {
     var bmp by remember(profile) { mutableStateOf(AvatarCache.get(profile)) }
     var failed by remember(profile) { mutableStateOf(false) }
 
@@ -110,7 +111,10 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp) {
                     )
                 }
                 if (decoded == null) { failed = true; return@withLock }
-                val img = decoded.asImageBitmap()
+                // M8: semua avatar = lingkaran penuh. Avatar dengan margin transparan
+                // (mis. squircle app-icon) di-trim ke bbox piksel opak dulu, supaya
+                // clip lingkaran terisi penuh — bukan squircle kecil di dalam lingkaran.
+                val img = withContext(Dispatchers.Default) { trimTransparent(decoded) }.asImageBitmap()
                 AvatarCache.put(profile, img)
                 bmp = img
             }
@@ -122,7 +126,7 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp) {
     }
 
     Box(
-        Modifier.size(size).clip(CircleShape).background(F.Surface2),
+        modifier.size(size).clip(CircleShape).background(Ink.Surface2),
         contentAlignment = Alignment.Center,
     ) {
         val current = bmp
@@ -139,9 +143,34 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp) {
             // kalau bytes null karena bug parse di MetaRepo.)
             Text(
                 profile.trim().take(1).uppercase(),
-                style = MaterialTheme.typography.labelLarge,
-                color = if (failed) F.Cream else F.LavenderDim,
+                // inisial skala ikut ukuran avatar (40% diameter), Inter SemiBold
+                style = Type.Title.copy(fontSize = (size.value * 0.4f).sp, lineHeight = (size.value * 0.4f).sp),
+                color = if (failed) Ink.Text2 else Ink.Text3,
             )
         }
     }
+}
+
+/** Crop bitmap ke bounding box piksel dengan alpha > 24; utuh kalau tidak ada margin. */
+internal fun trimTransparent(src: android.graphics.Bitmap): android.graphics.Bitmap {
+    if (!src.hasAlpha()) return src
+    val w = src.width; val h = src.height
+    val px = IntArray(w * h)
+    src.getPixels(px, 0, w, 0, 0, w, h)
+    var minX = w; var minY = h; var maxX = -1; var maxY = -1
+    for (y in 0 until h) for (x in 0 until w) {
+        if ((px[y * w + x] ushr 24) > 24) {
+            if (x < minX) minX = x; if (x > maxX) maxX = x
+            if (y < minY) minY = y; if (y > maxY) maxY = y
+        }
+    }
+    if (maxX < 0) return src
+    val bw = maxX - minX + 1; val bh = maxY - minY + 1
+    if (bw >= w - 2 && bh >= h - 2) return src
+    // kotak: sisi = max(bw,bh), dipusatkan — jaga rasio avatar
+    val side = maxOf(bw, bh)
+    val cx = minX + bw / 2; val cy = minY + bh / 2
+    val left = (cx - side / 2).coerceIn(0, (w - side).coerceAtLeast(0))
+    val top = (cy - side / 2).coerceIn(0, (h - side).coerceAtLeast(0))
+    return android.graphics.Bitmap.createBitmap(src, left, top, minOf(side, w - left), minOf(side, h - top))
 }

@@ -1,86 +1,97 @@
 package id.melvern.hermesmobile.ui.chat
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import android.provider.OpenableColumns
+import android.util.Base64
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.model.Attachment
 import id.melvern.hermesmobile.core.model.ChatItem
+import id.melvern.hermesmobile.core.model.SessionRow
 import id.melvern.hermesmobile.core.model.TranscriptMessage
-import id.melvern.hermesmobile.core.repo.Fmt
 import id.melvern.hermesmobile.core.repo.MediaRepo
 import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
 import id.melvern.hermesmobile.core.rpc.RpcException
-import id.melvern.hermesmobile.ui.components.MarkdownText
+import id.melvern.hermesmobile.ui.components.Hairline
+import id.melvern.hermesmobile.ui.components.OneLine
 import id.melvern.hermesmobile.ui.components.ProfileAvatar
-import id.melvern.hermesmobile.ui.theme.F
-import id.melvern.hermesmobile.ui.theme.JetBrainsMono
-import id.melvern.hermesmobile.ui.theme.Shape
+import id.melvern.hermesmobile.ui.components.PulsingDot
+import id.melvern.hermesmobile.ui.components.QuietIconButton
+import id.melvern.hermesmobile.ui.components.QuietSheet
+import id.melvern.hermesmobile.ui.components.RelTime
+import id.melvern.hermesmobile.ui.components.SheetActionRow
+import id.melvern.hermesmobile.ui.components.SkeletonBar
+import id.melvern.hermesmobile.ui.components.StatusDot
+import id.melvern.hermesmobile.ui.components.shimmerAlpha
+import id.melvern.hermesmobile.ui.sessions.SessionActionSheet
+import id.melvern.hermesmobile.ui.theme.Dim
+import id.melvern.hermesmobile.ui.theme.Ink
+import id.melvern.hermesmobile.ui.theme.Motion
+import id.melvern.hermesmobile.ui.theme.Radius
+import id.melvern.hermesmobile.ui.theme.Type
+import id.melvern.hermesmobile.ui.theme.hairline
 import id.melvern.hermesmobile.ui.theme.pressClickable
-import android.provider.OpenableColumns
-import android.util.Base64
+import id.melvern.hermesmobile.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 /**
- * Chat screen — "backstage": prose serif cream full-width, user pill kanan,
- * tool row kecil, composer = tiket strip (notch + outline vermillion).
- *
- * M3.2: title awal dari list (nav arg, encoded) — ID mentah gak pernah
- * tampil; timestamp per pesan; long-press salin; chip scroll-to-bottom.
+ * M8 Chat — Quiet Mono. Top bar: back · avatar 32 · judul + baris model
+ * (tap = model sheet) / "Working…" saat turn jalan · MoreVert (aksi session).
+ * User = bubble kanan surface2; assistant = tanpa bubble full width markdown;
+ * tool berurutan = grup collapsed; thinking = "Thinking…" → "Thought for Ns".
+ * Logika M3–M7 (resume, event stream, approval/clarify, queue, watchdog,
+ * read-only derived) dipertahankan apa adanya — pass ini visual.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: String?, initialTitle: String?) {
+fun ChatScreen(
+    app: HermesApp,
+    actualStoredId: String,
+    preattachedRuntime: String?,
+    initialTitle: String?,
+    onBack: () -> Unit = {},
+    onOpenChat: (String) -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     var runtimeId by remember { mutableStateOf(preattachedRuntime ?: actualStoredId) }
     // M5 fix: stored id aktif — bisa ganti pas "GIG baru dengan model ini"
@@ -94,6 +105,18 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     // M3.3: thinking indicator — event thinking.delta / reasoning.delta
     var thinking by remember { mutableStateOf(false) }
     var thinkingText by remember { mutableStateOf("") }
+    // M8: durasi + isi thinking live → "Thought for 12s" di jawaban yang menyusul.
+    var thinkStartMs by remember { mutableStateOf(0L) }
+    var thoughtBuf by remember { mutableStateOf("") }
+    var pendingThought by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    fun endThinking() {
+        if (thinkStartMs > 0L) {
+            val secs = ((System.currentTimeMillis() - thinkStartMs) / 1000L).toInt().coerceAtLeast(1)
+            pendingThought = thoughtBuf to secs
+            thinkStartMs = 0L
+        }
+        thinking = false; thinkingText = ""
+    }
     // M4: model aktif — baris meta kecil di header (dari model.options).
     var activeModel by remember { mutableStateOf("") }
     // M4: approval + clarify card — server→client request.
@@ -122,7 +145,10 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 last.offset + last.size >= info.viewportEndOffset - bottomThresholdPx
         }
     }
-    var hasNew by remember { mutableStateOf(false) }   // badge "baru" di chip
+    var hasNew by remember { mutableStateOf(false) }   // ada pesan baru saat user di atas
+    // M8: badge jumlah pesan baru — baseline dicatat saat user meninggalkan bottom
+    val messageCount = items.count { it is ChatItem.User || (it is ChatItem.Assistant && it.done) }
+    var baselineCount by remember { mutableStateOf(0) }
     var forceScroll by remember { mutableStateOf(false) } // user kirim pesan → selalu scroll
     var didInitialScroll by remember { mutableStateOf(false) }
     // M3.2: long-press salin teks
@@ -152,6 +178,8 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
     var attachment by remember { mutableStateOf<Attachment?>(null) }
     var attaching by remember { mutableStateOf(false) }
     var attachError by remember { mutableStateOf<String?>(null) }
+    var attachThumb by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var attachSheet by remember { mutableStateOf(false) }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -168,7 +196,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                     delay(500)
                 }
                 if (c.state.value != ConnState.OPEN) {
-                    throw IllegalStateException("not reconnected yet after returning from the picker (try again)")
+                    throw IllegalStateException("still reconnecting — try again")
                 }
                 val (name, mime) = withContext(Dispatchers.IO) { readUriMeta(context, uri) }
                 val bytes = withContext(Dispatchers.IO) {
@@ -211,8 +239,17 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                     Attachment(refText = out.refText, name = out.name, isImage = false)
                 }
                 attachment = att
+                // M8: thumbnail 40dp di chip — decode downsampled (~120px)
+                attachThumb = if (isImage) withContext(Dispatchers.Default) {
+                    val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+                    var sample = 1
+                    while (o.outWidth / (sample * 2) >= 120 && o.outHeight / (sample * 2) >= 120) sample *= 2
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                        ?.asImageBitmap()
+                } else null
             } catch (e: Throwable) {
-                attachError = "Failed to attach: ${e.message}"
+                attachError = "Couldn't attach: ${e.message}"
             } finally { attaching = false }
         }
     }
@@ -223,20 +260,24 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
         when {
-            m.isUser -> listOf(ChatItem.User(m.text ?: "", m.rowId, time = Fmt.clock(m.timestamp)))
+            m.isUser -> listOf(ChatItem.User(m.text ?: "", m.rowId, time = RelTime.clock(m.timestamp), at = m.timestamp))
             m.role == "tool" -> listOf(
-                ChatItem.Tool(m.name ?: "tool", "done", (m.args ?: m.context ?: "").take(140))
+                ChatItem.Tool(m.name ?: "tool", "done", (m.args ?: m.context ?: "").take(2000))
             )
             else -> {
                 val text = m.text ?: ""
                 val reasoning = m.reasoning?.takeIf { it.isNotBlank() }
                 if (text.isBlank() && reasoning == null) emptyList()
-                else listOf(ChatItem.Assistant(text.ifBlank { "…" }, done = true, reasoning = reasoning?.take(400), time = Fmt.clock(m.timestamp)))
+                else listOf(ChatItem.Assistant(text.ifBlank { "…" }, done = true, reasoning = reasoning?.take(4000), time = RelTime.clock(m.timestamp), at = m.timestamp))
             }
         }
     }
 
-    LaunchedEffect(actualStoredId, preattachedRuntime) {
+    // M8: gagal load transcript (mis. socket flap di tengah resume) → notice + Retry.
+    var reloadKey by remember { mutableStateOf(0) }
+    var loadFailed by remember { mutableStateOf(false) }
+    LaunchedEffect(actualStoredId, preattachedRuntime, reloadKey) {
+        loadFailed = false
         if (preattachedRuntime != null) {
             // NEW GIG: session baru kosong — gak ada transcript buat di-resume
             loading = false
@@ -246,7 +287,8 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
         var waited = 0
         while (c.state.value != ConnState.OPEN && waited < 25000) { delay(250); waited += 250 }
         if (c.state.value != ConnState.OPEN) {
-            items = listOf(ChatItem.NoticeLine("Not connected to backend."))
+            items = listOf(ChatItem.NoticeLine("Not connected."))
+            loadFailed = true
             loading = false; return@LaunchedEffect
         }
         try {
@@ -278,7 +320,8 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                 }
             }
         } catch (e: Throwable) {
-            items = listOf(ChatItem.NoticeLine("Failed to load transcript: ${e.message}"))
+            items = listOf(ChatItem.NoticeLine("Couldn't load this chat (${e.message})."))
+            loadFailed = true
         } finally { loading = false }
     }
 
@@ -333,51 +376,80 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                     "thinking.delta", "reasoning.delta" -> {
                         // M3.3: stream reasoning — tampil SELAMA assistant belum mulai jawab
                         val chunk = ev.payload?.get("text")?.jsonStr() ?: ev.payload?.get("delta")?.jsonStr() ?: ""
-                        if (chunk.isNotEmpty()) thinkingText = (thinkingText + chunk).takeLast(500)
+                        if (chunk.isNotEmpty()) {
+                            thinkingText = (thinkingText + chunk).takeLast(500)
+                            thoughtBuf = (thoughtBuf + chunk).takeLast(4000)
+                        }
+                        if (thinkStartMs == 0L) thinkStartMs = System.currentTimeMillis()
                         thinking = true
                     }
                     "message.delta" -> {
-                        thinking = false; thinkingText = ""
+                        endThinking()
                         val delta = ev.payload?.get("delta")?.jsonStr() ?: ev.payload?.get("text")?.jsonStr() ?: ""
                         if (delta.isNotEmpty()) {
                             val last = items.lastOrNull()
                             items = if (last is ChatItem.Assistant && !last.done) {
                                 items.dropLast(1) + last.copy(text = last.text + delta)
-                            } else items + ChatItem.Assistant(delta, done = false, time = Fmt.clock(nowEpoch()))
+                            } else items + ChatItem.Assistant(
+                                delta, done = false, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
+                                reasoning = pendingThought?.first?.takeIf { it.isNotBlank() }, thoughtSecs = pendingThought?.second,
+                            )
                             if (!atBottom) hasNew = true
                         }
                     }
                     "message.complete" -> {
-                        thinking = false
+                        endThinking()
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
                         items = items.filterNot { it is ChatItem.Assistant && !it.done }
-                        if (text.isNotEmpty()) items = items + ChatItem.Assistant(text, done = true, time = Fmt.clock(nowEpoch()))
+                        if (text.isNotEmpty()) items = items + ChatItem.Assistant(
+                            text, done = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
+                            reasoning = pendingThought?.first?.takeIf { it.isNotBlank() }, thoughtSecs = pendingThought?.second,
+                        )
+                        pendingThought = null; thoughtBuf = ""
                         running = false
                         if (!atBottom) hasNew = true
                     }
-                    "message.start" -> { running = true; thinking = false; thinkingText = ""; turnStartCount++ }
+                    "message.start" -> {
+                        running = true; thinking = false; thinkingText = ""; turnStartCount++
+                        thinkStartMs = 0L; thoughtBuf = ""; pendingThought = null
+                    }
                     "message.interim" -> {
-                        thinking = false
+                        endThinking()
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
                         if (text.isNotEmpty()) {
                             items = items.filterNot { it is ChatItem.Assistant && !it.done }
-                            items = items + ChatItem.Assistant(text, done = false, time = Fmt.clock(nowEpoch()))
+                            items = items + ChatItem.Assistant(text, done = false, time = RelTime.clock(nowEpoch()), at = nowEpoch())
                         }
                     }
                     "tool.start" -> {
-                        running = true; thinking = false; thinkingText = ""
-                        val name = ev.payload?.get("tool")?.jsonStr() ?: ev.payload?.get("name")?.jsonStr() ?: "tool"
-                        items = items + ChatItem.Tool(name, "run")
+                        running = true; endThinking()
+                        val p = ev.payload
+                        val name = p?.get("tool")?.jsonStr()?.ifEmpty { null } ?: p?.get("name")?.jsonStr()?.ifEmpty { null } ?: "tool"
+                        // M8: args (ToolStartPayload.args_text/preview/context) → isi code block saat row di-expand
+                        val args = listOf("args_text", "preview", "context").firstNotNullOfOrNull { k -> p?.get(k)?.jsonStr()?.takeIf { it.isNotBlank() } }
+                        items = items + ChatItem.Tool(name, "run", detail = args?.take(2000), toolId = p?.get("tool_id")?.jsonStr()?.ifEmpty { null })
                     }
                     "tool.complete" -> {
-                        val name = ev.payload?.get("tool")?.jsonStr() ?: ev.payload?.get("name")?.jsonStr() ?: ""
-                        items = items.map {
-                            if (it is ChatItem.Tool && it.status == "run" && (name.isEmpty() || it.name == name)) it.copy(status = "done")
-                            else it
+                        val p = ev.payload
+                        val name = p?.get("tool")?.jsonStr() ?: p?.get("name")?.jsonStr() ?: ""
+                        val tid = p?.get("tool_id")?.jsonStr()?.ifEmpty { null }
+                        // non-verbose: output ada di `result` (string / objek {output|content|...}); verbose: result_text
+                        val out = p?.get("result_text")?.jsonStr()?.takeIf { it.isNotBlank() }
+                            ?: toolResultText(p?.get("result"))
+                            ?: p?.get("summary")?.jsonStr()?.takeIf { it.isNotBlank() }
+                        // match by tool_id kalau ada; fallback nama (perilaku lama). Hanya SATU row yang di-complete.
+                        val idx = items.indexOfFirst {
+                            it is ChatItem.Tool && it.status == "run" &&
+                                (if (tid != null && it.toolId != null) it.toolId == tid else (name.isEmpty() || it.name == name))
+                        }
+                        if (idx >= 0) items = items.toMutableList().also { l ->
+                            val t = l[idx] as ChatItem.Tool
+                            val detail = listOfNotNull(t.detail, out).joinToString("\n\n").ifBlank { null }
+                            l[idx] = t.copy(status = "done", detail = detail?.take(4000))
                         }
                     }
                     "session.title" -> {
-                        ev.payload?.get("title")?.jsonStr()?.takeIf { it.isNotBlank() }?.let { title = it.take(24) }
+                        ev.payload?.get("title")?.jsonStr()?.takeIf { it.isNotBlank() }?.let { title = it }
                     }
                 }
                 is GatewayInbound.Ready -> app.client?.replaySince(runtimeId)
@@ -399,7 +471,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
         forceScroll = false
     }
     // balik ke bottom manual → badge "baru" reset
-    LaunchedEffect(atBottom) { if (atBottom) hasNew = false }
+    LaunchedEffect(atBottom, messageCount) { if (atBottom) { hasNew = false; baselineCount = messageCount } }
     // M3.3: thinking block muncul tanpa items berubah — scroll manual ke ujung
     LaunchedEffect(thinking, thinkingText) {
         if (thinking && (atBottom || forceScroll)) {
@@ -415,104 +487,141 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
         try {
             val prof = app.profile.value
             val opt = MetaRepo(c).modelOptions(sessionId = runtimeId, profile = prof)
-            activeModel = listOfNotNull(
-                opt.model.takeIf { it.isNotBlank() },
-                opt.provider.takeIf { it.isNotBlank() },
-            ).joinToString(" · ")
+            // M8: header cuma nama model (provider ada di model sheet)
+            activeModel = opt.model.ifBlank { opt.provider }
         } catch (_: Throwable) { /* header meta opsional */ }
     }
 
-    Column(Modifier.fillMaxSize().background(F.Bg).statusBarsPadding()) {
-        // Header tipis — bill type. M4: tap judul → sheet Model (read-only,
-        // aktif + inventaris — contract gak punya set-model per-session).
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .pressClickable { modelSheet = true }
-                .padding(horizontal = 20.dp, vertical = 10.dp),
+
+    val headerModel = activeModel
+    val profileName by app.profile.collectAsState()
+    val reduceMotion = rememberReduceMotion()
+    val rows = remember(items) { buildRows(items, { RelTime.dayKey(it) }, { RelTime.dayLabel(it) }) }
+    // M8: animasi masuk hanya untuk baris yang muncul SETELAH load awal.
+    val seenKeys = remember { mutableSetOf<String>() }
+    var seeded by remember { mutableStateOf(false) }
+    LaunchedEffect(loading, rows.size) {
+        if (!loading && !seeded) { rows.forEach { seenKeys += it.key }; seeded = true }
+    }
+    val scrolledContent by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+    }
+    // scroll-to-bottom muncul hanya kalau user naik > 1 layar
+    val farFromBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf false
+            val below = info.totalItemsCount - 1 - last.index
+            !atBottom && below >= info.visibleItemsInfo.size.coerceAtLeast(1)
+        }
+    }
+    var menuSheet by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Ink.Bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding(),
+    ) {
+        // ── Top bar 56dp ───────────────────────────────────────────────
+        Row(
+            Modifier.fillMaxWidth().height(Dim.TopBar).padding(end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                // M5c: avatar profile aktif 24dp kiri judul
-                ProfileAvatar(app, app.profile.value, 24.dp)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    title.uppercase(),
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (connState != ConnState.OPEN) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(F.Error))
-                } else if (running) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(F.Vermillion))
+            QuietIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = onBack)
+            ProfileAvatar(app, profileName, Dim.AvatarBar)
+            Spacer(Modifier.width(10.dp))
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clip(Radius.Chip)
+                    .pressClickable { modelSheet = true }
+                    .padding(vertical = 4.dp, horizontal = 2.dp),
+            ) {
+                OneLine(title.ifBlank { "New chat" }, Type.Title)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        connState != ConnState.OPEN -> {
+                            StatusDot(if (connState == ConnState.CLOSED) Ink.Danger else Ink.Warn)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (connState == ConnState.CLOSED) "Offline" else "Reconnecting…", style = Type.Meta, maxLines = 1)
+                        }
+                        running -> {
+                            PulsingDot(Ink.Live)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Working…", style = Type.Meta, maxLines = 1)
+                        }
+                        else -> {
+                            OneLine(headerModel.ifBlank { "Model" }, Type.Meta, Modifier.weight(1f, fill = false))
+                            Icon(Icons.Rounded.ExpandMore, "Change model", tint = Ink.Text2, modifier = Modifier.size(Dim.IconSmall))
+                        }
+                    }
                 }
             }
-            if (activeModel.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    activeModel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = F.Lavender,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).padding(top = 3.dp),
-                )
-                Text(" ▾", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim, modifier = Modifier.padding(top = 3.dp))
-            }
+            QuietIconButton(Icons.Rounded.MoreVert, "Chat options", onClick = { menuSheet = true })
         }
-        HorizontalDivider(color = F.Stroke, thickness = 1.dp)
+        if (scrolledContent) Hairline() else Spacer(Modifier.height(hairline()))
 
-        // M6: banner read-only — session dipegang surface lain; transcript tetap tampil.
+        // ── Read-only banner (M7 derived) ──────────────────────────────
         if (readOnly) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(F.Warn.copy(alpha = 0.08f))
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                    .height(Dim.BannerH)
+                    .background(Ink.Surface1)
+                    .padding(start = Dim.ScreenH, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(6.dp).clip(CircleShape).background(F.Warn))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Open in desktop — read-only",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = F.Warn,
-                )
+                StatusDot(Ink.Warn)
+                Spacer(Modifier.width(10.dp))
+                Text("Open on desktop — view only", style = Type.Callout, modifier = Modifier.weight(1f), maxLines = 1)
+                TextButton(onClick = { sessionNotOwned = false }) {
+                    Text("Retry", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold))
+                }
             }
         }
 
         Box(Modifier.weight(1f)) {
-            if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
-            } else if (items.isEmpty()) {
-                // M3.2: empty state chat baru
-                Column(
-                    Modifier.fillMaxSize().padding(horizontal = 40.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Send a message to get started", style = MaterialTheme.typography.bodyMedium, color = F.Lavender)
-                    Spacer(Modifier.height(6.dp))
-                    Text(Fmt.clock(nowEpoch()), style = MaterialTheme.typography.labelSmall, color = F.LavenderDim)
-                }
+            when {
+                loading -> ChatSkeleton()
+                items.isEmpty() && approval == null && clarify == null -> EmptyChat(app, profileName, headerModel)
             }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                contentPadding = PaddingValues(vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                items(items) { item ->
-                    // M5: mediaFetch dioper ke renderer (path gambar di jawaban agent → foto)
-                    ChatItemView(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch)
+                items(rows, key = { it.key }) { row ->
+                    val animate = seeded && row.key !in seenKeys && !reduceMotion
+                    SideEffect { if (seeded) seenKeys += row.key }
+                    Box(Modifier.enterOnce(animate)) {
+                        when (row) {
+                            is ChatRow.Day -> DayChip(row.label)
+                            is ChatRow.Tools -> ToolGroup(row.tools)
+                            is ChatRow.Thoughts -> ThoughtsRow(row.texts)
+                            is ChatRow.Item -> when (val item = row.item) {
+                                is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it })
+                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch)
+                                is ChatItem.NoticeLine -> NoticeRow(
+                                    item.text,
+                                    onRetry = if (loadFailed) ({ loading = true; items = emptyList(); reloadKey++ }) else null,
+                                )
+                                is ChatItem.Tool -> ToolGroup(listOf(item))
+                            }
+                        }
+                    }
                 }
-                // M3.3: thinking indicator — hanya kalau belum ada Assistant streaming
-                // (Assistant done dari turn sebelumnya tidak menghalangi)
+                // M3.3: thinking — hanya kalau belum ada Assistant streaming
                 val streamingAssistant = (items.lastOrNull() as? ChatItem.Assistant)?.done == false
                 if (thinking && !streamingAssistant) {
-                    item { ThinkingBlock(thinkingText) }
+                    item(key = "thinking") { ThinkingRow(thinkingText) }
                 }
                 // M4: approval card — security boundary. Setelah respond → dim, bukan hilang.
                 approval?.let { ap ->
-                    item {
+                    item(key = "approval-${ap.id}") {
                         ApprovalCard(
                             ap,
                             onChoice = { choice ->
@@ -521,8 +630,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                                 scope.launch {
                                     // rute 1: respond frame id-based (request hidup di socket ini)
                                     if (ap.respondRaw(choice)) return@launch
-                                    // rute 2 fallback: request.answer — jawab open request
-                                    // by frame id (bekerja utk restored + socket ganti).
+                                    // rute 2 fallback: request.answer by frame id (restored / socket ganti).
                                     val c = app.client ?: return@launch
                                     try {
                                         c.call("request.answer", buildJsonObject {
@@ -537,130 +645,81 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                         )
                     }
                 }
-                // M4: clarify card — pertanyaan + input teks + Jawab.
+                // M4: clarify card
                 clarify?.let { cq ->
-                    item { ClarifyCard(cq, onSubmit = { answer ->
-                        if (cq.responded != null) return@ClarifyCard
-                        clarify = cq.copy(responded = answer)
-                        scope.launch {
-                            // rute 1: respond frame id-based (request hidup di socket ini)
-                            if (cq.respondRaw(answer)) return@launch
-                            // rute 2 fallback: request.answer — sama untuk restored/lost frame
-                            val c = app.client ?: return@launch
-                            try {
-                                c.call("request.answer", buildJsonObject {
-                                    put("id", cq.id)
-                                    put("result", buildJsonObject {
-                                        if (cq.questionId != null) put("answers", buildJsonObject { put(cq.questionId, answer) })
-                                        else put("answer", answer)
+                    item(key = "clarify-${cq.id}") {
+                        ClarifyCard(cq, onSubmit = { answer ->
+                            if (cq.responded != null) return@ClarifyCard
+                            clarify = cq.copy(responded = answer)
+                            scope.launch {
+                                if (cq.respondRaw(answer)) return@launch
+                                val c = app.client ?: return@launch
+                                try {
+                                    c.call("request.answer", buildJsonObject {
+                                        put("id", cq.id)
+                                        put("result", buildJsonObject {
+                                            if (cq.questionId != null) put("answers", buildJsonObject { put(cq.questionId, answer) })
+                                            else put("answer", answer)
+                                        })
+                                        val prof = app.profile.value
+                                        if (prof.isNotBlank() && prof != "default") put("profile", prof)
                                     })
-                                    val prof = app.profile.value
-                                    if (prof.isNotBlank() && prof != "default") put("profile", prof)
-                                })
-                            } catch (_: Throwable) {}
-                        }
-                    }) }
+                                } catch (_: Throwable) {}
+                            }
+                        })
+                    }
                 }
             }
-            // M3.2: chip scroll-to-bottom — muncul saat scroll up dari bottom
-            if (!atBottom) {
+            // scroll-to-bottom: 36dp surface2 bulat kanan bawah + badge jumlah pesan baru
+            if (farFromBottom) {
                 Box(
                     Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 12.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(F.Surface2)
-                        .border(1.dp, F.StrokeBright, CircleShape)
-                        .clickable {
-                            hasNew = false
-                            scope.launch { listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1) }
-                        },
-                    contentAlignment = Alignment.Center,
+                        .align(Alignment.BottomEnd)
+                        .padding(end = Dim.ScreenH, bottom = 12.dp),
                 ) {
-                    Text("↓", color = F.Cream, fontSize = 18.sp)
-                    if (hasNew) {
-                        Box(
-                            Modifier
+                    Box(
+                        Modifier
+                            .size(Dim.ScrollFab)
+                            .clip(Radius.Full)
+                            .background(Ink.Surface2)
+                            .border(hairline(), Ink.HairlineStrong, Radius.Full)
+                            .pressClickable {
+                                hasNew = false
+                                scope.launch { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }
+                            }
+                            .semantics { contentDescription = "Scroll to latest" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Ink.Text, modifier = Modifier.size(Dim.Icon))
+                    }
+                    val newCount = (messageCount - baselineCount).coerceAtLeast(0)
+                    if (hasNew && newCount > 0) {
+                        Text(
+                            if (newCount > 99) "99+" else "$newCount",
+                            style = Type.Caption.copy(color = Ink.OnAccent),
+                            modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .offset(x = 2.dp, y = 2.dp)
-                                .size(9.dp)
-                                .clip(CircleShape)
-                                .background(F.Error)
+                                .offset(x = 6.dp, y = (-6).dp)
+                                .clip(Radius.Full)
+                                .background(Ink.Accent)
+                                .padding(horizontal = 5.dp, vertical = 0.dp),
                         )
                     }
                 }
             }
         }
 
-        // M3.2: long-press salin — bottom sheet kecil, satu aksi
-        if (copyTarget != null) {
-            ModalBottomSheet(
-                onDismissRequest = { copyTarget = null },
-                containerColor = F.Surface3,
-                shape = Shape.Ticket,
-            ) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
-                    Text(
-                        "COPY TEXT",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = F.LavenderDim,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                    Text(
-                        copyTarget!!.take(120),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = F.Lavender,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(bottom = 14.dp),
-                    )
-                    Text(
-                        "Copy text",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = F.Cream,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(Shape.S)
-                            .clickable {
-                                clipboard.setText(AnnotatedString(copyTarget!!))
-                                copyTarget = null
-                            }
-                            .padding(vertical = 14.dp),
-                    )
-                }
-            }
-        }
-
-        // M4: sheet Model — aktif (read-only; contract gak punya set-model
-        // per-session, hanya session.create) + inventaris provider/model.
-        if (modelSheet) {
-            ModelSheet(
-                app = app,
-                sessionId = runtimeId,
-                activeModel = activeModel,
-                onDismiss = { modelSheet = false },
-                // M5 fix (review HIGH#3): stored id session baru WAJIB ikut — kalau
-                // gak, retry sendPromptResilient me-resume session LAMA dan prompt
-                // "hilang" dari UI gig baru. Draft/attachment juga direset.
-                onNewGig = { runtime, stored ->
-                    runtimeId = runtime
-                    effectiveStoredId = stored.takeIf { it.isNotBlank() } ?: actualStoredId
-                    items = emptyList(); title = ""; activeModel = ""
-                    input = ""; attachment = null; running = false
-                },
-            )
-        }
-
-        TicketComposer(
+        Composer(
             value = input, onValueChange = { input = it },
             running = running, connected = connState == ConnState.OPEN,
             readOnly = readOnly,
             attachment = attachment,
+            attachThumb = attachThumb,
             attaching = attaching,
             attachError = attachError,
-            onAttach = { pickFile.launch("*/*") },
-            onRemoveAttachment = { attachment = null },
-            onSend = {
+            onAttach = { attachSheet = true },
+            onRemoveAttachment = { attachment = null; attachThumb = null },
+        onSend = {
                 val typed = input.trim()
                 // file non-gambar WAJIB bawa ref; gambar auto-queued server
                 val att = attachment
@@ -669,15 +728,16 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                     typed.takeIf { it.isNotEmpty() },
                 )
                 // M5: chip foto tanpa teks tetap bisa dikirim — gambar sudah
-                // auto-queued server-side; teks "📎 nama" cuma trigger turn.
-                if (parts.isEmpty() && att?.isImage != true) return@TicketComposer
-                val text = if (parts.isEmpty()) "📎 ${att?.name}" else parts.joinToString("\n")
+                // auto-queued server-side; teks "Sent a photo: nama" cuma trigger turn.
+                if (parts.isEmpty() && att?.isImage != true) return@Composer
+                val text = if (parts.isEmpty()) "Sent a photo: ${att?.name}" else parts.joinToString("\n")
                 input = ""
                 attachment = null
+                attachThumb = null
                 forceScroll = true
                 items = items + ChatItem.User(
-                    if (typed.isEmpty() && att != null) "📎 ${att.name}" else typed.ifEmpty { "📎 ${att?.name}" },
-                    pending = true, time = Fmt.clock(nowEpoch()),
+                    if (typed.isEmpty() && att != null) "Sent a photo: ${att.name}" else typed.ifEmpty { "Sent a photo: ${att?.name}" },
+                    pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
                 )
                 scope.launch {
                     try {
@@ -724,7 +784,7 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
                             // stale yang sembuh sendiri lewat retry.
                             sessionNotOwned = true
                         } else {
-                            val msg = "Failed to send: ${e.message}"
+                            val msg = "Couldn't send: ${e.message}"
                             items = items + ChatItem.NoticeLine(msg)
                         }
                         // M5 fix (review): gak nimpa draft baru yang user lagi ketik —
@@ -736,546 +796,124 @@ fun ChatScreen(app: HermesApp, actualStoredId: String, preattachedRuntime: Strin
             onStop = { scope.launch { app.client?.let { SessionRepo(it, app.profile.value).interrupt(runtimeId) } } },
         )
     }
+
+    // M3.2: long-press salin pesan
+    copyTarget?.let { target ->
+        QuietSheet(onDismiss = { copyTarget = null }, title = "Message") {
+            Text(
+                target.take(200),
+                style = Type.Callout.copy(color = Ink.Text2),
+                maxLines = 3, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp),
+            )
+            SheetActionRow("Copy text", Icons.Rounded.ContentCopy) {
+                clipboard.setText(AnnotatedString(target))
+                copyTarget = null
+            }
+        }
+    }
+    if (attachSheet) {
+        AttachSheet(
+            onDismiss = { attachSheet = false },
+            onPhoto = { pickFile.launch("image/*") },
+            onFile = { pickFile.launch("*/*") },
+        )
+    }
+    // M4: sheet Model — tap model = chat baru dengan model itu.
+    if (modelSheet) {
+        ModelSheet(
+            app = app,
+            sessionId = runtimeId,
+            onDismiss = { modelSheet = false },
+            // M5 fix (review HIGH#3): stored id session baru WAJIB ikut — draft/attachment direset.
+            onNewChat = { runtime, stored ->
+                runtimeId = runtime
+                effectiveStoredId = stored.takeIf { it.isNotBlank() } ?: actualStoredId
+                items = emptyList(); title = ""; activeModel = ""
+                input = ""; attachment = null; attachThumb = null; running = false
+            },
+        )
+    }
+    // M8: MoreVert → aksi session yang sama dengan long-press di Chats.
+    if (menuSheet) {
+        SessionActionSheet(
+            app = app,
+            row = SessionRow(id = effectiveStoredId, title = title.ifBlank { null }),
+            onDone = { menuSheet = false },
+            onDismiss = { menuSheet = false },
+            onOpenBranch = { rt, stored -> menuSheet = false; onOpenChat("$stored|$rt") },
+            onDeleted = { menuSheet = false; onBack() },
+        )
+    }
+}
+
+/** Animasi masuk pesan baru: fade + translateY 8dp→0, 180ms, sekali. */
+private fun Modifier.enterOnce(animate: Boolean): Modifier = composed {
+    if (!animate) return@composed this
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { progress.animateTo(1f, tween(Motion.MessageInMs, easing = Motion.EmphasizedDecelerate)) }
+    val rise = with(LocalDensity.current) { Motion.MessageRise.toPx() }
+    graphicsLayer {
+        alpha = progress.value
+        translationY = (1f - progress.value) * rise
+    }
+}
+
+/** Empty chat: avatar 56 + "Chat with {profile}" + model line, tengah vertikal. */
+@Composable
+private fun EmptyChat(app: HermesApp, profile: String, model: String) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        ProfileAvatar(app, profile, Dim.AvatarEmpty)
+        Spacer(Modifier.height(16.dp))
+        Text("Chat with $profile", style = Type.Title)
+        if (model.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(model, style = Type.Meta)
+        }
+        Spacer(Modifier.height(48.dp))
+    }
+}
+
+/** Skeleton transcript: 3 blok (bubble kanan, 2 paragraf kiri). */
+@Composable
+private fun ChatSkeleton() {
+    val a = shimmerAlpha()
+    Column(Modifier.fillMaxSize().padding(horizontal = Dim.ScreenH, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { SkeletonBar(180.dp, 40.dp, a) }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SkeletonBar(null, 14.dp, a); SkeletonBar(null, 14.dp, a); SkeletonBar(220.dp, 14.dp, a)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SkeletonBar(null, 14.dp, a); SkeletonBar(260.dp, 14.dp, a)
+        }
+    }
 }
 
 /** M5: fetcher gambar (path di Mac → bitmap) — null connection = selalu null (chip fallback). */
 private fun mediaFetcherFor(conn: id.melvern.hermesmobile.core.store.ConnectionSettings?): suspend (String) -> androidx.compose.ui.graphics.ImageBitmap? =
     if (conn == null) { _ -> null } else { path -> MediaRepo(conn).fetchImage(path) }
 
+/** M8: teks output tool dari ToolCompletePayload.result — string apa adanya; objek → field output umum, fallback JSON. */
+internal fun toolResultText(r: kotlinx.serialization.json.JsonElement?): String? {
+    val s = when (r) {
+        null, is kotlinx.serialization.json.JsonNull -> null
+        is kotlinx.serialization.json.JsonPrimitive -> r.content
+        is kotlinx.serialization.json.JsonObject -> listOf("output", "content", "stdout", "text", "result", "error")
+            .firstNotNullOfOrNull { k -> (r[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { it.isNotBlank() } }
+            ?: r.toString()
+        else -> r.toString()
+    }
+    return s?.trim()?.takeIf { it.isNotEmpty() }
+}
+
 private fun kotlinx.serialization.json.JsonElement?.jsonStr(): String =
     (this as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
         ?: (this as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun ChatItemView(
-    item: ChatItem,
-    onLongPress: (String) -> Unit = {},
-    mediaFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)? = null,
-) {
-    when (item) {
-        is ChatItem.User -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    item.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = F.CreamDim,
-                    modifier = Modifier
-                        .widthIn(max = 300.dp)
-                        .combinedClickable(onClick = {}, onLongClick = { onLongPress(item.text) })
-                        .background(F.UserBubble, Shape.M)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // M5: status antrian — server balik "queued" (busy path)
-                    if (item.queued) Text(
-                        "QUEUED",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = F.Warn,
-                        fontSize = 9.sp,
-                        modifier = Modifier.padding(top = 3.dp, end = 6.dp),
-                    )
-                    // M3.2: jam kecil di bawah pesan — gaya WhatsApp
-                    if (item.time.isNotEmpty()) Text(
-                        item.time,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = F.LavenderDim,
-                        fontSize = 9.sp,
-                        modifier = Modifier.padding(top = 3.dp, end = 4.dp),
-                    )
-                }
-            }
-        }
-        // animateContentSize HANYA saat done: transisi halus saat caret hilang,
-        // tanpa churn re-layout per delta streaming (perf).
-        is ChatItem.Assistant -> Column(
-            Modifier
-                .combinedClickable(onClick = {}, onLongClick = { onLongPress(item.text) })
-                .then(if (item.done) Modifier.animateContentSize() else Modifier),
-        ) {
-            if (item.reasoning != null) Text(
-                "· THINKING — " + item.reasoning!!.take(120),
-                style = MaterialTheme.typography.labelSmall,
-                color = F.LavenderDim,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(bottom = 6.dp),
-            )
-            // M3.1: jawaban assistant dirender markdown (bold/italic/code/list/
-            // heading/link/blockquote). User tetap plain (pill).
-            // M3.2: SelectionContainer diganti combinedClickable — SelectionContainer
-            // makan long-press buat seleksi teks, sheet "Salin" gak pernah ke-trigger.
-            MarkdownText(item.text, style = MaterialTheme.typography.bodyLarge, imageFetch = mediaFetch)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!item.done) VermillionCaret()
-                if (item.time.isNotEmpty()) Text(
-                    item.time,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = F.LavenderDim,
-                    fontSize = 9.sp,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
-        is ChatItem.Tool -> Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(if (item.status == "run") F.Vermillion else F.Ok))
-            Text(
-                (item.name.lowercase() + if (item.status == "run") " · running" else "").uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = F.Lavender,
-            )
-        }
-        is ChatItem.NoticeLine -> Text(item.text, style = MaterialTheme.typography.labelSmall, color = F.Warn)
-    }
-}
-
-@Composable
-private fun VermillionCaret() {
-    val alpha by rememberInfiniteTransition().animateFloat(
-        initialValue = 1f, targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
-        label = "caret",
-    )
-    Box(Modifier.padding(top = 6.dp).size(width = 4.dp, height = 20.dp).background(F.Vermillion.copy(alpha = alpha)))
-}
-
-// ── M4: approval / clarify / model sheet ────────────────────────────
-
-/** State approval card. `respondRaw` = jawab via respond frame; return Boolean: frame terkirim. */
-data class AskApproval(
-    val id: String,
-    val requestId: String?,
-    val title: String,
-    val command: String,
-    val responded: String? = null,
-    val respondRaw: (String) -> Boolean = { false },
-)
-
-/** State clarify card. `questionId` = qid pertanyaan batch pertama (null = single). */
-data class AskClarify(
-    val id: String,
-    val question: String,
-    val questionId: String? = null,
-    val responded: String? = null,
-    val respondRaw: (String) -> Boolean = { false },
-)
-
-/**
- * M4: approval card — SECURITY BOUNDARY. Tombol IZINKAN harus disengaja:
- * warna accent + label eksplisit, TOLAK netral, gak ada default-focus.
- * Setelah respond → dim (alpha rendah, tombol hilang) — jejak keputusan tetap ada.
- */
-@Composable
-private fun ApprovalCard(ap: AskApproval, onChoice: (String) -> Unit) {
-    val answered = ap.responded != null
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(F.Surface1, Shape.M)
-            .border(1.dp, if (answered) F.Stroke else F.Warn.copy(alpha = 0.6f), Shape.M)
-            .padding(16.dp),
-    ) {
-        Text(
-            if (answered) "COMMAND — ${if (ap.responded == "once") "ALLOWED" else "DENIED"}"
-            else "NEEDS APPROVAL — ${ap.title.uppercase()}",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (answered) F.LavenderDim else F.Warn,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            ap.command.ifBlank { "—" },
-            style = MaterialTheme.typography.bodySmall,
-            color = if (answered) F.LavenderDim else F.CreamDim,
-            fontFamily = JetBrainsMono,
-            maxLines = 4, overflow = TextOverflow.Ellipsis,
-        )
-        if (!answered) {
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                // TOLAK dulu (kiri) — Izinkan = aksi berat, harus dicari.
-                Button(
-                    onClick = { onChoice("deny") },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = F.Surface3, contentColor = F.Cream),
-                    shape = Shape.S,
-                ) { Text("Deny", style = MaterialTheme.typography.labelLarge) }
-                Button(
-                    onClick = { onChoice("once") },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = F.Vermillion, contentColor = F.BgDeep),
-                    shape = Shape.S,
-                ) { Text("Allow", style = MaterialTheme.typography.labelLarge) }
-            }
-        }
-    }
-}
-
-/** M4: clarify card — pertanyaan + input + Jawab; setelah jawab → dim. */
-@Composable
-private fun ClarifyCard(cq: AskClarify, onSubmit: (String) -> Unit) {
-    var answer by remember(cq.id) { mutableStateOf("") }
-    val answered = cq.responded != null
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(F.Surface1, Shape.M)
-            .border(1.dp, if (answered) F.Stroke else F.StrokeBright, Shape.M)
-            .padding(16.dp),
-    ) {
-        Text(
-            if (answered) "DRAFT — ANSWERED" else "CONFIRM",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (answered) F.LavenderDim else F.Lavender,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            cq.question,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (answered) F.LavenderDim else F.Cream,
-        )
-        if (answered) {
-            Spacer(Modifier.height(6.dp))
-            Text(cq.responded ?: "", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
-        } else {
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                BasicTextField(
-                    value = answer,
-                    onValueChange = { answer = it },
-                    textStyle = TextStyle(color = F.Cream, fontSize = 15.sp),
-                    cursorBrush = SolidColor(F.Vermillion),
-                    singleLine = true,
-                    modifier = Modifier
-                        .weight(1f)
-                        .background(F.BgDeep, Shape.S)
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                    decorationBox = { inner ->
-                        Box {
-                            if (answer.isEmpty()) Text("answer…", style = MaterialTheme.typography.bodySmall, color = F.LavenderDim)
-                            inner()
-                        }
-                    },
-                )
-                Button(
-                    onClick = { if (answer.isNotBlank()) onSubmit(answer.trim()) },
-                    modifier = Modifier.height(44.dp),
-                    enabled = answer.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = F.Vermillion, contentColor = F.BgDeep,
-                        disabledContainerColor = F.Surface3, disabledContentColor = F.LavenderDim,
-                    ),
-                    shape = Shape.S,
-                ) { Text("Answer", style = MaterialTheme.typography.labelLarge) }
-            }
-        }
-    }
-}
-
-/** M4: sheet "Model" — read-only: model aktif + inventaris model.options. */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun ModelSheet(app: HermesApp, sessionId: String, activeModel: String, onDismiss: () -> Unit, onNewGig: (String, String) -> Unit) {
-    var options by remember { mutableStateOf<MetaRepo.ModelOptions?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        val c = app.client ?: return@LaunchedEffect
-        try { options = MetaRepo(c).modelOptions(sessionId = sessionId, profile = app.profile.value) }
-        catch (e: Throwable) { error = e.message }
-    }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = F.Surface3,
-        shape = Shape.Ticket,
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
-            Text("MODEL", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim)
-            Spacer(Modifier.height(10.dp))
-            Text(
-                activeModel.ifBlank { options?.let { listOfNotNull(it.model.ifBlank { null }, it.provider.ifBlank { null }).joinToString(" · ") } ?: "—" },
-                style = MaterialTheme.typography.titleMedium, color = F.Cream,
-            )
-            Text(
-                "active in this chat — the contract has no per-session set-model (only session.create). Tap a model below = new chat with that model",
-                style = MaterialTheme.typography.labelSmall, color = F.LavenderDim,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            Spacer(Modifier.height(14.dp))
-            HorizontalDivider(color = F.Stroke, thickness = 1.dp)
-            Spacer(Modifier.height(10.dp))
-            when {
-                options == null && error == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-                }
-                error != null -> Text("Failed to load: $error", style = MaterialTheme.typography.bodySmall, color = F.Error)
-                else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-                    options!!.providers.forEach { p ->
-                        item(key = p.slug) {
-                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        p.name.ifBlank { p.slug },
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = F.Cream,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    if (p.isCurrent == true) Text(
-                                        "ACTIVE", style = MaterialTheme.typography.labelSmall, color = F.Vermillion,
-                                    )
-                                }
-                                Text(
-                                    "${p.models.size} model · ${p.slug}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = F.Lavender,
-                                )
-                                // daftar model: featured dulu (kalau ada), sisanya
-                                val models = (p.featuredModels.orEmpty() + p.models.filter { it !in (p.featuredModels ?: emptyList()) }).distinct()
-                                models.take(12).forEach { m ->
-                                    var creating by remember { mutableStateOf(false) }
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
-                                    ) {
-                                        Text("·", style = MaterialTheme.typography.bodySmall, color = F.Lavender)
-                                        Text(
-                                            m,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (creating) F.Vermillion else F.Lavender,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier
-                                                .pressClickable(enabled = !creating) {
-                                                    creating = true
-                                                    app.appScope.launch {
-                                                        try {
-                                                            val (newRuntime, _) = SessionRepo(app.client ?: return@launch, app.profile.value)
-                                                                .createSession(model = m, provider = p.slug)
-                                                            onDismiss()
-                                                            onNewGig(newRuntime, "")
-                                                        } catch (e: Throwable) {
-                                                            // M5 fix (review): gagal create jangan diam aja —
-                                                            // user nggak tau kenapa gig baru gak jadi.
-                                                            creating = false
-                                                            app.appScope.launch {
-                                                                android.widget.Toast.makeText(
-                                                                    app, "Failed to create chat: ${e.message}", android.widget.Toast.LENGTH_LONG
-                                                                ).show()
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                .padding(horizontal = 4.dp),
-                                        )
-                                        if (creating) CircularProgressIndicator(color = F.Vermillion, strokeWidth = 1.5.dp, modifier = Modifier.padding(start = 6.dp).size(12.dp))
-                                    }
-                                }
-                                if (models.size > 12) Text("+${models.size - 12} more", style = MaterialTheme.typography.labelSmall, color = F.LavenderDim, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * M3.3: blok "Berpikir…" — tampil saat reasoning.delta/thinking.delta stream
- * dan assistant belum mulai menjawab. Dot accent 6dp pulse alpha, teks reasoning
- * 2 baris max ellipsis (tail 500 char sudah di-cap di event handler).
- */
-@Composable
-private fun ThinkingBlock(text: String) {
-    val alpha by rememberInfiniteTransition().animateFloat(
-        initialValue = 1f, targetValue = 0.2f,
-        animationSpec = infiniteRepeatable(tween(750), RepeatMode.Reverse),
-        label = "thinkDot",
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-        Box(
-            Modifier
-                .padding(top = 4.dp)
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(F.Vermillion.copy(alpha = alpha))
-        )
-        Column {
-            Text(
-                "THINKING…",
-                style = MaterialTheme.typography.labelSmall,
-                color = F.Lavender,
-            )
-            if (text.isNotBlank()) Text(
-                text,
-                style = MaterialTheme.typography.bodySmall,
-                color = F.Lavender,
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-/**
- * Composer tiket: outline vermillion + notch kiri-kanan, send button = satu-satunya
- * lingkaran vermillion penuh di layar.
- * M3.2: multiline auto-grow (max 4 baris) + IME action Send di keyboard.
- * M5: (a) tombol "+" kiri = attach (file/foto picker); chip attachment di atas
- * composer (nama file, x utk batal); (b) saat running tombol kirim TETAP aktif
- * ("send while running…" — server antri/steer), tombol STOP terpisah muncul
- * menggantikan tombol "+" di kiri; (c) teks yang diketik saat running gak
- * hilang (draft di state ChatScreen, tap kirim saat idle = kirim draft).
- */
-@Composable
-private fun TicketComposer(
-    value: String, onValueChange: (String) -> Unit,
-    running: Boolean, connected: Boolean,
-    readOnly: Boolean = false,
-    attachment: id.melvern.hermesmobile.core.model.Attachment?,
-    attaching: Boolean,
-    attachError: String?,
-    onAttach: () -> Unit,
-    onRemoveAttachment: () -> Unit,
-    onSend: () -> Unit, onStop: () -> Unit,
-) {
-    Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        // M5: error attach — satu baris kecil, auto hilang saat attach baru
-        attachError?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = F.Error, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
-        }
-        // M5: chip attachment (nama file + x)
-        attachment?.let { att ->
-            Row(
-                Modifier
-                    .clip(Shape.S)
-                    .background(F.Surface2, Shape.S)
-                    .border(1.dp, F.StrokeBright, Shape.S)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(if (att.isImage) F.Vermillion else F.Lavender))
-                Text(
-                    (if (att.isImage) "PHOTO · " else "FILE · ") + att.name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = F.CreamDim,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 220.dp),
-                )
-                Text("×", color = F.Lavender, fontSize = 16.sp, modifier = Modifier.pressClickable(onClick = onRemoveAttachment).padding(horizontal = 4.dp))
-            }
-        }
-        // auto-grow: 64dp (1 baris) → 128dp (4 baris), tick tiap 22dp
-        val fieldHeight = (64 + minOf(value.count { it == '\n' }, 3) * 22).dp
-        BoxWithConstraints(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = if (attachment != null || attachError != null) 8.dp else 0.dp)
-                .height(fieldHeight)
-                .background(F.Surface1, Shape.Ticket)
-                .border(1.5.dp, F.Vermillion.copy(alpha = 0.8f), Shape.Ticket),
-        ) {
-            // notch kiri & kanan (lingkaran bg menembus)
-            Box(Modifier.align(Alignment.CenterStart).offset(x = (-11).dp).size(22.dp).clip(CircleShape).background(F.Bg))
-            Box(Modifier.align(Alignment.CenterEnd).offset(x = 11.dp).size(22.dp).clip(CircleShape).background(F.Bg))
-
-            Row(
-                Modifier.fillMaxSize().padding(horizontal = 24.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                // M5: kiri = "+" attach saat idle; STOP saat running (dua area terpisah —
-                // kirim tetap aktif di kanan buat reply sambil jalan)
-                if (running) {
-                    Box(
-                        Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(F.Surface2)
-                            .border(1.dp, F.Error.copy(alpha = 0.7f), CircleShape)
-                            .pressClickable(onClick = onStop),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(Modifier.size(13.dp).background(F.Error, Shape.Xs))
-                    }
-                } else {
-                    Box(
-                        Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(F.Surface2)
-                            .border(1.dp, if (attaching) F.Vermillion else F.StrokeBright, CircleShape)
-                            .pressClickable(enabled = !attaching, onClick = onAttach),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (attaching) CircularProgressIndicator(color = F.Vermillion, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                        else Text("+", color = F.Cream, fontSize = 20.sp)
-                    }
-                }
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    textStyle = TextStyle(color = if (readOnly) F.LavenderDim else F.Cream, fontSize = 16.sp),
-                    cursorBrush = SolidColor(F.Vermillion),
-                    // M3.2: IME Send — cukup satu baris; multiline di-entry via paste
-                    // atau Shift+Enter (keyboard yang support). Enter polos = kirim.
-                    // M5: kirim SAAT running juga boleh (server antri/steer).
-                    // M6: read-only → composer mati total.
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (connected && !readOnly && value.isNotBlank()) onSend() }),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { inner ->
-                        Box {
-                            if (value.isEmpty()) Text(
-                                if (readOnly) "read-only — open in desktop" else if (running) "send while running…" else "Message…",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = F.LavenderDim,
-                            )
-                            inner()
-                        }
-                    },
-                    enabled = !readOnly,
-                )
-                val interaction = remember { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                val scale by animateFloatAsState(
-                    targetValue = if (pressed) 0.97f else 1f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow,
-                    ),
-                    label = "sendScale",
-                )
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true) -> F.Vermillion
-                                else -> F.Surface2.copy(alpha = 0.5f)
-                            }
-                        )
-                        .clickable(
-                            interactionSource = interaction,
-                            indication = null,
-                            // M5: chip foto tanpa teks tetap bisa dikirim (onSend jadiin
-                            // "📎 nama" trigger turn); file non-gambar selalu bawa refText.
-                            // M6: read-only → disabled.
-                            enabled = connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true),
-                            onClick = { if (connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true)) onSend() },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("▲", color = F.Cream, fontSize = 15.sp)
-                }
-            }
-        }
-    }
-}
 
 /** M5 fix: ukuran file dari OpenableColumns.SIZE — null kalau provider gak kasih. */
 private fun querySize(context: android.content.Context, uri: android.net.Uri): Long? = try {

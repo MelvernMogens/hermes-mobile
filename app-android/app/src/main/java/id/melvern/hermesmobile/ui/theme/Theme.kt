@@ -1,111 +1,82 @@
 package id.melvern.hermesmobile.ui.theme
 
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import id.melvern.hermesmobile.R
+import androidx.compose.runtime.CompositionLocalProvider
 
 /**
- * Type system (M3.1, font M3.3): dua voice —
- *  - "bill" (sans bold, tracking, uppercase) untuk chrome/header/meta:
- *    header screen, session title, label tool, tombol. Sans = system default
- *    (Roboto) — SAMA dengan desktop Hermes yang pakai system font.
- *  - "prose" (sans regular) untuk konten assistant — sans 16/24.
- * Code block + inline code pakai JetBrains Mono (M3.3, match desktop) —
- * bundel res/font, TTF resmi github.com/JetBrains/JetBrainsMono v2.304.
+ * M8 Quiet Mono. Typography M3 dipetakan ke [Type] supaya komponen M3
+ * (TextField label, Switch, DropdownMenu) ikut Inter tanpa tracking lebar.
  */
-val BillSans: FontFamily = FontFamily.SansSerif
-
-/** JetBrains Mono — match desktop Hermes (M3.3). */
-val JetBrainsMono: FontFamily = FontFamily(
-    Font(R.font.jetbrainsmono_regular, FontWeight.Normal),
-    Font(R.font.jetbrainsmono_italic, FontWeight.Normal, FontStyle.Italic),
-    Font(R.font.jetbrainsmono_bold, FontWeight.Bold),
-    Font(R.font.jetbrainsmono_bold_italic, FontWeight.Bold, FontStyle.Italic),
+private val HermesTypography = Typography(
+    displaySmall = Type.Display,
+    headlineMedium = Type.Display,
+    headlineSmall = Type.Display,
+    titleLarge = Type.Title,
+    titleMedium = Type.Title,
+    titleSmall = Type.MetaMedium,
+    bodyLarge = Type.Body,
+    bodyMedium = Type.Callout,
+    bodySmall = Type.Meta,
+    labelLarge = Type.Callout,
+    labelMedium = Type.MetaMedium,
+    labelSmall = Type.Caption,
 )
-
-val HermesType = Typography(
-    // prose assistant — sans regular, ukuran baca nyaman
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
-        fontSize = 16.sp, lineHeight = 24.sp,
-        color = F.Cream,
-    ),
-    // user message + composer input
-    bodyMedium = TextStyle(
-        fontFamily = BillSans, fontWeight = FontWeight.Normal,
-        fontSize = 16.sp, lineHeight = 22.sp, color = F.Cream,
-    ),
-    // meta line (tool label, preview)
-    bodySmall = TextStyle(
-        fontFamily = BillSans, fontWeight = FontWeight.Medium,
-        fontSize = 12.sp, lineHeight = 17.sp, letterSpacing = 0.8.sp, color = F.Lavender,
-    ),
-    // empty state greeting / TONIGHT — sans Bold (ikut monochrome M3.1)
-    titleLarge = TextStyle(
-        fontFamily = BillSans,
-        fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 40.sp,
-        color = F.Cream,
-    ),
-    // session row title — sans SemiBold (bukan serif italic, M3.1)
-    titleMedium = TextStyle(
-        fontFamily = BillSans, fontWeight = FontWeight.SemiBold,
-        fontSize = 19.sp, lineHeight = 25.sp,
-        color = F.Cream,
-    ),
-    // header wordmark / condensed labels
-    labelLarge = TextStyle(
-        fontFamily = BillSans, fontWeight = FontWeight.Bold,
-        fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 3.sp,
-        color = F.Cream,
-    ),
-    labelSmall = TextStyle(
-        fontFamily = BillSans, fontWeight = FontWeight.Bold,
-        fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 1.6.sp,
-        color = F.Lavender,
-    ),
-)
-
-/** Radius system — 3 step + pill. */
-object Shape {
-    val Xs = RoundedCornerShape(8.dp)
-    val S = RoundedCornerShape(12.dp)
-    val M = RoundedCornerShape(20.dp)
-    val Pill = RoundedCornerShape(999.dp)
-    val Ticket = RoundedCornerShape(24.dp)
-}
 
 private val Scheme = darkColorScheme(
-    primary = F.Vermillion,
-    onPrimary = F.Cream,
-    secondary = F.Lavender,
-    onSecondary = F.Bg,
-    tertiary = F.Warn,
-    background = F.Bg,
-    onBackground = F.Cream,
-    surface = F.Bg,
-    onSurface = F.Cream,
-    surfaceVariant = F.Surface1,
-    onSurfaceVariant = F.Lavender,
-    surfaceContainer = F.Surface1,
-    surfaceContainerHigh = F.Surface2,
-    outline = F.Stroke,
-    outlineVariant = F.Stroke,
-    error = F.Error,
-    onError = F.BgDeep,
+    primary = Ink.Accent,
+    onPrimary = Ink.OnAccent,
+    primaryContainer = Ink.Surface2,
+    onPrimaryContainer = Ink.Text,
+    secondary = Ink.Text2,
+    onSecondary = Ink.Bg,
+    tertiary = Ink.Text2,
+    background = Ink.Bg,
+    onBackground = Ink.Text,
+    surface = Ink.Bg,
+    onSurface = Ink.Text,
+    surfaceVariant = Ink.Surface1,
+    onSurfaceVariant = Ink.Text2,
+    surfaceContainerLowest = Ink.Bg,
+    surfaceContainerLow = Ink.Surface1,
+    surfaceContainer = Ink.Surface1,
+    surfaceContainerHigh = Ink.Surface2,
+    surfaceContainerHighest = Ink.Surface3,
+    surfaceTint = Ink.Transparent,
+    inverseSurface = Ink.Text,
+    inverseOnSurface = Ink.Bg,
+    outline = Ink.HairlineStrong,
+    outlineVariant = Ink.Hairline,
+    scrim = Ink.Scrim,
+    error = Ink.Danger,
+    onError = Ink.Bg,
 )
 
+/** Ripple lembut putih 8% (brief E) — bukan hijau. */
+@OptIn(ExperimentalMaterial3Api::class)
+private val QuietRipple = RippleConfiguration(
+    color = Ink.Text,
+    rippleAlpha = RippleAlpha(draggedAlpha = 0.08f, focusedAlpha = 0.08f, hoveredAlpha = 0.08f, pressedAlpha = 0.08f),
+)
+
+private val Selection = TextSelectionColors(handleColor = Ink.Text, backgroundColor = Ink.Text.copy(alpha = 0.25f))
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HermesTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, typography = HermesType, content = content)
+    MaterialTheme(colorScheme = Scheme, typography = HermesTypography) {
+        CompositionLocalProvider(
+            LocalRippleConfiguration provides QuietRipple,
+            LocalTextSelectionColors provides Selection,
+            content = content,
+        )
+    }
 }

@@ -1,0 +1,314 @@
+package id.melvern.hermesmobile.ui.chat
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import id.melvern.hermesmobile.HermesApp
+import id.melvern.hermesmobile.core.model.Attachment
+import id.melvern.hermesmobile.core.repo.MetaRepo
+import id.melvern.hermesmobile.core.repo.SessionRepo
+import id.melvern.hermesmobile.ui.components.Hairline
+import id.melvern.hermesmobile.ui.components.OneLine
+import id.melvern.hermesmobile.ui.components.QuietSheet
+import id.melvern.hermesmobile.ui.components.SheetActionRow
+import id.melvern.hermesmobile.ui.components.SkeletonSessionRow
+import id.melvern.hermesmobile.ui.components.shimmerAlpha
+import id.melvern.hermesmobile.ui.theme.Dim
+import id.melvern.hermesmobile.ui.theme.Ink
+import id.melvern.hermesmobile.ui.theme.Radius
+import id.melvern.hermesmobile.ui.theme.Type
+import id.melvern.hermesmobile.ui.theme.hairline
+import id.melvern.hermesmobile.ui.theme.pressClickable
+import kotlinx.coroutines.launch
+
+/**
+ * M8 composer — menempel di atas keyboard (imePadding di pemanggil).
+ * Kiri: Add (attach sheet). Tengah: field surface1 radius 18, 1–6 baris.
+ * Kanan: tombol bulat 36 — kosong: outline redup; ada teks: putih + ArrowUpward
+ * hitam; agent jalan & field kosong: Stop putih (interrupt).
+ * M5 tetap: kirim saat running = antri/steer (server), draft tidak hilang.
+ */
+@Composable
+fun Composer(
+    value: String, onValueChange: (String) -> Unit,
+    running: Boolean, connected: Boolean,
+    readOnly: Boolean,
+    attachment: Attachment?,
+    attachThumb: ImageBitmap?,
+    attaching: Boolean,
+    attachError: String?,
+    onAttach: () -> Unit,
+    onRemoveAttachment: () -> Unit,
+    onSend: () -> Unit, onStop: () -> Unit,
+) {
+    val canSend = connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true)
+    val showStop = running && value.isBlank() && attachment == null && !readOnly
+    Column(Modifier.fillMaxWidth().background(Ink.Bg)) {
+        Hairline()
+        attachError?.let {
+            Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp))
+        }
+        if (attachment != null || attaching) {
+            AttachmentChip(attachment, attachThumb, attaching, onRemoveAttachment)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Box(
+                Modifier
+                    .size(Dim.Touch - 4.dp) // target 44
+                    .clip(Radius.Full)
+                    .pressClickable(enabled = !attaching && !readOnly, onClick = onAttach)
+                    .semantics { contentDescription = "Attach photo or file" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Add, null, tint = if (readOnly) Ink.Text3 else Ink.Text2, modifier = Modifier.size(Dim.Icon))
+            }
+            Spacer(Modifier.width(4.dp))
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                enabled = !readOnly,
+                textStyle = Type.Body.copy(color = if (readOnly) Ink.Text3 else Ink.Text),
+                cursorBrush = SolidColor(Ink.Text),
+                maxLines = 6,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Dim.ComposerMin)
+                            .clip(Radius.Bubble)
+                            .background(Ink.Surface1)
+                            .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (value.isEmpty()) Text(
+                            when {
+                                readOnly -> "View only"
+                                running -> "Reply or queue a message"
+                                else -> "Message"
+                            },
+                            style = Type.Body.copy(color = Ink.Text3),
+                            maxLines = 1,
+                        )
+                        inner()
+                    }
+                },
+            )
+            Spacer(Modifier.width(8.dp))
+            // tombol kanan 36 dalam target 44, rata bawah dengan field 1-baris
+            Box(Modifier.size(Dim.ComposerMin), contentAlignment = Alignment.Center) {
+                when {
+                    showStop -> RoundAction(Icons.Rounded.Stop, "Stop", filled = true, enabled = connected, onClick = onStop)
+                    else -> RoundAction(Icons.Rounded.ArrowUpward, "Send", filled = canSend, enabled = canSend, onClick = { if (canSend) onSend() })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoundAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    filled: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(Dim.SendButton)
+            .clip(Radius.Full)
+            .then(if (filled) Modifier.background(Ink.Accent) else Modifier.border(hairline() * 2, Ink.HairlineStrong, Radius.Full))
+            .pressClickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = if (filled) Ink.OnAccent else Ink.Text3, modifier = Modifier.size(Dim.Icon))
+    }
+}
+
+/** Chip attachment di atas field: thumbnail 40 radius 8 / ikon file, nama 1 baris, X. */
+@Composable
+private fun AttachmentChip(att: Attachment?, thumb: ImageBitmap?, attaching: Boolean, onRemove: () -> Unit) {
+    Row(
+        Modifier
+            .padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp)
+            .widthIn(max = 320.dp)
+            .clip(Radius.Chip)
+            .background(Ink.Surface1)
+            .padding(start = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(Dim.Thumb).clip(Radius.Thumb).background(Ink.Surface2),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                attaching -> CircularProgressIndicator(Modifier.size(16.dp), color = Ink.Text2, strokeWidth = 2.dp)
+                thumb != null -> Image(thumb, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else -> Icon(
+                    if (att?.isImage == true) Icons.Rounded.Image else Icons.Rounded.Description,
+                    null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon),
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            if (attaching) "Attaching…" else att?.name.orEmpty(),
+            style = Type.Callout,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Box(
+            Modifier
+                .size(Dim.Touch - 8.dp)
+                .clip(Radius.Full)
+                .pressClickable(enabled = !attaching, onClick = onRemove)
+                .semantics { contentDescription = "Remove attachment" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.Close, null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon))
+        }
+    }
+}
+
+/** Sheet attach: Photo / File. */
+@Composable
+fun AttachSheet(onDismiss: () -> Unit, onPhoto: () -> Unit, onFile: () -> Unit) {
+    QuietSheet(onDismiss = onDismiss, title = "Attach") {
+        SheetActionRow("Photo", Icons.Rounded.Image) { onDismiss(); onPhoto() }
+        SheetActionRow("File", Icons.Rounded.Description) { onDismiss(); onFile() }
+    }
+}
+
+/**
+ * M4→M8 sheet "Model": row model + provider (meta), Check di model aktif.
+ * Tap model = chat baru dengan model itu (kontrak tidak punya set-model
+ * per-session, hanya session.create).
+ */
+@Composable
+fun ModelSheet(
+    app: HermesApp,
+    sessionId: String,
+    onDismiss: () -> Unit,
+    onNewChat: (String, String) -> Unit,
+) {
+    var options by remember { mutableStateOf<MetaRepo.ModelOptions?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf<String?>(null) }
+    var createError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val c = app.client ?: return@LaunchedEffect
+        try { options = MetaRepo(c).modelOptions(sessionId = sessionId, profile = app.profile.value) }
+        catch (e: Throwable) { error = e.message }
+    }
+    QuietSheet(onDismiss = onDismiss, title = "Model") {
+        createError?.let {
+            Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
+        }
+        when {
+            options == null && error == null -> {
+                val a = shimmerAlpha()
+                repeat(3) { SkeletonSessionRow(a) }
+            }
+            error != null -> Text(
+                "Couldn't load models: $error",
+                style = Type.Callout.copy(color = Ink.Danger),
+                modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
+            )
+            else -> {
+                val opt = options!!
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+                    opt.providers.forEach { p ->
+                        val all = (p.featuredModels.orEmpty() + p.models.filter { it !in (p.featuredModels ?: emptyList()) }).distinct()
+                        val shown = all.take(12)
+                        val providerName = p.name.ifBlank { p.slug }
+                        shown.forEach { m ->
+                            item(key = "${p.slug}/$m") {
+                                val key = "${p.slug}/$m"
+                                val active = m == opt.model && (p.slug == opt.provider || p.isCurrent == true)
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 56.dp)
+                                        .pressClickable(enabled = creating == null) {
+                                            creating = key; createError = null
+                                            app.appScope.launch {
+                                                try {
+                                                    val (newRuntime, _) = SessionRepo(app.client ?: return@launch, app.profile.value)
+                                                        .createSession(model = m, provider = p.slug)
+                                                    onDismiss()
+                                                    onNewChat(newRuntime, "")
+                                                } catch (e: Throwable) {
+                                                    creating = null
+                                                    createError = "Couldn't start a chat with $m: ${e.message}"
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        OneLine(m, Type.Callout)
+                                        OneLine(providerName, Type.Meta)
+                                    }
+                                    when {
+                                        creating == key -> CircularProgressIndicator(Modifier.size(18.dp), color = Ink.Text2, strokeWidth = 2.dp)
+                                        active -> Icon(Icons.Rounded.Check, "Active model", tint = Ink.Text, modifier = Modifier.size(Dim.Icon))
+                                    }
+                                }
+                            }
+                        }
+                        if (all.size > shown.size) item(key = "${p.slug}/more") {
+                            Text(
+                                "${all.size - shown.size} more $providerName models on desktop",
+                                style = Type.Meta.copy(color = Ink.Text3),
+                                modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Hairline(Modifier.padding(top = 4.dp))
+        Text(
+            "Model applies to new chats",
+            style = Type.Callout.copy(color = Ink.Text3),
+            modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
+        )
+    }
+}

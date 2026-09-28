@@ -77,14 +77,21 @@ sealed interface ChatItem {
         /** M5: submit balik status "queued" — pesan dijamin server, muncul setelah turn jalan. */
         val queued: Boolean = false,
         val time: String = "",
+        /** M8: epoch detik — pemisah hari di chat (Today / Yesterday). */
+        val at: Double? = null,
     ) : ChatItem
     data class Assistant(
         val text: String,
         val done: Boolean,
         val reasoning: String? = null,
         val time: String = "",
+        /** M8: epoch detik — pemisah hari. */
+        val at: Double? = null,
+        /** M8: durasi thinking live (detik) → "Thought for 12s"; null = tidak diketahui. */
+        val thoughtSecs: Int? = null,
     ) : ChatItem
-    data class Tool(val name: String, val status: String, val detail: String? = null) : ChatItem
+    /** M8: [toolId] = tool_id event live (match start↔complete); [detail] = args + output → code block saat expand. */
+    data class Tool(val name: String, val status: String, val detail: String? = null, val toolId: String? = null) : ChatItem
     data class NoticeLine(val text: String) : ChatItem
 }
 

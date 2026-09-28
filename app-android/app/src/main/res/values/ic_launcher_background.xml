@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0D1117</color>
+    <!-- M8: = Ink.Bg. Satu-satunya tempat hex di luar ui/theme (resource XML
+         dibaca sistem sebelum Compose jalan: splash, window bg, ikon adaptif). -->
+    <color name="hermes_bg">#0B0B0C</color>
+    <color name="ic_launcher_background">#0B0B0C</color>
 </resources>
