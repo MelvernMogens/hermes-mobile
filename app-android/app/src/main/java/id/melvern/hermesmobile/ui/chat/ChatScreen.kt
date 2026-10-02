@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.MoreVert
@@ -94,6 +95,8 @@ fun ChatScreen(
     initialTitle: String?,
     onBack: () -> Unit = {},
     onOpenChat: (String) -> Unit = {},
+    /** M13: buka ArtifactsScreen (route terpisah, back = balik chat) — bawa live title. */
+    onOpenArtifacts: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var runtimeId by remember { mutableStateOf(preattachedRuntime ?: actualStoredId) }
@@ -329,7 +332,11 @@ fun ChatScreen(
     LaunchedEffect(actualStoredId, preattachedRuntime, reloadKey) {
         loadFailed = false
         if (preattachedRuntime != null) {
-            // NEW GIG: session baru kosong — gak ada transcript buat di-resume
+            // NEW GIG: session baru kosong — gak ada transcript buat di-resume.
+            // M13: tetap tulis entry kosong ke cache supaya ArtifactsScreen bisa
+            // bedain "chat baru (Nothing shared yet)" vs "transcript belum
+            // termuat (Nothing loaded yet)", dan back→reopen gak miss.
+            cacheSnapshot()
             loading = false
             return@LaunchedEffect
         }
@@ -612,6 +619,16 @@ fun ChatScreen(
         }
     }
     var menuSheet by remember { mutableStateOf(false) }
+    // M13: jumlah artifacts (link/foto/video/file) dari items — badge di top bar.
+    // Review M13 HIGH#2: parse di Dispatchers.Default (regex berat, transcript gede)
+    // dan di-skip saat turn jalan (items berganti tiap delta streaming — full
+    // reparse per delta = jank di main thread). Badge update saat stream selesai.
+    var artifactCount by remember { mutableStateOf(0) }
+    LaunchedEffect(items, running) {
+        if (running) return@LaunchedEffect
+        val snapshot = items
+        artifactCount = withContext(Dispatchers.Default) { ArtifactsParser.parse(snapshot).size }
+    }
 
     Column(
         Modifier
@@ -654,6 +671,22 @@ fun ChatScreen(
                             Icon(Icons.Rounded.ExpandMore, "Change model", tint = Ink.Text2, modifier = Modifier.size(Dim.IconSmall))
                         }
                     }
+                }
+            }
+            // M13: artifacts — semua link/foto/video/file dari chat ini.
+            Box {
+                QuietIconButton(Icons.Rounded.Inventory2, "Artifacts", onClick = { onOpenArtifacts(title) })
+                if (artifactCount > 0) {
+                    Text(
+                        if (artifactCount > 99) "99+" else "$artifactCount",
+                        style = Type.Caption.copy(color = Ink.OnAccent),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-4).dp, y = 4.dp)
+                            .clip(Radius.Full)
+                            .background(Ink.Accent)
+                            .padding(horizontal = 5.dp),
+                    )
                 }
             }
             QuietIconButton(Icons.Rounded.MoreVert, "Chat options", onClick = { menuSheet = true })

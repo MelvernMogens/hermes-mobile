@@ -51,6 +51,7 @@ Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
 | M8 | Full visual redesign "Quiet Mono" (DESIGN.md): token Ink/Type/Dim, Inter, Icons.Rounded, 5 layar + sheets + motion + splash; bonus: tool row expand isi args+output, Connect probe password juga di mode desktop | done (28 Sep) — verify/m8 | Opus + 1 subagent reviewer |
 | M9 | 6 UX pass dogfood 28 Sep: tabel markdown, effort chip di ModelSheet (config.set reasoning), video player media3 via proxy mobile-media, seleksi teks sebagian (SelectionContainer), Bot Chat render audit, TranscriptCache LRU-8 (back/rotate gak reload) | done (2 Okt) — verify/m9, 52 unit test, 1 subagent reviewer (4 temuan difix) | GLM 5.3 + reviewer sonnet |
 | M7 | 3 fix UX dogfood: banner read-only derived (4090 nyata + gateway mobile), avatar WEBP raw-base64 parse + inisial loading, showHidden persist DataStore (default ON) | done (28 Sep) — reviewer subagent: watchdog race + race load DataStore, keduanya difix | GLM 5.3 + 1 subagent reviewer |
+| M13 | Artifacts per chat: ikon+badge di top bar → ArtifactsScreen (link/foto/video/file dari TranscriptCache, pure client-side, tanpa RPC baru), grup hari, tap link=browser/foto=fullscreen zoom+Save/video=player/file=save+toast, 12 unit test parser | done (3 Okt) — verify/m13, 71 unit test, 1 subagent reviewer (2H+3M difix) | GLM 5.3 |
 
 ## Konvensi
 - Bahasa kode/komentar Indonesia; UI string English (user request 28 Sep).

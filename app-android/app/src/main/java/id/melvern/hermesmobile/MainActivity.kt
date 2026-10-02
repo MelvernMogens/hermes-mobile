@@ -26,6 +26,7 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import id.melvern.hermesmobile.ui.chat.ArtifactsScreen
 import id.melvern.hermesmobile.ui.chat.ChatScreen
 import id.melvern.hermesmobile.ui.connect.ConnectScreen
 import id.melvern.hermesmobile.ui.sessions.SessionsScreen
@@ -89,6 +90,19 @@ fun AppNav(app: HermesApp) {
         ) {
             composable("connect") { ConnectScreen(app, onConnected = { nav.navigate("sessions") { popUpTo("connect") { inclusive = true } } }) }
             composable("sessions") { SessionsScreen(app, onOpen = { id -> nav.navigate("chat/$id") }) }
+            // M13: artifacts per chat — parse client-side dari TranscriptCache.
+            composable("artifacts/{sessionId}") { entry ->
+                val raw = entry.arguments?.getString("sessionId") ?: return@composable
+                // arg = "storedId|t=<encoded title>"
+                val segs = raw.split("|")
+                val storedId = segs.first()
+                val chatTitle = segs.getOrNull(1)
+                    ?.takeIf { it.startsWith("t=") }
+                    ?.substring(2)
+                    ?.let { runCatching { Uri.decode(it) }.getOrNull() }
+                    ?: ""
+                ArtifactsScreen(app, storedId, chatTitle, onBack = { nav.popBackStack() })
+            }
             composable("chat/{sessionId}") { entry ->
                 // arg = "storedId" | "storedId|runtimeId" (chat baru) |
                 // "storedId|t=<encoded title>" (dari list).
@@ -105,6 +119,11 @@ fun AppNav(app: HermesApp) {
                     app, storedId, runtime, initialTitle,
                     onBack = { nav.popBackStack() },
                     onOpenChat = { arg -> nav.navigate("chat/$arg") { popUpTo("sessions") } },
+                    // M13: artifacts route — live title dari ChatScreen (bisa berubah
+                    // via event session.title), subtitle meta di ArtifactsScreen.
+                    onOpenArtifacts = { liveTitle ->
+                        nav.navigate("artifacts/${storedId}|t=${Uri.encode(liveTitle)}")
+                    },
                 )
             }
         }
