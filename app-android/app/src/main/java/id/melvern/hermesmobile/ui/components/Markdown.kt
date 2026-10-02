@@ -569,6 +569,7 @@ private fun InlineAwareText(
         out
     }
     var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     // M5 fix: lambda pointerInput(Unit) harus baca versi terbaru (streaming).
     val currentAnnotated by rememberUpdatedState(annotated)
     val currentHits by rememberUpdatedState(hitRanges)
@@ -604,7 +605,18 @@ private fun InlineAwareText(
                 }
             }
             .pointerInput(Unit) {
+                // Tap pada link = buka di browser (LinkAnnotation di buildMd gak
+                // ke-fire karena pointerInput ini mengonsumsi tap). Long-press =
+                // copy (code / URL) seperti sebelumnya.
                 detectTapGestures(
+                    onTap = { pos ->
+                        val l = layout ?: return@detectTapGestures
+                        val a = currentAnnotated
+                        val offset = l.getOffsetForPosition(pos).coerceIn(0, (a.length - 1).coerceAtLeast(0))
+                        val hit = currentHits.firstOrNull { offset in it.first } ?: return@detectTapGestures
+                        val (_, kind, value) = hit
+                        if (kind == "link") openUrlExternal(context, value)
+                    },
                     onLongPress = { pos ->
                         val l = layout ?: return@detectTapGestures
                         val a = currentAnnotated
