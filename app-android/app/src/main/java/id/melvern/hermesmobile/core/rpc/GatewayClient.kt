@@ -272,9 +272,16 @@ class GatewayClient(
         }
     }
 
-    suspend fun replaySince(sessionId: String): ReplayResult? {
+    suspend fun replaySince(sessionId: String): ReplayResult? =
+        replaySince(sessionId, lastSeen = null)
+
+    /**
+     * M9 (item 6): replay eksplisit sejak watermark (TranscriptCache) —
+     * client lama tanpa last_seen dapat snapshot penuh server.
+     */
+    suspend fun replaySince(sessionId: String, lastSeen: Int?): ReplayResult? {
         if (_state.value != ConnState.OPEN) return null
-        val last = lastSeenBySession[sessionId]
+        val last = lastSeen ?: lastSeenBySession[sessionId]
         return try {
             val res = call(
                 "session.events.since",
@@ -298,6 +305,9 @@ class GatewayClient(
     }
 
     data class ReplayResult(val count: Int, val truncated: Boolean)
+
+    /** M9: watermark seq terakhir yang diterima utk session (dipakai TranscriptCache). */
+    fun lastSeenSeq(sessionId: String): Int? = lastSeenBySession[sessionId]
 
     private fun failAllPending(reason: String) {
         val entries = pending.keys().toList()

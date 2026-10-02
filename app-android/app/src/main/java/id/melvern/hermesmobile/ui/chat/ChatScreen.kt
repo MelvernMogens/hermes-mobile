@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -42,6 +43,7 @@ import id.melvern.hermesmobile.core.model.TranscriptMessage
 import id.melvern.hermesmobile.core.repo.MediaRepo
 import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
+import id.melvern.hermesmobile.core.repo.TranscriptCache
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
 import id.melvern.hermesmobile.core.rpc.RpcException
@@ -101,7 +103,8 @@ fun ChatScreen(
     var title by remember { mutableStateOf(initialTitle ?: "") }
     var running by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(preattachedRuntime == null) }
-    var input by remember { mutableStateOf("") }
+    // M9 (item 6): draft input selamat dari rotate (transcript via TranscriptCache).
+    var input by rememberSaveable { mutableStateOf("") }
     // M3.3: thinking indicator — event thinking.delta / reasoning.delta
     var thinking by remember { mutableStateOf(false) }
     var thinkingText by remember { mutableStateOf("") }
@@ -255,8 +258,22 @@ fun ChatScreen(
     }
     // M5: fetcher gambar buat MarkdownImage (auth /api/media → bitmap)
     val mediaFetch = remember(app.connection) { mediaFetcherFor(app.connection) }
+    // M9 (item 3): fetcher video (proxy mobile-media → file cacheDir)
+    val videoFetch = remember(app.connection) { videoFetcherFor(app.connection) { context.cacheDir } }
 
     fun nowEpoch(): Double = System.currentTimeMillis() / 1000.0
+
+    /**
+     * M9 (item 6): sinkron transcript ke cache level-app — dipanggil di titik
+     * mutasi items/running (delta, complete, send, tool) supaya back→reopen
+     * dan rotate memulai dari state terakhir, bukan reload penuh.
+     */
+    fun cacheSnapshot() {
+        TranscriptCache.snapshot(
+            effectiveStoredId, items, runtimeId,
+            client?.lastSeenSeq(runtimeId) ?: TranscriptCache.CURSOR_UNKNOWN, running,
+        )
+    }
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
         when {
@@ -276,6 +293,9 @@ fun ChatScreen(
     // M8: gagal load transcript (mis. socket flap di tengah resume) → notice + Retry.
     var reloadKey by remember { mutableStateOf(0) }
     var loadFailed by remember { mutableStateOf(false) }
+    // M9 (item 6): satu flag yang menahan restore cache SEBELUM transcript
+    // server dipakai — mencegah flicker kosong dan cache menimpa hasil server.
+    var cacheHydrated by remember { mutableStateOf(false) }
     LaunchedEffect(actualStoredId, preattachedRuntime, reloadKey) {
         loadFailed = false
         if (preattachedRuntime != null) {
@@ -283,23 +303,66 @@ fun ChatScreen(
             loading = false
             return@LaunchedEffect
         }
+        // M9 (item 6): cache dulu — back→reopen / rotate render instan.
+        if (!cacheHydrated) {
+            TranscriptCache.get(actualStoredId)?.let { e ->
+                items = e.items
+                runtimeId = e.runtimeId
+                running = e.running
+                loading = false
+            }
+            cacheHydrated = true
+        }
         val c = app.client ?: return@LaunchedEffect
         var waited = 0
         while (c.state.value != ConnState.OPEN && waited < 25000) { delay(250); waited += 250 }
         if (c.state.value != ConnState.OPEN) {
-            items = listOf(ChatItem.NoticeLine("Not connected."))
-            loadFailed = true
-            loading = false; return@LaunchedEffect
+            if (items.isEmpty()) {
+                items = listOf(ChatItem.NoticeLine("Not connected."))
+                loadFailed = true
+                loading = false
+            }
+            return@LaunchedEffect
         }
         try {
-            val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
-            runtimeId = out.runtimeId
-            running = out.running
-            items = mapTranscript(out.messages)
+            val cached = TranscriptCache.get(actualStoredId)
+            if (cached != null && cached.runtimeId == runtimeId &&
+                cached.cursor != TranscriptCache.CURSOR_UNKNOWN
+            ) {
+                // DELTA PATH: transcript dipegang cache; ambil hanya event sejak
+                // watermark. Kalau ada event / server bilang truncated → cache
+                // basi (gap) → fallback full resume (satu kali).
+                val replay = c.replaySince(runtimeId, lastSeen = cached.cursor)
+                TranscriptCache.setCursor(actualStoredId, client?.lastSeenSeq(runtimeId) ?: cached.cursor)
+                if (replay != null && replay.count > 0 && items.isNotEmpty()) {
+                    // event masuk lewat inbound flow — beri jendela kecil lalu
+                    // snapshot; fallback resume penuh kalau ternyata ada gap.
+                    delay(600)
+                    cacheSnapshot()
+                    if ((items.lastOrNull() as? ChatItem.Assistant)?.done != false) loading = false
+                } else {
+                    if (replay == null || replay.truncated) {
+                        val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
+                        runtimeId = out.runtimeId
+                        running = out.running
+                        items = mapTranscript(out.messages)
+                        cacheSnapshot()
+                    }
+                    loading = false
+                }
+            } else {
+                val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
+                runtimeId = out.runtimeId
+                running = out.running
+                items = mapTranscript(out.messages)
+                cacheSnapshot()
+            }
             // M4: restored server→client request (replay open_requests) —
             // card dimunculkan lagi; jawab via request.answer RPC (frame id
-            // dari socket lama sudah mati).
-            out.openRequests.forEach { req ->
+            // dari socket lama sudah mati). M9: diambil via resume lazy
+            // (delta path tidak memanggil resume penuh) — HANYA kalau tidak
+            // ada turn jalan (lazy attach bisa re-parent runtime aktif).
+            if (!running) SessionRepo(c, app.profile.value).resumeOpenRequests(actualStoredId).forEach { req ->
                 when (req.method) {
                     "approval" -> approval = AskApproval(
                         id = req.id,
@@ -407,6 +470,7 @@ fun ChatScreen(
                         )
                         pendingThought = null; thoughtBuf = ""
                         running = false
+                        cacheSnapshot()
                         if (!atBottom) hasNew = true
                     }
                     "message.start" -> {
@@ -447,6 +511,7 @@ fun ChatScreen(
                             val detail = listOfNotNull(t.detail, out).joinToString("\n\n").ifBlank { null }
                             l[idx] = t.copy(status = "done", detail = detail?.take(4000))
                         }
+                        cacheSnapshot()
                     }
                     "session.title" -> {
                         ev.payload?.get("title")?.jsonStr()?.takeIf { it.isNotBlank() }?.let { title = it }
@@ -604,7 +669,7 @@ fun ChatScreen(
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
                             is ChatRow.Item -> when (val item = row.item) {
                                 is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it })
-                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch)
+                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch)
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,
                                     onRetry = if (loadFailed) ({ loading = true; items = emptyList(); reloadKey++ }) else null,
@@ -759,6 +824,7 @@ fun ChatScreen(
                             else it
                         }
                         if (status == SessionRepo.SubmitStatus.QUEUED) running = true // turn lanjut/drain queued
+                        cacheSnapshot()
                         // M7 watchdog: submit sukses tapi event streaming belum pasti
                         // sampai. Kalau message.start (counter naik) gak datang dalam
                         // 20s, refresh transcript via session.events.since (replay
@@ -774,6 +840,7 @@ fun ChatScreen(
                         if (turnStartCount == turnStartSnapshot && runtimeId == watchdogRuntime) {
                             app.client?.replaySince(watchdogRuntime)
                         }
+                        cacheSnapshot()
                     } catch (e: Throwable) {
                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
                         if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException) {
@@ -835,6 +902,7 @@ fun ChatScreen(
                 effectiveStoredId = stored.takeIf { it.isNotBlank() } ?: actualStoredId
                 items = emptyList(); title = ""; activeModel = ""
                 input = ""; attachment = null; attachThumb = null; running = false
+                cacheSnapshot()
             },
         )
     }
@@ -900,6 +968,10 @@ private fun ChatSkeleton() {
 /** M5: fetcher gambar (path di Mac → bitmap) — null connection = selalu null (chip fallback). */
 private fun mediaFetcherFor(conn: id.melvern.hermesmobile.core.store.ConnectionSettings?): suspend (String) -> androidx.compose.ui.graphics.ImageBitmap? =
     if (conn == null) { _ -> null } else { path -> MediaRepo(conn).fetchImage(path) }
+
+/** M9 (item 3): fetcher video (path di Mac → file cacheDir) — null connection = chip fallback. */
+private fun videoFetcherFor(conn: id.melvern.hermesmobile.core.store.ConnectionSettings?, cacheDir: () -> java.io.File?): suspend (String) -> java.io.File? =
+    if (conn == null) { _ -> null } else { path -> cacheDir()?.let { MediaRepo(conn).fetchVideo(path, it) } }
 
 /** M8: teks output tool dari ToolCompletePayload.result — string apa adanya; objek → field output umum, fallback JSON. */
 internal fun toolResultText(r: kotlinx.serialization.json.JsonElement?): String? {

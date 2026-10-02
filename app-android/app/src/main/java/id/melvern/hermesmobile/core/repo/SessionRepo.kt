@@ -94,6 +94,32 @@ class SessionRepo(
     /** Satu server→client request belum dijawab (OpenRequestEntry contract). */
     data class OpenRequest(val id: String, val method: String, val params: JsonObject?)
 
+    /**
+     * M9 (item 6): open_requests saja via session.resume lazy+omit_messages —
+     * dipakai delta path (TranscriptCache) supaya card approval/clarify yang
+     * belum dijawab tetap di-restored tanpa transfer transcript penuh.
+     */
+    suspend fun resumeOpenRequests(storedId: String): List<OpenRequest> {
+        val res = try {
+            client.call(
+                "session.resume",
+                buildJsonObject {
+                    put("session_id", storedId); put("lazy", true); put("omit_messages", true); putProfile()
+                },
+                timeoutMs = 20_000,
+            )
+        } catch (_: Throwable) { return emptyList() }
+        return res["open_requests"]?.jsonArray?.mapNotNull { el ->
+            val o = el.jsonObject
+            val method = o["method"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            OpenRequest(
+                id = o["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                method = method,
+                params = o["params"]?.jsonObject,
+            )
+        } ?: emptyList()
+    }
+
     data class ResumeOutcome(
         val runtimeId: String,
         val messages: List<TranscriptMessage>,
