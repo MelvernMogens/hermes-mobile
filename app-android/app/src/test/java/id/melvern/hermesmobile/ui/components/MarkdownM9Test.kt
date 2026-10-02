@@ -54,6 +54,15 @@ class MarkdownM9Test {
     }
 
     @Test
+    fun `HR polos bukan separator tabel`() {
+        // review M9: `| teks |` diikuti HR --- tanpa pipe TIDAK boleh jadi tabel
+        val blocks = MarkdownParser.parse("| catatan penting |\n---\n\nteks lanjut")
+        assertEquals(2, blocks.size)
+        assertTrue(blocks[0] is MdBlock.Paragraph)
+        assertTrue(blocks[1] is MdBlock.Paragraph)
+    }
+
+    @Test
     fun `baris path video jadi VideoRef`() {
         val blocks = MarkdownParser.parse("/Users/melvern/Desktop/clip.mp4")
         assertEquals(1, blocks.size)

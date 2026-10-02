@@ -210,8 +210,10 @@ object MarkdownParser {
         return s.split("|").map { it.trim() }
     }
 
-    /** Baris separator tabel: `|---|:---:|` — hanya dash/colon/spasi. */
+    /** Baris separator tabel: `|---|:---:|` — hanya dash/colon/spasi, WAJIB
+     *  mengandung pipe (HR `---` polos bukan separator tabel). */
     private fun isTableSeparator(line: String): Boolean {
+        if (!line.contains("|")) return false
         val cells = splitTableRow(line)
         if (cells.isEmpty()) return false
         return cells.all { it.matches(Regex(":?-{3,}:?")) }
@@ -393,6 +395,8 @@ fun openUrlExternal(context: Context, url: String) {
 
 private val BlockGap = 12.dp
 private val ListIndent = 20.dp
+/** M9 (item 5): indent per level bullet nested — 16dp (brief). */
+private val NestIndent = 16.dp
 
 /**
  * Body markdown assistant. Parse di-remember per teks supaya streaming delta
@@ -436,7 +440,7 @@ fun MarkdownText(
                 is MdBlock.BulletList -> Column(gap) {
                     block.items.forEachIndexed { n, (raw, level) ->
                         Row(Modifier.padding(top = if (n == 0) 0.dp else 4.dp)) {
-                            Box(Modifier.padding(start = ListIndent * level).width(ListIndent).height(with(LocalDensity.current) { style.lineHeight.toDp() }), contentAlignment = Alignment.CenterStart) {
+                            Box(Modifier.padding(start = NestIndent * level).width(ListIndent).height(with(LocalDensity.current) { style.lineHeight.toDp() }), contentAlignment = Alignment.CenterStart) {
                                 Box(Modifier.padding(start = 6.dp).size(if (level > 0) 4.dp else 5.dp).clip(Radius.Full).background(Ink.Text2))
                             }
                             val item = remember(raw) { MarkdownParser.parseInline(raw) }

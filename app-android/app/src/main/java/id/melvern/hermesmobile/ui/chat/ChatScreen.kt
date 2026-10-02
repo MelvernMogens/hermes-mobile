@@ -268,10 +268,33 @@ fun ChatScreen(
      * mutasi items/running (delta, complete, send, tool) supaya back→reopen
      * dan rotate memulai dari state terakhir, bukan reload penuh.
      */
+    /** M4/M9: replay server→client request (approval/clarify) yang belum dijawab. */
+    fun restoreOpenRequest(req: SessionRepo.OpenRequest) {
+        when (req.method) {
+            "approval" -> approval = AskApproval(
+                id = req.id,
+                requestId = req.params?.get("request_id")?.jsonStr(),
+                title = req.params?.get("tool_name")?.jsonStr()?.takeIf { it.isNotBlank() } ?: "COMMAND",
+                command = req.params?.get("command")?.jsonStr() ?: req.params?.get("description")?.jsonStr() ?: "",
+            )
+            "clarify" -> {
+                val qArr = req.params?.get("questions")?.jsonArray
+                clarify = AskClarify(
+                    id = req.id,
+                    question = req.params?.get("question")?.jsonStr()
+                        ?: qArr?.firstOrNull()?.jsonObject?.get("question")?.jsonStr()
+                        ?: "Something needs confirmation",
+                    questionId = qArr?.firstOrNull()?.jsonObject?.get("qid")?.jsonStr(),
+                )
+            }
+        }
+    }
+
     fun cacheSnapshot() {
+        // app.client (bukan val client lama) — instance bisa diganti HermesApp saat reconnect.
         TranscriptCache.snapshot(
             effectiveStoredId, items, runtimeId,
-            client?.lastSeenSeq(runtimeId) ?: TranscriptCache.CURSOR_UNKNOWN, running,
+            app.client?.lastSeenSeq(runtimeId) ?: TranscriptCache.CURSOR_UNKNOWN, running,
         )
     }
 
@@ -356,31 +379,20 @@ fun ChatScreen(
                 running = out.running
                 items = mapTranscript(out.messages)
                 cacheSnapshot()
+                // M4 asli (review M9): open_requests SELALU direstore dari resume
+                // penuh — approval pending server-side membuat running=true dan
+                // justru di kasus ini card wajib muncul lagi.
+                out.openRequests.forEach { req -> restoreOpenRequest(req) }
             }
             // M4: restored server→client request (replay open_requests) —
             // card dimunculkan lagi; jawab via request.answer RPC (frame id
             // dari socket lama sudah mati). M9: diambil via resume lazy
             // (delta path tidak memanggil resume penuh) — HANYA kalau tidak
             // ada turn jalan (lazy attach bisa re-parent runtime aktif).
+            // delta path: open_requests via lazy resume — HANYA kalau gak ada
+            // turn jalan (lazy attach bisa re-parent runtime aktif).
             if (!running) SessionRepo(c, app.profile.value).resumeOpenRequests(actualStoredId).forEach { req ->
-                when (req.method) {
-                    "approval" -> approval = AskApproval(
-                        id = req.id,
-                        requestId = req.params?.get("request_id")?.jsonStr(),
-                        title = req.params?.get("tool_name")?.jsonStr()?.takeIf { it.isNotBlank() } ?: "COMMAND",
-                        command = req.params?.get("command")?.jsonStr() ?: req.params?.get("description")?.jsonStr() ?: "",
-                    )
-                    "clarify" -> {
-                        val qArr = req.params?.get("questions")?.jsonArray
-                        clarify = AskClarify(
-                            id = req.id,
-                            question = req.params?.get("question")?.jsonStr()
-                                ?: qArr?.firstOrNull()?.jsonObject?.get("question")?.jsonStr()
-                                ?: "Something needs confirmation",
-                            questionId = qArr?.firstOrNull()?.jsonObject?.get("qid")?.jsonStr(),
-                        )
-                    }
-                }
+                restoreOpenRequest(req)
             }
         } catch (e: Throwable) {
             items = listOf(ChatItem.NoticeLine("Couldn't load this chat (${e.message})."))
