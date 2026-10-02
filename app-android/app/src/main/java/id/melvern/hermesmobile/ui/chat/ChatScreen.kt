@@ -103,6 +103,11 @@ fun ChatScreen(
     // M5 fix: stored id aktif — bisa ganti pas "GIG baru dengan model ini"
     // (session.create balikin stored id baru; jangan resume session lama).
     var effectiveStoredId by remember { mutableStateOf(actualStoredId) }
+    // M14: chat ini "yang dibuka di layar" — notif utk session ini di-mute.
+    DisposableEffect(effectiveStoredId) {
+        app.openChatStoredId = effectiveStoredId
+        onDispose { if (app.openChatStoredId == effectiveStoredId) app.openChatStoredId = null }
+    }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     var title by remember { mutableStateOf(initialTitle ?: "") }
     var running by remember { mutableStateOf(false) }

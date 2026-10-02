@@ -56,11 +56,20 @@ class GatewayClient(
 ) {
     companion object {
         const val HEARTBEAT_INTERVAL_MS = 15_000L
+        /** M14: interval heartbeat saat app background — hemat baterai hp-kentang. */
+        const val HEARTBEAT_BACKGROUND_MS = 25_000L
         const val HEARTBEAT_DEADLINE_MS = 45_000L
         const val REQUEST_TIMEOUT_MS = 120_000L
         const val REPLAY_TIMEOUT_MS = 10_000L
         const val WS_SUBPROTOCOL = "hermes-gateway-v1"
     }
+
+    /**
+     * M14: heartbeatIntervalMs() dipanggil tiap siklus — constant yang bisa di-set
+     * service (spec: gak boleh sentuh dispatch logic; ini cuma interval).
+     * Default = foreground 15s. Service men-set 25s saat background.
+     */
+    @Volatile var heartbeatIntervalMs: () -> Long = { HEARTBEAT_INTERVAL_MS }
 
     private val json = Json { ignoreUnknownKeys = true }
     private val client = OkHttpClient.Builder()
@@ -180,11 +189,11 @@ class GatewayClient(
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive && _state.value == ConnState.OPEN) {
-                delay(HEARTBEAT_INTERVAL_MS)
+                delay(heartbeatIntervalMs())
                 val silent = System.currentTimeMillis() - lastInboundAt > HEARTBEAT_DEADLINE_MS
                 if (silent) { webSocket?.cancel(); break }
                 try {
-                    call("gateway.ping", timeoutMs = HEARTBEAT_INTERVAL_MS)
+                    call("gateway.ping", timeoutMs = heartbeatIntervalMs())
                 } catch (_: Throwable) { webSocket?.cancel(); break }
             }
         }

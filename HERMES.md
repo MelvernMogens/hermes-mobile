@@ -52,6 +52,7 @@ Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
 | M9 | 6 UX pass dogfood 28 Sep: tabel markdown, effort chip di ModelSheet (config.set reasoning), video player media3 via proxy mobile-media, seleksi teks sebagian (SelectionContainer), Bot Chat render audit, TranscriptCache LRU-8 (back/rotate gak reload) | done (2 Okt) — verify/m9, 52 unit test, 1 subagent reviewer (4 temuan difix) | GLM 5.3 + reviewer sonnet |
 | M7 | 3 fix UX dogfood: banner read-only derived (4090 nyata + gateway mobile), avatar WEBP raw-base64 parse + inisial loading, showHidden persist DataStore (default ON) | done (28 Sep) — reviewer subagent: watchdog race + race load DataStore, keduanya difix | GLM 5.3 + 1 subagent reviewer |
 | M13 | Artifacts per chat: ikon+badge di top bar → ArtifactsScreen (link/foto/video/file dari TranscriptCache, pure client-side, tanpa RPC baru), grup hari, tap link=browser/foto=fullscreen zoom+Save/video=player/file=save+toast, 12 unit test parser | done (3 Okt) — verify/m13, 71 unit test, 1 subagent reviewer (2H+3M difix) | GLM 5.3 |
+| M14 | Notifikasi background tanpa FCM: foreground service dataSync + partial wake lock 4h re-acquire + poller session.active_list 20s (event ring TIDAK sampai ke non-viewer — terbukti E2E) → notif reply/approval/error, dedup 30s, deep-link tap→chat, POST_NOTIFICATIONS flow + banner, heartbeat 15s/25s fg/bg, channel agent high + connection low | done (3 Okt) — verify/m14, 96 unit test, 1 subagent reviewer (2H+4M difix) | GLM 5.3 |
 
 ## Konvensi
 - Bahasa kode/komentar Indonesia; UI string English (user request 28 Sep).
@@ -70,3 +71,9 @@ Log server: `tail -f ~/.hermes/logs/mobile-serve.log`.
   (jangan complete-kan deferred di `onOpen`).
 - Emulator: `adb -s emulator-5580` (AVD Blokees dipakai bareng — jangan
   `adb kill-server`).
+- **M14**: event ring gateway hanya terkirim ke transport viewer session itu —
+  deteksi aktivitas background WAJIB polling `session.active_list` (status
+  working/waiting/idle + message_count + preview + session_key), bukan listen
+  inbound. Notif id & PendingIntent requestCode = storedId.hashCode().
+- logcat emulator API 36 kadang tak menampilkan log app lama — untuk bukti
+  gunakan `logcat -v threadtime -T 1` live capture + dumpsys notification.

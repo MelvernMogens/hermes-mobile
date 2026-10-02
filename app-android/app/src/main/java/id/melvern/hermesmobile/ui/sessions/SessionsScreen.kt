@@ -233,6 +233,34 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
         }
         if (scrolled || searching) Hairline() else Spacer(Modifier.height(hairline()))
 
+        // M14: banner permission notif mati — cuma di API 33+ dan belum granted.
+        val notifDenied = remember {
+            android.os.Build.VERSION.SDK_INT >= 33 &&
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (notifDenied) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .pressClickable {
+                        // Buka settings app (dialog permission cuma bisa muncul sekali per install).
+                        runCatching {
+                            ctx.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Notifications disabled — tap to enable", style = Type.MetaMedium, color = Ink.Text2)
+            }
+        }
+
         // ── Isi ────────────────────────────────────────────────────────
         val problem = when (connState) {
             ConnState.OPEN -> null

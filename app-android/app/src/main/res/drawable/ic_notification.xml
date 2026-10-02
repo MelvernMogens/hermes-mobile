@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M14: small icon notifikasi — lingkaran + petir, putih di atas transparan
+     (standar AOSP: template alpha-only, diberi tint oleh sistem/ setColor). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2a10,10 0 1,0 0,20a10,10 0 0,0 0,-20zM12,4.5a7.5,7.5 0 1,1 0,15a7.5,7.5 0 0,1 0,-15z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12.8,6.5l-4.3,6.2h2.6l-1.1,4.8 4.5,-6.6h-2.7z" />
+</vector>

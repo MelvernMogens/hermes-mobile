@@ -1,0 +1,5 @@
+--------- beginning of main
+10-03 03:49:59.677  8479  8575 I HermesGateway: WS open
+10-03 03:52:38.574  8479  8559 I HermesNotifRouter: notif: Agent replied — Save & link test | Kopi adalah salah satu tanaman paling be
+10-03 03:53:58.610  8479  8550 I HermesNotifRouter: notif: Agent needs your approval — Save & link test | Approval is waiting for your response.
+10-03 03:59:18.727  8479  8559 I HermesNotifRouter: notif: Agent replied — Save & link test | **Hujan di Jakarta** Sore itu langit pec
