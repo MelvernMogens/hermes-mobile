@@ -361,6 +361,11 @@ fun ChatScreen(
                 // basi (gap) → fallback full resume (satu kali).
                 val replay = c.replaySince(runtimeId, lastSeen = cached.cursor)
                 TranscriptCache.setCursor(actualStoredId, client?.lastSeenSeq(runtimeId) ?: cached.cursor)
+                // M10b: epoch replay-ring — kalau gateway restart, runtime id + ring baru
+                // (count=0 palsu). Epoch beda dari cache = WAJIB full resume, jangan
+                // percaya "tidak ada event baru" (bug: chat gak ngikutin pesan terakhir).
+                replay?.let { TranscriptCache.setEpoch(actualStoredId, it.epoch) }
+                val epochFresh = replay != null && (cached.epoch == 0 || replay.epoch == cached.epoch)
                 if (replay != null && replay.count > 0 && items.isNotEmpty()) {
                     // event masuk lewat inbound flow — beri jendela kecil lalu
                     // snapshot; fallback resume penuh kalau ternyata ada gap.
@@ -368,7 +373,7 @@ fun ChatScreen(
                     cacheSnapshot()
                     if ((items.lastOrNull() as? ChatItem.Assistant)?.done != false) loading = false
                 } else {
-                    if (replay == null || replay.truncated) {
+                    if (replay == null || replay.truncated || !epochFresh) {
                         val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
                         runtimeId = out.runtimeId
                         running = out.running

@@ -300,11 +300,15 @@ class GatewayClient(
                 _inbound.tryEmit(GatewayInbound.RpcEvent(type, sid, payload))
             }
             (res["latest_seq"]?.jsonPrimitive?.intOrNull)?.let { lastSeenBySession[sessionId] = it }
-            ReplayResult(res["count"]?.jsonPrimitive?.intOrNull ?: 0, res["truncated"]?.jsonPrimitive?.booleanOrNull ?: false)
+            ReplayResult(
+                res["count"]?.jsonPrimitive?.intOrNull ?: 0,
+                res["truncated"]?.jsonPrimitive?.booleanOrNull ?: false,
+                res["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
+            )
         } catch (_: Throwable) { null }
     }
 
-    data class ReplayResult(val count: Int, val truncated: Boolean)
+    data class ReplayResult(val count: Int, val truncated: Boolean, val epoch: Int = 0)
 
     /** M9: watermark seq terakhir yang diterima utk session (dipakai TranscriptCache). */
     fun lastSeenSeq(sessionId: String): Int? = lastSeenBySession[sessionId]

@@ -25,6 +25,9 @@ object TranscriptCache {
         /** Watermark seq events terakhir yang sudah masuk `items` (-1 = belum ada). */
         val cursor: Int,
         val running: Boolean,
+        /** Replay-epoch gateway saat snapshot diambil — berubah tiap restart gateway;
+         *  epoch beda = ring replay kosong → delta count=0 TIDAK bisa dipercaya → full resume. */
+        val epoch: Int = 0,
         val at: Long = System.currentTimeMillis(),
     )
 
@@ -76,4 +79,9 @@ object TranscriptCache {
             map.remove(eldest)
         }
     }
+    @Synchronized
+    fun setEpoch(storedId: String, epoch: Int) {
+        map[storedId]?.let { map[storedId] = it.copy(epoch = epoch) }
+    }
+
 }
