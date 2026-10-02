@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -156,6 +157,8 @@ fun ChatScreen(
     var didInitialScroll by remember { mutableStateOf(false) }
     // M3.2: long-press salin teks
     var copyTarget by remember { mutableStateOf<String?>(null) }
+    // M11: reply — teks pesan yang di-quote, tampil sebagai chip di atas composer.
+    var replyQuote by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
     // M6→M7: read-only — HANYA setelah error 4090 NYATA saat gateway mobile
     // (desktop-linked = multi-surface normal, banner tidak boleh muncul
@@ -690,7 +693,7 @@ fun ChatScreen(
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
                             is ChatRow.Item -> when (val item = row.item) {
                                 is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it })
-                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch)
+                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) })
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,
                                     onRetry = if (loadFailed) ({ loading = true; items = emptyList(); reloadKey++ }) else null,
@@ -803,10 +806,15 @@ fun ChatScreen(
             attachThumb = attachThumb,
             attaching = attaching,
             attachError = attachError,
+            quote = replyQuote,
+            onCancelQuote = { replyQuote = null },
             onAttach = { attachSheet = true },
             onRemoveAttachment = { attachment = null; attachThumb = null },
         onSend = {
                 val typed = input.trim()
+                // M11: reply — quote diselipkan sebagai konteks di atas pesan
+                val quote = replyQuote
+                replyQuote = null
                 // file non-gambar WAJIB bawa ref; gambar auto-queued server
                 val att = attachment
                 val parts = listOfNotNull(
@@ -816,7 +824,14 @@ fun ChatScreen(
                 // M5: chip foto tanpa teks tetap bisa dikirim — gambar sudah
                 // auto-queued server-side; teks "Sent a photo: nama" cuma trigger turn.
                 if (parts.isEmpty() && att?.isImage != true) return@Composer
-                val text = if (parts.isEmpty()) "Sent a photo: ${att?.name}" else parts.joinToString("\n")
+                val sentQuote = quote?.let { q ->
+                    val flat = q.lineSequence().joinToString(" ").trim()
+                    if (flat.isEmpty()) null else "> ${flat.take(240)}"
+                }
+                val text = listOfNotNull(
+                    sentQuote,
+                    if (parts.isEmpty() && att?.isImage == true) "Sent a photo: ${att?.name}" else parts.joinToString("\n").takeIf { it.isNotEmpty() },
+                ).joinToString("\n\n")
                 input = ""
                 attachment = null
                 attachThumb = null
@@ -824,6 +839,7 @@ fun ChatScreen(
                 items = items + ChatItem.User(
                     if (typed.isEmpty() && att != null) "Sent a photo: ${att.name}" else typed.ifEmpty { "Sent a photo: ${att?.name}" },
                     pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
+                    quote = quote,
                 )
                 scope.launch {
                     try {
@@ -894,6 +910,10 @@ fun ChatScreen(
                 maxLines = 3, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp),
             )
+            SheetActionRow("Reply", Icons.Rounded.Reply) {
+                replyQuote = target.take(280)
+                copyTarget = null
+            }
             SheetActionRow("Copy text", Icons.Rounded.ContentCopy) {
                 clipboard.setText(AnnotatedString(target))
                 copyTarget = null

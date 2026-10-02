@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Terminal
@@ -143,6 +144,7 @@ fun DayChip(label: String) {
  */
 @Composable
 fun UserBubble(item: ChatItem.User, onLongPress: (String) -> Unit) {
+    // M11: quote block (reply) di atas isi — kaya WhatsApp.
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
         val maxW = maxWidth * 0.8f
         // M9 (item 4): SelectionContainer di level konten — user bisa seleksi
@@ -160,6 +162,19 @@ fun UserBubble(item: ChatItem.User, onLongPress: (String) -> Unit) {
                 .padding(horizontal = 12.dp, vertical = 9.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            item.quote?.let { q ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp)
+                        .clip(Radius.Chip)
+                        .background(Ink.Surface1)
+                        .border(hairline(), Ink.Hairline, Radius.Chip)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                ) {
+                    Text(q, style = Type.Callout.copy(color = Ink.Text2), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+            }
             SelectionContainer { Text(item.text, style = Type.Body) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
@@ -187,6 +202,7 @@ fun AssistantBlock(
     onLongPress: (String) -> Unit,
     mediaFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)?,
     videoFetch: (suspend (String) -> java.io.File?)? = null,
+    onReply: ((String) -> Unit)? = null,
 ) {
     Column(
         Modifier
@@ -211,8 +227,26 @@ fun AssistantBlock(
         SelectionContainer {
             MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
         }
-        if (item.done && item.time.isNotEmpty()) {
-            Text(item.time, style = Type.Caption, modifier = Modifier.padding(top = 6.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
+            if (item.done && onReply != null) {
+                Row(
+                    Modifier
+                        .clip(Radius.Chip)
+                        .pressClickable { onReply(item.text) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Reply, "Reply", tint = Ink.Text3, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Reply", style = Type.Caption.copy(color = Ink.Text3))
+                }
+            }
+            if (item.done && item.time.isNotEmpty()) {
+                Text(item.time, style = Type.Caption, modifier = Modifier.padding(start = 10.dp, top = 2.dp))
+            }
         }
     }
 }

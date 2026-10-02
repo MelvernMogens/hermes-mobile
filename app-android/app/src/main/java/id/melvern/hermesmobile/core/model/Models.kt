@@ -79,6 +79,8 @@ sealed interface ChatItem {
         val time: String = "",
         /** M8: epoch detik — pemisah hari di chat (Today / Yesterday). */
         val at: Double? = null,
+        /** M11: teks pesan yang di-quote (reply) — tampil sebagai blok kutipan di atas isi. */
+        val quote: String? = null,
     ) : ChatItem
     data class Assistant(
         val text: String,

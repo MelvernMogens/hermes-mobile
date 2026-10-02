@@ -67,6 +67,8 @@ fun Composer(
     attachThumb: ImageBitmap?,
     attaching: Boolean,
     attachError: String?,
+    quote: String? = null,
+    onCancelQuote: () -> Unit = {},
     onAttach: () -> Unit,
     onRemoveAttachment: () -> Unit,
     onSend: () -> Unit, onStop: () -> Unit,
@@ -77,6 +79,35 @@ fun Composer(
         Hairline()
         attachError?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp))
+        }
+        // M11: chip reply — kutipan pesan yang dibalas, X untuk batal.
+        quote?.let { q ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp)
+                    .clip(Radius.Chip)
+                    .background(Ink.Surface1)
+                    .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(3.dp).height(32.dp).clip(Radius.Full).background(Ink.Text2))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    q, style = Type.Meta.copy(color = Ink.Text2),
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(Radius.Full)
+                        .pressClickable(onClick = onCancelQuote),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Close, "Cancel reply", tint = Ink.Text3, modifier = Modifier.size(Dim.IconSmall))
+                }
+            }
         }
         if (attachment != null || attaching) {
             AttachmentChip(attachment, attachThumb, attaching, onRemoveAttachment)
