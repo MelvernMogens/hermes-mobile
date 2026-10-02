@@ -79,6 +79,31 @@ class MetaRepo(private val client: GatewayClient) {
         )
     }
 
+    // ── M9 (item 2): reasoning effort (config.get/config.set key=reasoning) ──
+
+    /**
+     * Upaya reasoning aktif utk session (fallback config global).
+     * `config.get key=reasoning` → {value, display}; value "none" = thinking
+     * mati → null (chip gak ada yang aktif).
+     */
+    suspend fun reasoningEffort(sessionId: String?): String? {
+        val res = client.call("config.get", buildJsonObject {
+            put("key", "reasoning")
+            if (!sessionId.isNullOrBlank()) put("session_id", sessionId)
+        })
+        val v = res["value"]?.jsonPrimitive?.contentOrNull ?: return null
+        return v.takeIf { it.isNotBlank() && it != "none" }
+    }
+
+    /** `config.set key=reasoning value=<low|medium|high|max>` — session-scoped. */
+    suspend fun setReasoningEffort(sessionId: String, effort: String) {
+        client.call("config.set", buildJsonObject {
+            put("session_id", sessionId)
+            put("key", "reasoning")
+            put("value", effort)
+        })
+    }
+
     // ── profiles.list ──────────────────────────────────────────────────
 
     @Serializable
