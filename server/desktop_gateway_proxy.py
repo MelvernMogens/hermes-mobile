@@ -149,7 +149,11 @@ async def _ticket_valid(ticket: str, subproto: str, session: aiohttp.ClientSessi
 
 
 _IMG_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
-             ".gif": "image/gif", ".bmp": "image/bmp"}
+             ".gif": "image/gif", ".bmp": "image/bmp",
+             # M9: video dari agent (media3 ExoPlayer di app; suffix list diperluas,
+             # auth + path-in-chat + size cap TIDAK diubah)
+             ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+             ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo"}
 _MEDIA_MAX = 20 * 1024 * 1024
 
 

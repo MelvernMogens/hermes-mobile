@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,9 +29,13 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.JetBrainsMono
@@ -106,19 +113,36 @@ sealed interface MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock
     data class Heading(val level: Int, val spans: List<MdSpan>) : MdBlock
     data class CodeBlock(val lang: String, val code: String) : MdBlock
-    data class BulletList(val items: List<List<MdSpan>>) : MdBlock
+    data class BulletList(val items: List<Pair<String, Int>>) : MdBlock
     data class NumberList(val items: List<List<MdSpan>>) : MdBlock
     data class Quote(val spans: List<MdSpan>) : MdBlock
     /** M5: baris path file gambar — render sebagai foto (via /api/media). */
     data class ImageRef(val path: String) : MdBlock
+    /** M9 (item 3): baris path file video — render player (via proxy mobile-media). */
+    data class VideoRef(val path: String) : MdBlock
+    /** M9 (item 1): blok tabel markdown — header + baris body, sel = span inline. */
+    data class Table(val header: List<List<MdSpan>>, val rows: List<List<List<MdSpan>>>) : MdBlock
 }
 
 object MarkdownParser {
 
+    /** M9: marker sementara utk `|` yang di-escape (`\\|`) di dalam sel tabel. */
+    private const val ESCAPED_PIPE = "\uE000"
+
     private val HEADING = Regex("^(#{1,6})\\s+(.*)$")
-    private val BULLET = Regex("^\\s*[-*]\\s+(.*)$")
-    private val ORDERED = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
+    private val BULLET = Regex("^(\\s*)[-*]\\s+(.*)$")
+    private val ORDERED = Regex("^(\\s*)(\\d+)[.)]\\s+(.*)$")
     private val QUOTE = Regex("^\\s*>\\s?(.*)$")
+
+    /** M9: level indent bullet — 2 spasi per level (tab = 4), max 3. */
+    private fun bulletLevel(indent: String): Int {
+        val spaces = indent.count { it == ' ' } + indent.count { it == '\t' } * 4
+        return (spaces / 2).coerceIn(0, 3)
+    }
+
+    /** M9 (item 5): kolaps spasi ganda jadi satu — teks bot sering bawa "kata  kata". */
+    private fun collapseSpaces(s: String): String = s.replace(Regex("[ \\t]{2,}"), " ")
+
 
     /**
      * M5: baris yang persis satu path file gambar — absolute unix path
@@ -138,12 +162,36 @@ object MarkdownParser {
         RegexOption.IGNORE_CASE,
     )
 
+    /**
+     * M9 (item 3): ekstensi video yang dikenali (line-based + anywhere,
+     * pola sama dengan gambar).
+     */
+    private val VIDEO_EXTS = "mp4|mov|webm|mkv|avi"
+
+    /** M9: baris yang persis satu path file video (pola IMAGE_PATH_LINE). */
+    private val VIDEO_PATH_LINE = Regex(
+        """^\s*(?:MEDIA:\s*|!\[[^\]]*\]\(|\[[^\]]*\]\()?\s*[`'"]?((?:/[\w.\-]+)+\.(?:$VIDEO_EXTS))[`'"]?\s*\)?\s*$""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Path video dalam teks bebas. */
+    private val VIDEO_PATH_ANYWHERE = Regex(
+        """(?:/[\w.\-]+)+\.(?:$VIDEO_EXTS)""",
+        RegexOption.IGNORE_CASE,
+    )
+
+
     /** M5: true kalau teks berisi setidaknya satu path file gambar. */
     fun containsImagePath(text: String): Boolean = IMAGE_PATH_ANYWHERE.containsMatchIn(text)
 
     /** M5: semua path gambar yang ketemu di teks (distinct, urutan kemunculan). */
     fun imagePathsIn(text: String): List<String> =
         IMAGE_PATH_ANYWHERE.findAll(text).map { it.value }.distinct().toList()
+
+    /** M9: semua path video yang ketemu di teks (distinct, urutan kemunculan). */
+    fun videoPathsIn(text: String): List<String> =
+        VIDEO_PATH_ANYWHERE.findAll(text).map { it.value }.distinct().toList()
+
 
     // urutan alternatif PENTING: bold sebelum italic, markdown-link sebelum URL polos
     private val INLINE = Regex(
@@ -154,10 +202,33 @@ object MarkdownParser {
         """|(?:^|[\s(])((?:https?://)[^\s<>()\[\]{}'\u0022]+)""" // url polos
     )
 
+    /** Baris tabel markdown: mulai + akhir `|` (opsional), sel dipisah `|`. */
+    private fun splitTableRow(line: String): List<String> {
+        var s = line.trim()
+        if (s.startsWith("|")) s = s.substring(1)
+        if (s.endsWith("|")) s = s.substring(0, s.length - 1)
+        return s.split("|").map { it.trim() }
+    }
+
+    /** Baris separator tabel: `|---|:---:|` — hanya dash/colon/spasi. */
+    private fun isTableSeparator(line: String): Boolean {
+        val cells = splitTableRow(line)
+        if (cells.isEmpty()) return false
+        return cells.all { it.matches(Regex(":?-{3,}:?")) }
+    }
+
+    /**
+     * M9 (item 1): split inline menjadi span per sel — escaped pipe `\|`
+     * dipulihkan jadi `|` setelah split baris (markernya <U+E000>).
+     */
+    fun parseInlineCell(src: String): List<MdSpan> =
+        parseInline(src.replace(ESCAPED_PIPE, "|"))
+
     fun parse(src: String): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
         val para = mutableListOf<String>()
-        val bullet = mutableListOf<String>()
+        val bullet = mutableListOf<Pair<Int, String>>()
+        var curLevel = -1
         val ordered = mutableListOf<String>()
         val quote = mutableListOf<String>()
 
@@ -169,7 +240,7 @@ object MarkdownParser {
         }
         fun flushBullet() {
             if (bullet.isNotEmpty()) {
-                blocks += MdBlock.BulletList(bullet.map { parseInline(it) })
+                blocks += MdBlock.BulletList(bullet.map { it.second to it.first })
                 bullet.clear()
             }
         }
@@ -192,6 +263,7 @@ object MarkdownParser {
         while (i < lines.size) {
             val line = lines[i]
             val trimmed = line.trim()
+            val trimmedCollapsed = collapseSpaces(trimmed)
             when {
                 trimmed.startsWith("```") -> {
                     flushAll()
@@ -204,25 +276,48 @@ object MarkdownParser {
                     // i sekarang di fence penutup (atau EOF — code block gak ditutup tetap dirender)
                     blocks += MdBlock.CodeBlock(lang, body.joinToString("\n"))
                 }
+                // M9 (item 1): blok tabel — baris | lalu separator |---|
+                trimmed.startsWith("|") && i + 1 < lines.size && isTableSeparator(lines[i + 1]) -> {
+                    flushAll()
+                    val header = splitTableRow(trimmed.replace("\\|", ESCAPED_PIPE)).map { parseInlineCell(it) }
+                    i += 2
+                    val rows = mutableListOf<List<List<MdSpan>>>()
+                    while (i < lines.size && lines[i].trim().startsWith("|") &&
+                        !isTableSeparator(lines[i])
+                    ) {
+                        rows += splitTableRow(lines[i].trim().replace("\\|", ESCAPED_PIPE)).map { parseInlineCell(it) }
+                        i++
+                    }
+                    blocks += MdBlock.Table(header, rows)
+                }
                 HEADING.containsMatchIn(trimmed) && trimmed.startsWith("#") -> {
                     flushAll()
                     val m = HEADING.find(trimmed)!!
                     blocks += MdBlock.Heading(m.groupValues[1].length, parseInline(m.groupValues[2].trim()))
                 }
+                // M9: match di baris MENTAH — indent dipakai utk level nested
                 BULLET.containsMatchIn(trimmed) && !trimmed.startsWith("**") -> {
-                    flushPara(); flushOrdered(); flushQuote()
+                    val m = BULLET.find(line)!!
+                    val level = bulletLevel(m.groupValues[1])
+                    if (level != curLevel) { flushPara(); flushOrdered(); flushQuote(); flushBullet(); curLevel = level }
+                    if (para.isNotEmpty()) flushPara()
                     if (ordered.isNotEmpty()) flushOrdered()
-                    bullet += BULLET.find(trimmed)!!.groupValues[1].trim()
+                    if (quote.isNotEmpty()) flushQuote()
+                    bullet += bulletLevel(m.groupValues[1]) to collapseSpaces(m.groupValues[2].trim())
                 }
                 ORDERED.containsMatchIn(trimmed) -> {
                     flushPara(); flushBullet(); flushQuote()
-                    ordered += ORDERED.find(trimmed)!!.groupValues[2].trim()
+                    ordered += collapseSpaces(ORDERED.find(line)!!.groupValues[3].trim())
                 }
                 QUOTE.containsMatchIn(trimmed) -> {
                     flushPara(); flushBullet(); flushOrdered()
                     quote += QUOTE.find(trimmed)!!.groupValues[1]
                 }
                 trimmed.isEmpty() -> flushAll()
+                VIDEO_PATH_LINE.containsMatchIn(trimmed) -> {
+                    flushAll()
+                    blocks += MdBlock.VideoRef(videoPathsIn(trimmed).first())
+                }
                 IMAGE_PATH_LINE.containsMatchIn(trimmed) && imagePathsIn(trimmed).isNotEmpty() -> {
                     // M5: baris path gambar → render foto (bukan paragraf teks)
                     flushAll()
@@ -230,7 +325,7 @@ object MarkdownParser {
                 }
                 else -> {
                     flushBullet(); flushOrdered(); flushQuote()
-                    para += trimmed
+                    para += trimmedCollapsed
                 }
             }
             i++
@@ -310,6 +405,8 @@ fun MarkdownText(
     style: TextStyle = Type.Body,
     /** M5: fetcher gambar (path di Mac → bitmap via /api/media); null = selalu chip fallback. */
     imageFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)? = null,
+    /** M9: fetcher video (path di Mac → file cache via proxy mobile-media); null = chip fallback. */
+    videoFetch: (suspend (String) -> java.io.File?)? = null,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -324,6 +421,8 @@ fun MarkdownText(
             val gap = if (idx == blocks.lastIndex) Modifier else Modifier.padding(bottom = BlockGap)
             when (block) {
                 is MdBlock.ImageRef -> MarkdownImage(block.path, modifier = gap, fetch = imageFetch)
+                is MdBlock.VideoRef -> MarkdownVideo(block.path, modifier = gap, fetch = videoFetch)
+                is MdBlock.Table -> MdTable(block, modifier = gap)
                 is MdBlock.Paragraph -> InlineAwareText(
                     buildMd(block.spans, context), style = style, spans = block.spans, actions = actions, modifier = gap,
                 )
@@ -335,11 +434,12 @@ fun MarkdownText(
                 )
                 is MdBlock.CodeBlock -> CodeBox(block.lang, block.code, modifier = gap)
                 is MdBlock.BulletList -> Column(gap) {
-                    block.items.forEachIndexed { n, item ->
+                    block.items.forEachIndexed { n, (raw, level) ->
                         Row(Modifier.padding(top = if (n == 0) 0.dp else 4.dp)) {
-                            Box(Modifier.width(ListIndent).height(with(LocalDensity.current) { style.lineHeight.toDp() }), contentAlignment = Alignment.CenterStart) {
-                                Box(Modifier.padding(start = 6.dp).size(5.dp).clip(Radius.Full).background(Ink.Text2))
+                            Box(Modifier.padding(start = ListIndent * level).width(ListIndent).height(with(LocalDensity.current) { style.lineHeight.toDp() }), contentAlignment = Alignment.CenterStart) {
+                                Box(Modifier.padding(start = 6.dp).size(if (level > 0) 4.dp else 5.dp).clip(Radius.Full).background(Ink.Text2))
                             }
+                            val item = remember(raw) { MarkdownParser.parseInline(raw) }
                             InlineAwareText(buildMd(item, context), style = style, spans = item, actions = actions, modifier = Modifier.weight(1f))
                         }
                     }
@@ -472,8 +572,198 @@ private fun buildMd(spans: List<MdSpan>, context: Context): AnnotatedString = bu
 }
 
 // ---------------------------------------------------------------------------
-// M5: aksi long-press (copy inline code / salin tautan) + render gambar path
+// M9 (item 1): render tabel markdown
 // ---------------------------------------------------------------------------
+
+private val TableCellMaxW = 200.dp
+
+/**
+ * M9 (item 1): tabel markdown — Surface1 radius 10, header bold (Title) di
+ * atas divider hairline, kolom dibagi rata weight(1f), gap antar sel 12dp.
+ * Kolom > 4 ATAU ada sel panjang (> 40 char) → horizontal scroll.
+ * Tap sel yang terpotong (ellipsis) → sheet teks penuh.
+ */
+@Composable
+fun MdTable(table: MdBlock.Table, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val cols = table.header.size
+    val scrollable = cols > 4 || (table.rows.maxOfOrNull { r -> r.maxOfOrNull { spans -> spans.sumOf { it.text.length } } ?: 0 } ?: 0) > 40
+    val hl = hairline()
+    var cellSheet by remember { mutableStateOf<String?>(null) }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(Radius.Chip)
+            .background(Ink.Surface1)
+            .border(hl, Ink.Hairline, Radius.Chip)
+            .then(if (scrollable) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+    ) {
+        // header
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+            table.header.forEachIndexed { c, spans ->
+                val cell = buildMd(spans, context)
+                val overflow = cell.length > 24
+                Text(
+                    cell,
+                    style = Type.Title.copy(fontSize = Type.Callout.fontSize, lineHeight = Type.Callout.lineHeight),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .widthIn(max = TableCellMaxW)
+                        .padding(horizontal = 6.dp)
+                        .then(if (overflow) Modifier.pressClickable { cellSheet = cell.text } else Modifier),
+                )
+            }
+        }
+        HorizontalDivider(color = Ink.Hairline, thickness = hl)
+        // body
+        table.rows.forEachIndexed { r, row ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                row.forEachIndexed { c, spans ->
+                    val cell = buildMd(spans, context)
+                    val overflow = cell.length > 40
+                    Text(
+                        cell,
+                        style = Type.Callout,
+                        color = Ink.Text2,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .widthIn(max = TableCellMaxW)
+                            .padding(horizontal = 6.dp)
+                            .then(if (overflow) Modifier.pressClickable { cellSheet = cell.text } else Modifier),
+                )
+            }
+            }
+            if (r != table.rows.lastIndex) HorizontalDivider(color = Ink.Hairline, thickness = hairline())
+        }
+    }
+    cellSheet?.let { full ->
+        QuietSheet(onDismiss = { cellSheet = null }, title = "Cell") {
+            Text(
+                full,
+                style = Type.Callout.copy(color = Ink.Text2),
+                modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 12.dp),
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M9 (item 3): render video path dari agent
+// ---------------------------------------------------------------------------
+
+/**
+ * M9 (item 3): render path file video dari jawaban agent.
+ * Download via proxy /api/mobile-media (auth + path-in-chat guard) ke cacheDir,
+ * mainkan pakai media3 ExoPlayer di AndroidView 16:9 radius 10; kontrol ON.
+ * > 50MB / gagal → chip nama file + "Open on your Mac" (pola fallback image).
+ */
+@Composable
+fun MarkdownVideo(
+    path: String,
+    modifier: Modifier = Modifier,
+    fetch: (suspend (String) -> java.io.File?)? = null,
+) {
+    var file by remember(path) { mutableStateOf<java.io.File?>(null) }
+    var failed by remember(path) { mutableStateOf(false) }
+    LaunchedEffect(path) {
+        if (fetch == null) { failed = true; return@LaunchedEffect }
+        val f = try { fetch(path) } catch (_: Throwable) { null }
+        if (f != null && f.exists() && f.length() > 0) file = f else failed = true
+    }
+    val name = path.substringAfterLast('/')
+    val hl = hairline()
+    val f = file
+    when {
+        f != null -> Box(
+            modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(Radius.Chip)
+                .border(hl, Ink.Hairline, Radius.Chip),
+        ) {
+            VideoPlayer(file = f, name = name)
+        }
+        failed -> Row(
+            modifier
+                .fillMaxWidth()
+                .clip(Radius.Chip)
+                .background(Ink.Surface1)
+                .border(hl, Ink.Hairline, Radius.Chip)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.PlayArrow, null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("Open on your Mac", style = Type.Meta)
+            }
+        }
+        else -> Box(
+            modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .graphicsLayer { alpha = 0.8f }
+                .clip(Radius.Chip)
+                .background(Ink.Surface1),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = Ink.Text2, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/**
+ * AndroidView wrapper media3 ExoPlayer — lifecycle-aware (play saat RESUMED,
+ * release saat dispose). Controller ON, 16:9, background hitam.
+ */
+@android.annotation.SuppressLint("UnsafeOptInUsageError")
+@Composable
+private fun VideoPlayer(file: java.io.File, name: String) {
+    val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val exo = remember(file) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(file)))
+            prepare()
+        }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> exo.play()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> exo.pause()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(obs)
+            exo.release()
+        }
+    }
+    AndroidView(
+        factory = { ctx ->
+            androidx.media3.ui.PlayerView(ctx).apply {
+                player = exo
+                setUseController(true)
+                setBackgroundColor(android.graphics.Color.BLACK)
+                contentDescription = name
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
 
 /** Slot aksi long-press per MarkdownText (user cuma sentuh satu elemen sekaligus). */
 class MdActions {

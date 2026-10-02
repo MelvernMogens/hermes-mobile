@@ -86,8 +86,10 @@ class MarkdownParserTest {
         val blocks = MarkdownParser.parse("- satu\n- dua **kuat**\n\n1. pertama\n2. kedua")
         val ul = blocks[0] as MdBlock.BulletList
         assertEquals(2, ul.items.size)
-        assertEquals(listOf(MdSpan.Text("satu")), ul.items[0])
-        assertTrue(ul.items[1].any { it is MdSpan.Bold })
+        assertEquals("satu" to 0, ul.items[0])
+        val (raw2, level2) = ul.items[1]
+        assertEquals(0, level2)
+        assertTrue(MarkdownParser.parseInline(raw2).any { it is MdSpan.Bold })
         val ol = blocks[1] as MdBlock.NumberList
         assertEquals(2, ol.items.size)
         assertEquals(listOf(MdSpan.Text("pertama")), ol.items[0])
