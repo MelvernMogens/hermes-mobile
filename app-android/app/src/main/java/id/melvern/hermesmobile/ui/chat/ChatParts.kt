@@ -7,11 +7,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -140,22 +141,26 @@ fun DayChip(label: String) {
  * caption di DALAM bubble pojok kanan bawah. Queued = ikon Schedule + "Queued";
  * pending = ikon jam kecil. Terkirim = tanpa centang.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun UserBubble(item: ChatItem.User, onLongPress: (String) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
         val maxW = maxWidth * 0.8f
+        // M9 (item 4): SelectionContainer di level konten — user bisa seleksi
+        // sebagian teks native. Long-press full-copy lewat tap-gesture di
+        // wrapper (SelectionContainer + combinedClickable bentrok).
         Column(
             Modifier
                 .align(Alignment.CenterEnd)
                 .widthIn(max = maxW)
                 .clip(Radius.BubbleUser)
                 .background(Ink.Surface2)
-                .combinedClickable(onClick = {}, onLongClick = { onLongPress(item.text) })
+                .pointerInput(item.text) {
+                    detectTapGestures(onLongPress = { onLongPress(item.text) })
+                }
                 .padding(horizontal = 12.dp, vertical = 9.dp),
             horizontalAlignment = Alignment.End,
         ) {
-            Text(item.text, style = Type.Body)
+            SelectionContainer { Text(item.text, style = Type.Body) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
                     item.queued -> {
@@ -176,17 +181,21 @@ fun UserBubble(item: ChatItem.User, onLongPress: (String) -> Unit) {
 }
 
 /** Assistant: tanpa bubble, full width, markdown body 16/24. */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AssistantBlock(
     item: ChatItem.Assistant,
     onLongPress: (String) -> Unit,
     mediaFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)?,
+    videoFetch: (suspend (String) -> java.io.File?)? = null,
 ) {
     Column(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = { onLongPress(item.text) })
+            // M9 (item 4): long-press full-copy via tap-gesture wrapper;
+            // konten dibungkus SelectionContainer di bawah (seleksi sebagian).
+            .pointerInput(item.text) {
+                detectTapGestures(onLongPress = { onLongPress(item.text) })
+            }
             .padding(horizontal = Dim.ScreenH)
             // animateContentSize HANYA saat done: tanpa churn layout per delta (perf).
             .then(if (item.done) Modifier.animateContentSize() else Modifier),
@@ -199,7 +208,9 @@ fun AssistantBlock(
             if (!thoughtOnly) Spacer(Modifier.height(8.dp))
         }
         if (thoughtOnly) return@Column
-        MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch)
+        SelectionContainer {
+            MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
+        }
         if (item.done && item.time.isNotEmpty()) {
             Text(item.time, style = Type.Caption, modifier = Modifier.padding(top = 6.dp))
         }
