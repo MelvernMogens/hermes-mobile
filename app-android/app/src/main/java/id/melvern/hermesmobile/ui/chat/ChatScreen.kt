@@ -260,6 +260,10 @@ fun ChatScreen(
     val mediaFetch = remember(app.connection) { mediaFetcherFor(app.connection) }
     // M9 (item 3): fetcher video (proxy mobile-media → file cacheDir)
     val videoFetch = remember(app.connection) { videoFetcherFor(app.connection) { context.cacheDir } }
+    // M10: save helper butuh connection aktif (unduh via media proxy)
+    androidx.compose.runtime.LaunchedEffect(app.connection) {
+        id.melvern.hermesmobile.ui.components.MediaFetchSave.connection = app.connection
+    }
 
     fun nowEpoch(): Double = System.currentTimeMillis() / 1000.0
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -24,9 +25,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -678,6 +682,9 @@ fun MarkdownVideo(
 ) {
     var file by remember(path) { mutableStateOf<java.io.File?>(null) }
     var failed by remember(path) { mutableStateOf(false) }
+    var savedVideo by remember(path) { mutableStateOf(SaveState.Idle) }
+    val chipScope = rememberCoroutineScope()
+    val chipCtx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(path) {
         if (fetch == null) { failed = true; return@LaunchedEffect }
         val f = try { fetch(path) } catch (_: Throwable) { null }
@@ -702,14 +709,30 @@ fun MarkdownVideo(
                 .clip(Radius.Chip)
                 .background(Ink.Surface1)
                 .border(hl, Ink.Hairline, Radius.Chip)
+                .pressClickable {
+                    // M10: chip fallback = save ke Downloads (bukan dead-end "Open on your Mac")
+                    savedVideo = SaveState.Busy
+                    chipScope.launch {
+                        val ok = MediaFetchSave.saveAny(chipCtx, path)
+                        savedVideo = if (ok) SaveState.Done else SaveState.Fail
+                    }
+                }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.PlayArrow, null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon))
             Spacer(Modifier.width(12.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Open on your Mac", style = Type.Meta)
+                Text(
+                    when (savedVideo) {
+                        SaveState.Busy -> "Saving…"
+                        SaveState.Done -> "Saved to Downloads"
+                        SaveState.Fail -> "Tap to save to Downloads"
+                        SaveState.Idle -> "Tap to save to Downloads"
+                    },
+                    style = Type.Meta,
+                )
             }
         }
         else -> Box(
@@ -796,15 +819,55 @@ fun MarkdownImage(
     val name = path.substringAfterLast('/')
     val hl = hairline()
     when {
-        image != null -> androidx.compose.foundation.Image(
-            bitmap = image!!,
-            contentDescription = name,
-            contentScale = ContentScale.FillWidth,
-            modifier = modifier
+        image != null -> Box(
+            modifier
                 .fillMaxWidth()
                 .clip(Radius.Chip)
                 .border(hl, Ink.Hairline, Radius.Chip),
-        )
+        ) {
+            androidx.compose.foundation.Image(
+                bitmap = image!!,
+                contentDescription = name,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // M10: tombol save pojok kanan-atas foto
+            var saved by remember(path) { mutableStateOf(false) }
+            var saving by remember(path) { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(height = 32.dp, width = if (saved) 32.dp else 84.dp)
+                    .clip(Radius.Chip)
+                    .background(Ink.Scrim)
+                    .pressClickable(enabled = !saving && !saved) {
+                        saving = true
+                        scope.launch {
+                            val res = MediaFetchSave.saveImage(ctx, path)
+                            saved = res != null
+                            saving = false
+                        }
+                    },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(Modifier.size(14.dp), color = Ink.Text2, strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        if (saved) Icons.Rounded.Check else Icons.Rounded.Download,
+                        if (saved) "Saved" else "Save",
+                        tint = Ink.Text,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    if (!saved) Spacer(Modifier.width(6.dp))
+                    if (!saved) Text("Save", style = Type.Meta, color = Ink.Text)
+                }
+            }
+        }
         failed -> Row(
             modifier
                 .fillMaxWidth()
@@ -923,4 +986,21 @@ private fun InlineAwareText(
                 )
             },
     )
+}
+
+/** State tombol save pada chip fallback video/file. */
+private enum class SaveState { Idle, Busy, Done, Fail }
+
+/** M10: unduh path di Mac lalu simpan ke penyimpanan HP (MediaStore). */
+object MediaFetchSave {
+    var connection: id.melvern.hermesmobile.core.store.ConnectionSettings? = null
+
+    suspend fun saveImage(context: android.content.Context, path: String): String? {
+        val conn = connection ?: return null
+        val (bytes, mime) = id.melvern.hermesmobile.core.repo.MediaRepo(conn).fetchBytes(path) ?: return null
+        return SaveHelper.save(context, bytes, mime, path.substringAfterLast('/'))
+    }
+
+    suspend fun saveAny(context: android.content.Context, path: String): Boolean =
+        saveImage(context, path) != null
 }

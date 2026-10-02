@@ -43,9 +43,35 @@ class MediaRepo(private val settings: ConnectionSettings) {
         val auth = DashboardAuth(settings.baseUrl.trim().trimEnd('/'))
         val ok = auth.ensureLogin(settings.username, settings.password)
         if (!ok) return@withContext null
-        val body = auth.getJson(mobileMediaUrl(settings.baseUrl, path)) ?: return@withContext null
+        // Hermes media roots first (agent-generated media lives there), then the
+        // guarded /api/mobile-media for files elsewhere under $HOME.
+        val body = auth.getJson(mediaUrl(settings.baseUrl, path))
+            ?: auth.getJson(mobileMediaUrl(settings.baseUrl, path))
+            ?: return@withContext null
         val file = parseDataUrlToFile(body, cacheDir, path.substringAfterLast('/'))
         file
+    }
+
+
+    /** M10: unduh bytes file apa pun (save ke Downloads). Image roots → mobile-media fallback. */
+    suspend fun fetchBytes(path: String): Pair<ByteArray, String>? = withContext(Dispatchers.IO) {
+        val auth = DashboardAuth(settings.baseUrl.trim().trimEnd('/'))
+        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val body = auth.getJson(mediaUrl(settings.baseUrl, path))
+            ?: auth.getJson(mobileMediaUrl(settings.baseUrl, path))
+            ?: return@withContext null
+        val el = kotlinx.serialization.json.Json.parseToJsonElement(body)
+        val obj = el as? kotlinx.serialization.json.JsonObject ?: return@withContext null
+        val dataUrl = (obj["data_url"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: return@withContext null
+        val b64 = dataUrl.substringAfter("base64,", "")
+        if (b64.isEmpty()) return@withContext null
+        val bytes = try {
+            android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+        } catch (_: Throwable) {
+            try { android.util.Base64.decode(b64 + "=".repeat(-b64.length % 4), android.util.Base64.DEFAULT) } catch (_: Throwable) { null }
+        } ?: return@withContext null
+        val mime = dataUrl.removePrefix("data:").substringBefore(';', "")
+        bytes to (mime.ifBlank { "application/octet-stream" })
     }
 
     companion object {
