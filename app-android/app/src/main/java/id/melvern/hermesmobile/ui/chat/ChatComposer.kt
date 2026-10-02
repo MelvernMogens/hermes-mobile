@@ -221,6 +221,12 @@ fun AttachSheet(onDismiss: () -> Unit, onPhoto: () -> Unit, onFile: () -> Unit) 
  * Live chat → tap switches THIS chat's model in place (config.set … --session,
  * same as desktop). Only a chat with no session yet falls back to creating one.
  */
+// M9 (item 2): chip effort — label → kata server (desktop pakai kata sama).
+private val EFFORT_CHIPS = listOf("Low" to "low", "Medium" to "medium", "High" to "high", "Max" to "max")
+/** remembered effort buat chat baru (session_id blank) — hidup selama app. */
+@Volatile
+private var pendingEffort: String? = null
+
 @Composable
 fun ModelSheet(
     app: HermesApp,
@@ -235,10 +241,36 @@ fun ModelSheet(
     var actionError by remember { mutableStateOf<String?>(null) }
     // expensive-model guard from the gateway: (model, provider, message)
     var confirm by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+    // M9 (item 2): effort aktif — null = belum ketahuan (chip kosong semua).
+    var effort by remember { mutableStateOf<String?>(null) }
+    var effortBusy by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         val c = app.client ?: return@LaunchedEffect
         try { options = MetaRepo(c).modelOptions(sessionId = sessionId.ifBlank { null }, profile = app.profile.value) }
         catch (e: Throwable) { error = e.message }
+        // chat kosong: pakai pilihan yang diingat; session live: tanya server.
+        effort = if (sessionId.isBlank()) pendingEffort
+        else try { MetaRepo(c).reasoningEffort(sessionId) } catch (_: Throwable) { null }
+    }
+
+    /** Terapkan effort: live → config.set session-scoped; chat baru → remembered. */
+    fun pickEffort(word: String) {
+        if (effortBusy != null) return
+        effortBusy = word
+        app.appScope.launch {
+            try {
+                if (sessionId.isBlank()) {
+                    pendingEffort = word
+                    effort = word
+                } else {
+                    val c = app.client ?: return@launch
+                    MetaRepo(c).setReasoningEffort(sessionId, word)
+                    effort = word
+                }
+            } catch (e: Throwable) {
+                actionError = "Couldn't set effort: ${e.message}"
+            } finally { effortBusy = null }
+        }
     }
 
     fun pick(model: String, provider: String, confirmed: Boolean = false) {
@@ -247,7 +279,9 @@ fun ModelSheet(
             val c = app.client ?: run { busy = null; return@launch }
             try {
                 if (sessionId.isBlank()) {
-                    val (newRuntime, _) = SessionRepo(c, app.profile.value).createSession(model = model, provider = provider)
+                    val (newRuntime, _) = SessionRepo(c, app.profile.value).createSession(
+                        model = model, provider = provider, reasoningEffort = pendingEffort,
+                    )
                     onDismiss(); onNewChat(newRuntime, "")
                     return@launch
                 }
@@ -337,6 +371,44 @@ fun ModelSheet(
             }
         }
         Hairline(Modifier.padding(top = 4.dp))
+        // M9 (item 2): Effort — 4 chip segmented (aktif = bg putih teks hitam).
+        Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Effort", style = Type.Meta.copy(color = Ink.Text3))
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .clip(Radius.Chip)
+                    .background(Ink.Surface1)
+                    .border(hairline(), Ink.Hairline, Radius.Chip)
+                    .padding(3.dp),
+            ) {
+                EFFORT_CHIPS.forEach { (label, word) ->
+                    val active = effort == word
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .heightIn(min = 36.dp)
+                            .clip(Radius.Inline)
+                            .then(if (active) Modifier.background(Ink.Accent) else Modifier)
+                            .pressClickable(enabled = effortBusy == null) { pickEffort(word) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (effortBusy == word) "…" else label,
+                            style = Type.Callout.copy(
+                                color = if (active) Ink.OnAccent else Ink.Text2,
+                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
         Text(
             if (sessionId.isBlank()) "Model for this new chat" else "Applies to this chat only",
             style = Type.Callout.copy(color = Ink.Text3),
