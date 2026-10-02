@@ -313,6 +313,19 @@ class GatewayClient(
     /** M9: watermark seq terakhir yang diterima utk session (dipakai TranscriptCache). */
     fun lastSeenSeq(sessionId: String): Int? = lastSeenBySession[sessionId]
 
+    /**
+     * M12: runtime id server untuk stored id — dari session.list (satu call ringan).
+     * Dipakai anti-stale: kalau runtime server BERBEDA dari yang di TranscriptCache,
+     * event ring berjalan di runtime baru; replay dengan runtime lama count=0 palsu.
+     * Return null kalau tidak ditemukan / gagal (fail-open: biarkan jalur lama).
+     */
+    suspend fun serverRuntimeFor(storedId: String): String? = try {
+        val res = call("session.list", buildJsonObject { put("limit", 100) }, timeoutMs = 15_000)
+        res["sessions"]?.jsonArray?.firstOrNull { el ->
+            (el as? JsonObject)?.get("session_key")?.jsonPrimitive?.contentOrNull == storedId
+        }?.let { (it as JsonObject)["id"]?.jsonPrimitive?.contentOrNull }
+    } catch (_: Throwable) { null }
+
     private fun failAllPending(reason: String) {
         val entries = pending.keys().toList()
         entries.forEach { id -> pending.remove(id)?.completeExceptionally(RpcException(-1, reason)) }

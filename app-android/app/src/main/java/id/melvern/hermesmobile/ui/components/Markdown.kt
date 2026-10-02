@@ -186,6 +186,15 @@ object MarkdownParser {
 
 
     /** M5: true kalau teks berisi setidaknya satu path file gambar. */
+
+    /** M12: true kalau ada baris media (MEDIA:/path gambar/video) — dipakai UserBubble
+     *  untuk memilih renderer (media di pesan user harus ke-render, bukan teks polos). */
+    fun containsMediaLine(text: String): Boolean =
+        text.lineSequence().any { ln ->
+            (IMAGE_PATH_LINE.containsMatchIn(ln) && imagePathsIn(ln).isNotEmpty()) ||
+                (VIDEO_PATH_LINE.containsMatchIn(ln) && videoPathsIn(ln).isNotEmpty())
+        }
+
     fun containsImagePath(text: String): Boolean = IMAGE_PATH_ANYWHERE.containsMatchIn(text)
 
     /** M5: semua path gambar yang ketemu di teks (distinct, urutan kemunculan). */

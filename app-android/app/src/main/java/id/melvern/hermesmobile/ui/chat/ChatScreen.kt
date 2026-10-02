@@ -356,7 +356,12 @@ fun ChatScreen(
         }
         try {
             val cached = TranscriptCache.get(actualStoredId)
-            if (cached != null && cached.runtimeId == runtimeId &&
+            // M12 anti-stale: runtime id server bisa berganti TANPA restart gateway
+            // (resume dari surface lain) — epoch sama, ring baru, delta count=0 palsu.
+            // Percaya delta HANYA kalau runtime server == runtime cache.
+            val serverRt = c.serverRuntimeFor(actualStoredId)
+            val runtimeFresh = serverRt == null || serverRt == runtimeId
+            if (cached != null && cached.runtimeId == runtimeId && runtimeFresh &&
                 cached.cursor != TranscriptCache.CURSOR_UNKNOWN
             ) {
                 // DELTA PATH: transcript dipegang cache; ambil hanya event sejak
@@ -452,7 +457,9 @@ fun ChatScreen(
                     }
                     else -> ev.fail(-32601, "no handler: ${ev.method}")
                 }
-                is GatewayInbound.RpcEvent -> if (ev.sessionId == runtimeId || ev.sessionId.isEmpty()) when (ev.type) {
+                is GatewayInbound.RpcEvent -> if (ev.sessionId == runtimeId || ev.sessionId == actualStoredId || ev.sessionId.isEmpty()) when (ev.type) {
+                    // M12: event server memakai RUNTIME id yang berganti tiap resume di surface
+                    // lain (desktop/python) — cocokkan stored id juga supaya event gak dibuang.
                     "request.cancel" -> {
                         // server menarik request (timeout/withdraw) — buang card
                         // yang belum dijawab; card yang sudah dijawab (dim) biarkan.
@@ -692,7 +699,7 @@ fun ChatScreen(
                             is ChatRow.Tools -> ToolGroup(row.tools)
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
                             is ChatRow.Item -> when (val item = row.item) {
-                                is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it })
+                                is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch)
                                 is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) })
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,

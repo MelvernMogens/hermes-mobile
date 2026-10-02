@@ -143,8 +143,15 @@ fun DayChip(label: String) {
  * pending = ikon jam kecil. Terkirim = tanpa centang.
  */
 @Composable
-fun UserBubble(item: ChatItem.User, onLongPress: (String) -> Unit) {
+fun UserBubble(
+    item: ChatItem.User,
+    onLongPress: (String) -> Unit,
+    mediaFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)? = null,
+    videoFetch: (suspend (String) -> java.io.File?)? = null,
+) {
     // M11: quote block (reply) di atas isi — kaya WhatsApp.
+    // M12: pesan user yang mengandung MEDIA:/path → render via MarkdownText (foto/video/player),
+    // bukan Text polos (bug: media dari user tampil sebagai teks path).
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
         val maxW = maxWidth * 0.8f
         // M9 (item 4): SelectionContainer di level konten — user bisa seleksi
@@ -175,7 +182,11 @@ fun UserBubble(item: ChatItem.User, onLongPress: (String) -> Unit) {
                     Text(q, style = Type.Callout.copy(color = Ink.Text2), maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
             }
-            SelectionContainer { Text(item.text, style = Type.Body) }
+            if (id.melvern.hermesmobile.ui.components.MarkdownParser.containsMediaLine(item.text)) {
+                MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
+            } else {
+                SelectionContainer { Text(item.text, style = Type.Body) }
+            }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
                     item.queued -> {
