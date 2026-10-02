@@ -190,12 +190,15 @@ class SessionRepo(
         // M5: "GIG baru dengan model ini" — SessionCreateParams punya model+provider.
         model: String? = null,
         provider: String? = null,
+        // M9 (item 2): reasoning effort utk chat baru (SessionCreateParams.reasoning_effort).
+        reasoningEffort: String? = null,
     ): Pair<String, String> {
         // return (runtimeId, storedId) — session baru punya runtime beda dari stored
         val res = client.call("session.create", buildJsonObject {
             if (!title.isNullOrBlank()) put("title", title)
             if (!model.isNullOrBlank()) put("model", model)
             if (!provider.isNullOrBlank()) put("provider", provider)
+            if (!reasoningEffort.isNullOrBlank()) put("reasoning_effort", reasoningEffort)
             putProfile()
         })
         val runtimeId = res["session_id"]?.jsonPrimitive?.contentOrNull
