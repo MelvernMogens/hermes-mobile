@@ -153,7 +153,14 @@ _IMG_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", "
              # M9: video dari agent (media3 ExoPlayer di app; suffix list diperluas,
              # auth + path-in-chat + size cap TIDAK diubah)
              ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
-             ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo"}
+             ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+             # M15.2: dokumen/artifact file — masih path-referenced-in-chat guarded, cuma
+             # perluas tipe supaya artifact .md/.pdf/.zip/... bisa di-save dari HP.
+             ".pdf": "application/pdf", ".zip": "application/zip", ".txt": "text/plain",
+             ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv",
+             ".apk": "application/vnd.android.package-archive", ".yaml": "application/yaml",
+             ".yml": "application/yaml", ".py": "text/x-python", ".kt": "text/x-kotlin",
+             ".sh": "text/x-shellscript", ".html": "text/html", ".ts": "text/x-typescript"}
 _MEDIA_MAX = 20 * 1024 * 1024
 
 
