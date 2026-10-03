@@ -7,6 +7,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -137,9 +143,23 @@ fun Composer(
                 textStyle = Type.Body.copy(color = if (readOnly) Ink.Text3 else Ink.Text),
                 cursorBrush = SolidColor(Ink.Text),
                 maxLines = 6,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    // Multi-line + ImeAction.Send itu ambigu antar keyboard (Samsung/Gboard
+                    // sering kirim ENTER sebagai newline). Kalikan eksplisit: Enter biasa =
+                    // kirim, Shift+Enter = baris baru (perilaku WhatsApp).
+                    imeAction = ImeAction.Send,
+                    autoCorrect = true,
+                ),
                 keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onKeyEvent { e ->
+                        if (e.key == Key.Enter && e.type == KeyEventType.KeyUp) {
+                            val shifted = e.isShiftPressed
+                            if (!shifted && canSend) { onSend(); true } else false
+                        } else false
+                    },
                 decorationBox = { inner ->
                     Box(
                         Modifier
