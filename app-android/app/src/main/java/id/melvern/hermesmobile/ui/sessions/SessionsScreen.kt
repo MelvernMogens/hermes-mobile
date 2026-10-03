@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +52,9 @@ import id.melvern.hermesmobile.ui.components.RelTime
 import id.melvern.hermesmobile.ui.components.SkeletonSessionRow
 import id.melvern.hermesmobile.ui.components.StatusDot
 import id.melvern.hermesmobile.ui.components.shimmerAlpha
+import id.melvern.hermesmobile.ui.chat.ChatScreen
+import id.melvern.hermesmobile.ui.layout.ChatRouteArg
+import id.melvern.hermesmobile.ui.layout.isExpanded
 import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Radius
@@ -70,6 +74,19 @@ import kotlinx.coroutines.launch
 @Composable
 fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
+    // M15: adaptive — two-pane HANYA Expanded width (>=840dp); Compact/Medium
+    // perilaku lama (nav ke ChatScreen). Selection di level screen ini, bukan
+    // navigasi — rememberSaveable supaya selamat rotate (dan Compact↔Expanded
+    // tidak menghapusnya).
+    val winSize by app.windowSize.collectAsState()
+    var paneSelection by rememberSaveable { mutableStateOf<String?>(null) }
+    fun openChat(arg: String) {
+        if (winSize.isExpanded) paneSelection = arg else onOpen(arg)
+    }
+    // M15: back di expanded = tutup pane (bukan keluar app).
+    androidx.activity.compose.BackHandler(enabled = winSize.isExpanded && paneSelection != null) {
+        paneSelection = null
+    }
     var sessions by remember { mutableStateOf<List<SessionRow>>(emptyList()) }
     // M8: id session yang hidden = ada di list include_hidden tapi tidak di list default
     // (SessionListRow di kontrak tidak punya field hidden).
@@ -170,7 +187,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             try {
                 val c = app.client ?: return@launch
                 val (runtimeId, storedId) = SessionRepo(c, profile).createSession()
-                onOpen("$storedId|$runtimeId")
+                // M15: expanded → chat baru langsung tampil di ChatPane.
+                openChat("$storedId|$runtimeId")
             } catch (_: Throwable) {
             } finally { creating = false }
         }
@@ -197,8 +215,12 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     val visibleRows = filtered.filterNot { it.id in hiddenIds }
     val hiddenRows = filtered.filter { it.id in hiddenIds }
 
-    Column(Modifier.fillMaxSize().background(Ink.Bg).statusBarsPadding()) {
-        // ── Top bar ────────────────────────────────────────────────────
+
+    // M15: isi sessions pane — dipakai Compact (full width + status bar) dan
+    // expanded (340dp kolom kiri, tanpa status bar tambahan — Row di atas sudah
+    // tidak menambah padding apa pun).
+    val paneContent: @Composable () -> Unit = {
+        Column(Modifier.fillMaxSize().background(Ink.Bg).then(if (!winSize.isExpanded) Modifier.statusBarsPadding() else Modifier)) {
         Box(Modifier.fillMaxWidth().height(Dim.TopBar)) {
             if (searching) {
                 SearchBar(
@@ -291,7 +313,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                     SessionRowView(
                         app, s,
                         running = s.id in active || s.running == true,
-                        onClick = { onOpen("${s.id}|t=${Uri.encode(s.displayTitle)}") },
+                        onClick = { openChat("${s.id}|t=${Uri.encode(s.displayTitle)}") },
                         onLongPress = { actionTarget = s },
                     )
                 }
@@ -307,7 +329,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                         SessionRowView(
                             app, s,
                             running = s.id in active || s.running == true,
-                            onClick = { onOpen("${s.id}|t=${Uri.encode(s.displayTitle)}") },
+                            onClick = { openChat("${s.id}|t=${Uri.encode(s.displayTitle)}") },
                             onLongPress = { actionTarget = s },
                         )
                     }
@@ -321,6 +343,35 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                     )
                 }
             }
+        }
+    }
+    }   // tutup val paneContent (M15)
+
+    Column(Modifier.fillMaxSize().background(Ink.Bg)) {
+        // M15: expanded → list-detail: SessionsPane 340dp + hairline + ChatPane.
+        if (winSize.isExpanded) {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.width(Dim.PaneListW)) { paneContent() }
+                Box(Modifier.fillMaxHeight().width(hairline()).background(Ink.Hairline))
+                Box(Modifier.weight(1f)) {
+                    val sel = paneSelection
+                    if (sel == null) {
+                        SelectAChatPane()
+                    } else {
+                        val parsed = remember(sel) { ChatRouteArg.parse(sel as String) }
+                        ChatScreen(
+                            app = app,
+                            actualStoredId = parsed.storedId,
+                            preattachedRuntime = parsed.runtimeId,
+                            initialTitle = parsed.title,
+                            onBack = { paneSelection = null },
+                            inTwoPane = true,
+                        )
+                    }
+                }
+            }
+        } else {
+            Box(Modifier.fillMaxSize()) { paneContent() }
         }
     }
 
@@ -345,8 +396,28 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             onDismiss = { actionTarget = null },
             onOpenBranch = { runtimeId, storedId ->
                 actionTarget = null
-                onOpen("$storedId|$runtimeId")
+                openChat("$storedId|$runtimeId")
             },
+        )
+    }
+}
+
+/** M15: empty state ChatPane — belum ada chat terpilih (expanded). */
+@Composable
+private fun SelectAChatPane() {
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Rounded.ChatBubbleOutline, null, tint = Ink.Text3, modifier = Modifier.size(Dim.EmptyIcon))
+        Spacer(Modifier.height(12.dp))
+        Text("Select a chat", style = Type.Title)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Pick a conversation from the list",
+            style = Type.Meta, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 24.dp),
         )
     }
 }

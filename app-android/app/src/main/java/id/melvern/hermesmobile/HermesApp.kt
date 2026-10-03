@@ -10,6 +10,7 @@ import id.melvern.hermesmobile.core.repo.GatewayDiscovery
 import id.melvern.hermesmobile.core.rpc.GatewayClient
 import id.melvern.hermesmobile.core.store.ConnectionSettings
 import id.melvern.hermesmobile.core.store.SettingsStore
+import id.melvern.hermesmobile.ui.layout.WinSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +26,9 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
 
     /** M4: profile aktif — semua RPC session kirim params.profile=<ini>. */
     val profile = MutableStateFlow("default")
+
+    /** M15: window size class aktif (diisi MainActivity dari calculateWindowSizeClass). */
+    val windowSize = MutableStateFlow(WinSize.Compact)
 
     @Volatile var client: GatewayClient? = null
         private set

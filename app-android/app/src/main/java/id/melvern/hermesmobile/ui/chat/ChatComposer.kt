@@ -72,10 +72,13 @@ fun Composer(
     onAttach: () -> Unit,
     onRemoveAttachment: () -> Unit,
     onSend: () -> Unit, onStop: () -> Unit,
+    /** M15: expanded → composer max 640 center (Discord style). */
+    wide: Boolean = false,
 ) {
     val canSend = connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true)
     val showStop = running && value.isBlank() && attachment == null && !readOnly
-    Column(Modifier.fillMaxWidth().background(Ink.Bg)) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+    Column(Modifier.then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier).fillMaxWidth().background(Ink.Bg)) {
         Hairline()
         attachError?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp))
@@ -169,6 +172,7 @@ fun Composer(
                 }
             }
         }
+    }
     }
 }
 

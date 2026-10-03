@@ -47,6 +47,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    // M15: adaptive layout — WindowSizeClass (Compact/Medium/Expanded) di HermesApp.
+    implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.compose.material:material-icons-core")
     // M8: Icons.Rounded.* lengkap (satu keluarga) — pengganti emoji/unicode ikon
     implementation("androidx.compose.material:material-icons-extended")

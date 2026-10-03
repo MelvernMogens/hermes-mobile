@@ -111,6 +111,8 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
             .imePadding(),
     ) {
         val minH = maxHeight
+        // M15: tablet — blok connect tetap max 420 SUDAH center (CenterHorizontally
+        // di parent Column); pastikan container luar juga center di layar lebar.
         Column(
             Modifier
                 .fillMaxWidth()

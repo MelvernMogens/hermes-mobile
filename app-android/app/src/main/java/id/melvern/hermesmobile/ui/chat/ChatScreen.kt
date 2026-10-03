@@ -1,7 +1,14 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -34,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -67,6 +75,7 @@ import id.melvern.hermesmobile.ui.theme.Motion
 import id.melvern.hermesmobile.ui.theme.Radius
 import id.melvern.hermesmobile.ui.theme.Type
 import id.melvern.hermesmobile.ui.theme.hairline
+import id.melvern.hermesmobile.ui.layout.WinSize
 import id.melvern.hermesmobile.ui.theme.pressClickable
 import id.melvern.hermesmobile.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +106,8 @@ fun ChatScreen(
     onOpenChat: (String) -> Unit = {},
     /** M13: buka ArtifactsScreen (route terpisah, back = balik chat) — bawa live title. */
     onOpenArtifacts: (String) -> Unit = {},
+    /** M15: render di dalam ChatPane two-pane (expanded) — back = clear selection. */
+    inTwoPane: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var runtimeId by remember { mutableStateOf(preattachedRuntime ?: actualStoredId) }
@@ -624,6 +635,12 @@ fun ChatScreen(
         }
     }
     var menuSheet by remember { mutableStateOf(false) }
+    // M15: adaptive — konten max 640 center (gaya Discord) di Medium+ (tablet
+    // portrait single-pane juga kena cap); Compact phone = full seperti biasa.
+    val winSize by app.windowSize.collectAsState()
+    val wide = winSize != WinSize.Compact
+    // M15: artifacts sebagai side sheet 380dp di expanded (bukan route full screen).
+    var artifactsOpen by rememberSaveable { mutableStateOf(false) }
     // M13: jumlah artifacts (link/foto/video/file) dari items — badge di top bar.
     // Review M13 HIGH#2: parse di Dispatchers.Default (regex berat, transcript gede)
     // dan di-skip saat turn jalan (items berganti tiap delta streaming — full
@@ -643,9 +660,12 @@ fun ChatScreen(
             .navigationBarsPadding()
             .imePadding(),
     ) {
-        // ── Top bar 56dp ───────────────────────────────────────────────
+        // ── Top bar 56dp (M15: expanded → konten max 640 center) ────────
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Row(
-            Modifier.fillMaxWidth().height(Dim.TopBar).padding(end = 4.dp),
+            Modifier
+                .then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier)
+                .fillMaxWidth().height(Dim.TopBar).padding(end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             QuietIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = onBack)
@@ -679,8 +699,11 @@ fun ChatScreen(
                 }
             }
             // M13: artifacts — semua link/foto/video/file dari chat ini.
+            // M15: expanded → side sheet 380dp di dalam pane (BUKAN route full screen).
             Box {
-                QuietIconButton(Icons.Rounded.Inventory2, "Artifacts", onClick = { onOpenArtifacts(title) })
+                QuietIconButton(Icons.Rounded.Inventory2, "Artifacts", onClick = {
+                    if (wide) artifactsOpen = true else onOpenArtifacts(title)
+                })
                 if (artifactCount > 0) {
                     Text(
                         if (artifactCount > 99) "99+" else "$artifactCount",
@@ -696,7 +719,12 @@ fun ChatScreen(
             }
             QuietIconButton(Icons.Rounded.MoreVert, "Chat options", onClick = { menuSheet = true })
         }
-        if (scrolledContent) Hairline() else Spacer(Modifier.height(hairline()))
+        }
+        // M15: hairline juga ikut max width center di expanded.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            if (scrolledContent) Hairline(Modifier.widthIn(max = if (wide) Dim.ChatMaxW else Dp.Unspecified).fillMaxWidth())
+            else Spacer(Modifier.height(hairline()))
+        }
 
         // ── Read-only banner (M7 derived) ──────────────────────────────
         if (readOnly) {
@@ -717,14 +745,19 @@ fun ChatScreen(
             }
         }
 
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
             when {
                 loading -> ChatSkeleton()
                 items.isEmpty() && approval == null && clarify == null -> EmptyChat(app, profileName, headerModel)
             }
+            // M15: Medium+ → list max 640 center (Discord style). Wrapper Box
+            // fillMaxWidth + TopCenter menempatkan LazyColumn widthIn di tengah;
+            // Compact tetap fillMaxSize (align tidak berlaku pada fill parent).
+            Box(Modifier.fillMaxWidth().then(if (!wide) Modifier.fillMaxSize() else Modifier), contentAlignment = Alignment.TopCenter) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = (if (wide) Modifier.widthIn(max = Dim.ChatMaxW).fillMaxHeight()
+                            else Modifier.fillMaxSize()),
                 contentPadding = PaddingValues(vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -804,6 +837,7 @@ fun ChatScreen(
                     }
                 }
             }
+            }
             // scroll-to-bottom: 36dp surface2 bulat kanan bawah + badge jumlah pesan baru
             if (farFromBottom) {
                 Box(
@@ -843,18 +877,20 @@ fun ChatScreen(
             }
         }
 
-        Composer(
-            value = input, onValueChange = { input = it },
-            running = running, connected = connState == ConnState.OPEN,
-            readOnly = readOnly,
-            attachment = attachment,
-            attachThumb = attachThumb,
-            attaching = attaching,
-            attachError = attachError,
-            quote = replyQuote,
-            onCancelQuote = { replyQuote = null },
-            onAttach = { attachSheet = true },
-            onRemoveAttachment = { attachment = null; attachThumb = null },
+            // M15: expanded → composer max 640 center.
+            Composer(
+                value = input, onValueChange = { input = it },
+                running = running, connected = connState == ConnState.OPEN,
+                readOnly = readOnly,
+                attachment = attachment,
+                attachThumb = attachThumb,
+                attaching = attaching,
+                attachError = attachError,
+                quote = replyQuote,
+                onCancelQuote = { replyQuote = null },
+                onAttach = { attachSheet = true },
+                onRemoveAttachment = { attachment = null; attachThumb = null },
+                wide = wide,
         onSend = {
                 val typed = input.trim()
                 // M11: reply — quote diselipkan sebagai konteks di atas pesan
@@ -1002,6 +1038,40 @@ fun ChatScreen(
             onOpenBranch = { rt, stored -> menuSheet = false; onOpenChat("$stored|$rt") },
             onDeleted = { menuSheet = false; onBack() },
         )
+    }
+    // M15: artifacts side sheet (expanded) — 380dp slide dari kanan di dalam
+    // ChatPane, tanpa navigasi. Konten = ArtifactsScreen (reuse penuh).
+    if (artifactsOpen && wide) {
+        ArtifactsSideSheet(
+            app = app,
+            storedId = effectiveStoredId,
+            chatTitle = title,
+            onDismiss = { artifactsOpen = false },
+        )
+    }
+}
+
+/** M15: side sheet artifacts — width 380dp, slide-in dari kanan, scrim none. */
+@Composable
+private fun ArtifactsSideSheet(app: HermesApp, storedId: String, chatTitle: String, onDismiss: () -> Unit) {
+    val reduce = rememberReduceMotion()
+    androidx.activity.compose.BackHandler(onBack = onDismiss)
+    Box(Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = true,
+            enter = if (reduce) EnterTransition.None else slideInHorizontally(tween(Motion.NavMs, easing = Motion.EmphasizedDecelerate)) { it } + fadeIn(tween(Motion.NavMs)),
+            exit = if (reduce) ExitTransition.None else slideOutHorizontally(tween(Motion.NavMs / 2, easing = Motion.EmphasizedAccelerate)) { it } + fadeOut(tween(Motion.NavMs / 2)),
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            Box(
+                Modifier
+                    .width(Dim.ArtifactSheetW)
+                    .fillMaxHeight()
+                    .background(Ink.Bg),
+            ) {
+                ArtifactsScreen(app, storedId, chatTitle, onBack = onDismiss)
+            }
+        }
     }
 }
 

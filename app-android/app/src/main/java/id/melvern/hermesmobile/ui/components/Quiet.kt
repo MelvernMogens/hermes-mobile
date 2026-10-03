@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +41,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import id.melvern.hermesmobile.ui.layout.WinSize
+import id.melvern.hermesmobile.ui.layout.isExpanded
 import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Motion
@@ -139,6 +142,31 @@ fun QuietSheet(
     skipPartiallyExpanded: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // M15: expanded → pola konsisten Dialog center widthIn(max 480) —
+    // bukan bottom sheet stretch. Compact/Medium = ModalBottomSheet seperti M8.
+    val winSize = id.melvern.hermesmobile.ui.layout.currentWinSize()
+    if (winSize.isExpanded) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+            Column(
+                Modifier
+                    .widthIn(max = Dim.SheetMaxW)
+                    .clip(Radius.Card)
+                    .background(Ink.Surface1)
+                    .navigationBarsPadding()
+                    .padding(bottom = 12.dp),
+            ) {
+                if (title != null) {
+                    Text(
+                        title, style = Type.Title,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+                    )
+                }
+                content()
+            }
+        }
+        return
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded),

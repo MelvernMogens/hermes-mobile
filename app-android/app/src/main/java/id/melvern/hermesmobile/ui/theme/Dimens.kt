@@ -29,6 +29,13 @@ object Dim {
     val SheetRow = 64.dp
     val ActionRow = 52.dp
 
+    // M15: adaptive tablet — list-detail two-pane (Expanded width).
+    val PaneListW = 340.dp       // lebar fixed sessions pane
+    val ChatMaxW = 640.dp        // max lebar konten chat (gaya Discord)
+    val BubbleMaxW = 560.dp      // max lebar bubble user
+    val SheetMaxW = 480.dp       // max lebar sheet di expanded (center)
+    val ArtifactSheetW = 380.dp  // side sheet artifacts
+
     val ComposerMin = 44.dp
     val SendButton = 36.dp
     val ScrollFab = 36.dp

@@ -25,14 +25,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import id.melvern.hermesmobile.core.notify.AppNotifier
+import id.melvern.hermesmobile.ui.layout.WinSize
+import id.melvern.hermesmobile.ui.layout.LocalWinSize
 import id.melvern.hermesmobile.ui.chat.ArtifactsScreen
 import id.melvern.hermesmobile.ui.chat.ChatScreen
 import id.melvern.hermesmobile.ui.connect.ConnectScreen
@@ -42,6 +47,7 @@ import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Motion
 import id.melvern.hermesmobile.ui.theme.rememberReduceMotion
 
+@kotlin.OptIn(androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi::class)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Splash: platform SplashScreen (values-v31/themes.xml) bg #0B0B0C + logo;
@@ -64,11 +70,28 @@ class MainActivity : ComponentActivity() {
         )
         // M14: extra dari tap notif — baca SEKALI di onCreate (onNewIntent → flow).
         setContent {
-            HermesTheme {
-                AppNav(app, notifOpenChat = intent?.getStringExtra(AppNotifier.EXTRA_OPEN_CHAT))
+            // M15: adaptive — WindowSizeClass dihitung di sini (satu-satunya tempat),
+            // disimpan ke state app + CompositionLocal; screens baca dari situ.
+            val windowSizeClass = calculateWindowSizeClass(this)
+            // M15: two-pane HANYA benar-benar layar lebar. Terukur: tablet portrait
+            // 1600px@276dpi = 928dp dan phone landscape modern ~914dp — keduanya
+            // masuk Expanded kanonik (>=840) padahal bukan target two-pane.
+            // Threshold praktis: Expanded = sizeClass Expanded DAN width >= 1000dp
+            // (Tab S8 landscape 1463dp masuk; portrait 928dp turun ke Medium).
+            val widthDp = resources.configuration.screenWidthDp
+            val winSize = when (windowSizeClass.widthSizeClass) {
+                WindowWidthSizeClass.Expanded -> if (widthDp >= 1000) WinSize.Expanded else WinSize.Medium
+                WindowWidthSizeClass.Medium -> WinSize.Medium
+                else -> WinSize.Compact
+            }
+            LaunchedEffect(winSize) { app.windowSize.value = winSize }
+            CompositionLocalProvider(LocalWinSize provides winSize) {
+                HermesTheme {
+                    AppNav(app, notifOpenChat = intent?.getStringExtra(AppNotifier.EXTRA_OPEN_CHAT))
+                }
             }
         }
-    }
+    }  // onCreate
 
     /** M14: notif tap → intent baru (FLAG_CLEAR_TOP) — baca extra chat setiap kali. */
     override fun onNewIntent(intent: android.content.Intent) {

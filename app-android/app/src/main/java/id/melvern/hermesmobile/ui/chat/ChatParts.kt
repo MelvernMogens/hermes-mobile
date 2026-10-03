@@ -153,7 +153,8 @@ fun UserBubble(
     // M12: pesan user yang mengandung MEDIA:/path → render via MarkdownText (foto/video/player),
     // bukan Text polos (bug: media dari user tampil sebagai teks path).
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
-        val maxW = maxWidth * 0.8f
+        // M15: bubble max = min(80% pane, 560dp) — di tablet tidak full-stretch.
+        val maxW = minOf(maxWidth * 0.8f, Dim.BubbleMaxW)
         // M9 (item 4): SelectionContainer di level konten — user bisa seleksi
         // sebagian teks native. Long-press full-copy lewat tap-gesture di
         // wrapper (SelectionContainer + combinedClickable bentrok).
