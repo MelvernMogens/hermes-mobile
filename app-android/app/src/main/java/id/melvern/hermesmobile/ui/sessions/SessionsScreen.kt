@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,7 +79,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
     // perilaku lama (nav ke ChatScreen). Selection di level screen ini, bukan
     // navigasi — rememberSaveable supaya selamat rotate (dan Compact↔Expanded
     // tidak menghapusnya).
-    val winSize by app.windowSize.collectAsState()
+    val winSize = id.melvern.hermesmobile.ui.layout.currentWinSize()
     var paneSelection by rememberSaveable { mutableStateOf<String?>(null) }
     fun openChat(arg: String) {
         if (winSize.isExpanded) paneSelection = arg else onOpen(arg)
@@ -359,14 +360,18 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
                         SelectAChatPane()
                     } else {
                         val parsed = remember(sel) { ChatRouteArg.parse(sel as String) }
+                        // Review M15 H1: key per selection — tanpa ini state ChatScreen
+                        // (draft, attachment, approval, scroll) bocor dari chat lama
+                        // ke chat baru saat ganti row di pane.
+                        key(sel) {
                         ChatScreen(
                             app = app,
                             actualStoredId = parsed.storedId,
                             preattachedRuntime = parsed.runtimeId,
                             initialTitle = parsed.title,
                             onBack = { paneSelection = null },
-                            inTwoPane = true,
                         )
+                        }
                     }
                 }
             }
@@ -392,7 +397,15 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
             app = app,
             row = target,
             hidden = target.id in hiddenIds,
-            onDone = { actionTarget = null; refresh() },
+            onDone = {
+                actionTarget = null
+                // Review M15 M4: chat yang sedang terpilih dihapus dari list →
+                // bersihkan ChatPane (jangan render chat mati).
+                if (paneSelection != null && target.id == paneSelection!!.substringBefore("|")) {
+                    paneSelection = null
+                }
+                refresh()
+            },
             onDismiss = { actionTarget = null },
             onOpenBranch = { runtimeId, storedId ->
                 actionTarget = null

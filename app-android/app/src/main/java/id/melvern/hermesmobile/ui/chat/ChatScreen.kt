@@ -76,6 +76,7 @@ import id.melvern.hermesmobile.ui.theme.Radius
 import id.melvern.hermesmobile.ui.theme.Type
 import id.melvern.hermesmobile.ui.theme.hairline
 import id.melvern.hermesmobile.ui.layout.WinSize
+import id.melvern.hermesmobile.ui.layout.isExpanded
 import id.melvern.hermesmobile.ui.theme.pressClickable
 import id.melvern.hermesmobile.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.Dispatchers
@@ -106,8 +107,6 @@ fun ChatScreen(
     onOpenChat: (String) -> Unit = {},
     /** M13: buka ArtifactsScreen (route terpisah, back = balik chat) — bawa live title. */
     onOpenArtifacts: (String) -> Unit = {},
-    /** M15: render di dalam ChatPane two-pane (expanded) — back = clear selection. */
-    inTwoPane: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var runtimeId by remember { mutableStateOf(preattachedRuntime ?: actualStoredId) }
@@ -347,7 +346,8 @@ fun ChatScreen(
     var cacheHydrated by remember { mutableStateOf(false) }
     LaunchedEffect(actualStoredId, preattachedRuntime, reloadKey) {
         loadFailed = false
-        if (preattachedRuntime != null) {
+        val cachedEntry = TranscriptCache.get(actualStoredId)
+        if (preattachedRuntime != null && cachedEntry == null) {
             // NEW GIG: session baru kosong — gak ada transcript buat di-resume.
             // M13: tetap tulis entry kosong ke cache supaya ArtifactsScreen bisa
             // bedain "chat baru (Nothing shared yet)" vs "transcript belum
@@ -637,7 +637,7 @@ fun ChatScreen(
     var menuSheet by remember { mutableStateOf(false) }
     // M15: adaptive — konten max 640 center (gaya Discord) di Medium+ (tablet
     // portrait single-pane juga kena cap); Compact phone = full seperti biasa.
-    val winSize by app.windowSize.collectAsState()
+    val winSize = id.melvern.hermesmobile.ui.layout.currentWinSize()
     val wide = winSize != WinSize.Compact
     // M15: artifacts sebagai side sheet 380dp di expanded (bukan route full screen).
     var artifactsOpen by rememberSaveable { mutableStateOf(false) }
@@ -1041,7 +1041,7 @@ fun ChatScreen(
     }
     // M15: artifacts side sheet (expanded) — 380dp slide dari kanan di dalam
     // ChatPane, tanpa navigasi. Konten = ArtifactsScreen (reuse penuh).
-    if (artifactsOpen && wide) {
+    if (artifactsOpen && winSize.isExpanded) {
         ArtifactsSideSheet(
             app = app,
             storedId = effectiveStoredId,
@@ -1055,10 +1055,13 @@ fun ChatScreen(
 @Composable
 private fun ArtifactsSideSheet(app: HermesApp, storedId: String, chatTitle: String, onDismiss: () -> Unit) {
     val reduce = rememberReduceMotion()
-    androidx.activity.compose.BackHandler(onBack = onDismiss)
+    // Review M15 M5: exit animation — turunkan visible SEBELUM keluar composition.
+    var closing by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(onBack = { closing = true })
     Box(Modifier.fillMaxSize()) {
         AnimatedVisibility(
-            visible = true,
+            visible = !closing,
+            // Review M15 M6: sheet dipakai hanya Expanded (Medium tidak scrim-less).
             enter = if (reduce) EnterTransition.None else slideInHorizontally(tween(Motion.NavMs, easing = Motion.EmphasizedDecelerate)) { it } + fadeIn(tween(Motion.NavMs)),
             exit = if (reduce) ExitTransition.None else slideOutHorizontally(tween(Motion.NavMs / 2, easing = Motion.EmphasizedAccelerate)) { it } + fadeOut(tween(Motion.NavMs / 2)),
             modifier = Modifier.align(Alignment.CenterEnd),
