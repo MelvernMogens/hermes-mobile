@@ -109,15 +109,60 @@ class MetaRepo(private val client: GatewayClient) {
     @Serializable
     data class ProfileRow(
         val name: String,
+        val path: String = "",
         @SerialName("is_default") val isDefault: Boolean = false,
         val model: String? = null,
         val provider: String? = null,
         val description: String = "",
         @SerialName("display_name") val displayName: String = "",
+        /** M18: hanya terisi include_sessions=true. */
+        @SerialName("last_session") val lastSession: ProfileSessionPreview? = null,
+        @SerialName("worker_session") val workerSession: ProfileWorkerSession? = null,
+        @SerialName("canonical_session") val canonicalSession: ProfileCanonicalSession? = null,
     )
 
-    suspend fun profiles(): List<ProfileRow> {
-        val res = client.call("profiles.list", buildJsonObject { })
+    @Serializable
+    data class ProfileSessionPreview(
+        val id: String,
+        val title: String = "",
+        val preview: String = "",
+        @SerialName("started_at") val startedAt: Double = 0.0,
+        @SerialName("last_active") val lastActive: Double = 0.0,
+        @SerialName("message_count") val messageCount: Int = 0,
+    )
+
+    @Serializable
+    data class ProfileWorkerSession(
+        val id: String,
+        val source: String = "",
+        val title: String = "",
+        @SerialName("last_active") val lastActive: Double = 0.0,
+    )
+
+    /** Canonical "Bot Chat" profile (contract ProfileCanonicalSession). */
+    @Serializable
+    data class ProfileCanonicalSession(
+        val id: String,
+        @SerialName("resolved_id") val resolvedId: String = "",
+        @SerialName("root_title") val rootTitle: String = "",
+        val title: String = "",
+        val preview: String = "",
+        @SerialName("started_at") val startedAt: Double = 0.0,
+        @SerialName("last_active") val lastActive: Double = 0.0,
+        @SerialName("message_count") val messageCount: Int = 0,
+    )
+
+    suspend fun profiles(): List<ProfileRow> = profiles(includeSessions = false)
+
+    /**
+     * M18: include_sessions=true → tiap row bawa canonical_session (Bot Chat
+     * registry row), last_session, worker_session — fleet dashboard map status
+     * per profile tanpa N call lanjutan.
+     */
+    suspend fun profiles(includeSessions: Boolean): List<ProfileRow> {
+        val res = client.call("profiles.list", buildJsonObject {
+            if (includeSessions) put("include_sessions", true)
+        })
         return res["profiles"]?.jsonArray?.mapNotNull { el ->
             try { lenientJson.decodeFromJsonElement(ProfileRow.serializer(), el.jsonObject) } catch (_: Throwable) { null }
         } ?: emptyList()

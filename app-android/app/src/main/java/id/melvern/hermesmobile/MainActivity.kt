@@ -27,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
@@ -38,6 +39,10 @@ import androidx.navigation.compose.rememberNavController
 import id.melvern.hermesmobile.core.notify.AppNotifier
 import id.melvern.hermesmobile.ui.layout.WinSize
 import id.melvern.hermesmobile.ui.layout.LocalWinSize
+import id.melvern.hermesmobile.ui.layout.isExpanded
+import id.melvern.hermesmobile.ui.layout.HomeShell
+import id.melvern.hermesmobile.ui.layout.HomeTabs
+import id.melvern.hermesmobile.ui.overview.OverviewScreen
 import id.melvern.hermesmobile.ui.chat.ArtifactsScreen
 import id.melvern.hermesmobile.ui.chat.ChatScreen
 import id.melvern.hermesmobile.ui.connect.ConnectScreen
@@ -107,8 +112,16 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
     val reduce = rememberReduceMotion()
     val slidePx = with(LocalDensity.current) { Motion.NavSlide.roundToPx() }
 
+    // M18: tab aktif (Chats=0 / Overview=1) — rememberSaveable: survive rotate;
+    // deep-link notif selalu balik ke tab Chats.
+    var homeTab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(HomeTabs.CHATS) }
+    // M18: chat yang diminta dari Overview (expanded → inline two-pane M15).
+    var pendingChatSel by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val ws = id.melvern.hermesmobile.ui.layout.currentWinSize()
+
     // M14: buka chat yang diminta dari tap notif (intent extra / onNewIntent flow).
     fun openChatFromNotif(storedId: String) {
+        homeTab = HomeTabs.CHATS
         nav.navigate("chat/$storedId") { launchSingleTop = true }
     }
     LaunchedEffect(Unit) { notifOpenChat?.let { openChatFromNotif(it) } }
@@ -147,7 +160,33 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
             popEnterTransition = popEnter, popExitTransition = popExit,
         ) {
             composable("connect") { ConnectScreen(app, onConnected = { nav.navigate("sessions") { popUpTo("connect") { inclusive = true } } }) }
-            composable("sessions") { SessionsScreen(app, onOpen = { id -> nav.navigate("chat/$id") }) }
+            composable("sessions") {
+                // M18: home 2 tab — Chats (perilaku M15 persis) + Overview.
+                HomeShell(
+                    tab = homeTab,
+                    onTab = { homeTab = it },
+                    chats = {
+                        SessionsScreen(
+                            app,
+                            onOpen = { id -> nav.navigate("chat/$id") },
+                            // expanded: buka dari Overview → selection inline
+                            initialSelection = if (ws.isExpanded) pendingChatSel else null,
+                        )
+                    },
+                    overview = {
+                        OverviewScreen(app, onOpenChat = { arg ->
+                            if (ws.isExpanded) {
+                                // two-pane M15 tetap: selection di pane kanan.
+                                homeTab = HomeTabs.CHATS
+                                pendingChatSel = arg
+                            } else {
+                                homeTab = HomeTabs.CHATS
+                                nav.navigate("chat/$arg") { popUpTo("sessions") }
+                            }
+                        })
+                    },
+                )
+            }
             // M13: artifacts per chat — parse client-side dari TranscriptCache.
             composable("artifacts/{sessionId}") { entry ->
                 val raw = entry.arguments?.getString("sessionId") ?: return@composable

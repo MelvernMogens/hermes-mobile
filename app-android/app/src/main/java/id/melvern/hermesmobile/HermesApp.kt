@@ -7,6 +7,7 @@ import id.melvern.hermesmobile.core.auth.DashboardAuth
 import id.melvern.hermesmobile.core.notify.AppNotifier
 import id.melvern.hermesmobile.core.notify.startNotifPoller
 import id.melvern.hermesmobile.core.repo.GatewayDiscovery
+import id.melvern.hermesmobile.core.repo.BotFleet
 import id.melvern.hermesmobile.core.rpc.GatewayClient
 import id.melvern.hermesmobile.core.store.ConnectionSettings
 import id.melvern.hermesmobile.core.store.SettingsStore
@@ -147,6 +148,11 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
         client = c
         // M14: poller notifikasi (active_list diff) + foreground service + heartbeat hemat.
         notifPollerJob = c.startNotifPoller(this, appScope)
+        // M18: badge fleet di tab bar hidup sejak koneksi pertama — bukan cuma
+        // setelah tab Overview dibuka. profileRows di-cache proses-wide; refetch
+        // ringan sekali per rebuild client (reconnect), bukan per poll tick.
+        BotFleet.appScope = appScope
+        BotFleet.ensureProfiles(c)
         HermesLiveService.start(this)
         return c
     }

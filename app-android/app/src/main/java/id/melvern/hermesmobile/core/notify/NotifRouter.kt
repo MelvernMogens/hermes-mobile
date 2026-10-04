@@ -5,6 +5,8 @@ import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.rpc.GatewayClient
 import id.melvern.hermesmobile.core.rpc.ConnState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -18,6 +20,22 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 
 private const val TAG = "HermesNotifRouter"
+
+/**
+ * M18: snapshot active_list terakhir dari poller M14 — satu-satunya poller
+ * (larangan brief: gak boleh poller kedua). OverviewScreen badge/status
+ * recompute dari sini tanpa RPC tambahan.
+ */
+object FleetBus {
+    private val _live = MutableStateFlow<List<NotifPolicy.LiveRow>>(emptyList())
+    val live: StateFlow<List<NotifPolicy.LiveRow>> = _live
+
+    fun publish(rows: List<NotifPolicy.LiveRow>) {
+        _live.value = rows
+        id.melvern.hermesmobile.core.repo.BotFleet.recomputeFrom(rows)
+    }
+}
+
 
 /**
  * M14: notifikasi background via POLLING (spec: "foreground service + WebSocket keepalive…
@@ -64,7 +82,7 @@ class NotifRouter(private val app: HermesApp) {
         val c = app.client ?: return prev
         val now = try {
             val res = c.call("session.active_list", buildJsonObject { }, timeoutMs = 15_000)
-            res["sessions"]?.jsonArray?.mapNotNull { el ->
+            val rows = res["sessions"]?.jsonArray?.mapNotNull { el ->
                 val o = el.jsonObject
                 val sid = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 NotifPolicy.LiveRow(
@@ -75,10 +93,14 @@ class NotifRouter(private val app: HermesApp) {
                     preview = o["preview"]?.jsonPrimitive?.contentOrNull ?: "",
                     title = o["title"]?.jsonPrimitive?.contentOrNull ?: "",
                 )
-            }?.associateBy { it.sessionKey.ifEmpty { it.sid } } ?: return prev
+            } ?: return prev
             // Key = sessionKey (stored id — stabil antar runtime restart). Kalau pakai
             // runtime sid, resume di surface lain bikin sid baru → baseline hilang →
             // diff miss / notif palsu (terbukti saat verify: sid berganti 650ad4c2→49fada2d).
+            val map = rows.associateBy { it.sessionKey.ifEmpty { it.sid } }
+            // M18: publish snapshot fleet (badge + Overview status live).
+            FleetBus.publish(map.values.toList())
+            map
         } catch (e: Throwable) {
             Log.w(TAG, "active_list gagal: ${e.message}")
             return prev

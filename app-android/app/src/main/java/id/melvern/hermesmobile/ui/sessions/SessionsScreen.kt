@@ -73,14 +73,19 @@ import kotlinx.coroutines.launch
  * Hidden session dikelompokkan di bawah header "Hidden".
  */
 @Composable
-fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit) {
+fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: String? = null) {
     val scope = rememberCoroutineScope()
     // M15: adaptive — two-pane HANYA Expanded width (>=840dp); Compact/Medium
     // perilaku lama (nav ke ChatScreen). Selection di level screen ini, bukan
     // navigasi — rememberSaveable supaya selamat rotate (dan Compact↔Expanded
     // tidak menghapusnya).
     val winSize = id.melvern.hermesmobile.ui.layout.currentWinSize()
-    var paneSelection by rememberSaveable { mutableStateOf<String?>(null) }
+    var paneSelection by rememberSaveable { mutableStateOf(initialSelection) }
+    // M18: buka Bot Chat dari Overview di expanded → selection inline di pane
+    // kanan (bukan route full-screen yang menimpa two-pane M15).
+    androidx.compose.runtime.LaunchedEffect(initialSelection) {
+        if (initialSelection != null) paneSelection = initialSelection
+    }
     fun openChat(arg: String) {
         if (winSize.isExpanded) paneSelection = arg else onOpen(arg)
     }
