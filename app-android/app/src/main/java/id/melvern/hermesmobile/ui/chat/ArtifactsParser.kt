@@ -33,6 +33,18 @@ sealed interface ArtifactRow {
     data class Item(val artifact: Artifact, override val key: String) : ArtifactRow
 }
 
+/**
+ * M16: section tab di ArtifactsScreen. All = gabungan (default, seperti M13);
+ * sisanya 1:1 dengan Artifact.Type (Photos=Image, Files=File generik).
+ */
+enum class ArtifactSection(val label: String, val emptyText: String) {
+    All("All", "Nothing shared yet"),
+    Links("Links", "No links yet"),
+    Photos("Photos", "No photos yet"),
+    Videos("Videos", "No videos yet"),
+    Files("Files", "No files yet"),
+}
+
 object ArtifactsParser {
 
     /** Ekstensi non-media yang dianggap file generik (pdf, zip, txt, apk, json, md, dll). */
@@ -151,6 +163,19 @@ object ArtifactsParser {
             }
         }
     }
+
+    /**
+     * M16: filter pure per section tab — All jalan-turun, sisanya match type
+     * (Image→Photos, File→Files). Pure fn supaya bisa di-unit-test.
+     */
+    fun filter(artifacts: List<Artifact>, section: ArtifactSection): List<Artifact> =
+        when (section) {
+            ArtifactSection.All -> artifacts
+            ArtifactSection.Links -> artifacts.filter { it.type == Artifact.Type.Link }
+            ArtifactSection.Photos -> artifacts.filter { it.type == Artifact.Type.Image }
+            ArtifactSection.Videos -> artifacts.filter { it.type == Artifact.Type.Video }
+            ArtifactSection.Files -> artifacts.filter { it.type == Artifact.Type.File }
+        }
 
     /**
      * Susun baris list terbaru-dulu dengan pemisah hari (gaya chat:

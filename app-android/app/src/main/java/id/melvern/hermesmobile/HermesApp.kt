@@ -37,7 +37,10 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
 
     /** M5: settings koneksi aktif — dipakai MediaRepo (base URL + kredensial /api/media). */
     @Volatile var connection: ConnectionSettings? = null
-        private set
+        set(value) {
+            field = value
+            id.melvern.hermesmobile.ui.components.MediaFetchSave.connection = value
+        }
 
     /** M6: mode discovery aktif — desktop (multi-surface) atau mobile (fallback 8788). */
     val gatewayMode = MutableStateFlow<GatewayDiscovery.Mode>(GatewayDiscovery.Mode.Mobile)
@@ -158,5 +161,7 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
         notifier.cancelSessionNotifications()
         client?.stop()
         client = null
+        // M16: connection global MediaFetchSave ikut dibersihkan saat logout.
+        id.melvern.hermesmobile.ui.components.MediaFetchSave.connection = null
     }
 }

@@ -207,4 +207,52 @@ class ArtifactsParserTest {
         val a = ArtifactsParser.parse(listOf(bot("protokol `https://` dipakai endpoint itu.")))
         assertTrue(a.isEmpty())
     }
+
+    // ── M16: section filter (tab All/Links/Photos/Videos/Files) ──────────
+
+    /** Campuran 5 jenis untuk dipakai semua test filter. */
+    private fun mixed(): List<Artifact> = ArtifactsParser.parse(listOf(
+        bot("Lihat https://example.com/page sekarang.", at = 1001.0),
+        bot("Foto: /Users/x/.hermes/images/upload_2026_0928_1.png", at = 1002.0),
+        bot("Video: /Users/x/out/demo.mp4", at = 1003.0),
+        bot("File: /Users/x/Docs/laporan.md dan /Users/x/app-release.apk", at = 1004.0),
+    ))
+
+    @Test
+    fun `filter All mengembalikan semua tanpa perubahan urutan`() {
+        val a = mixed()
+        val out = ArtifactsParser.filter(a, ArtifactSection.All)
+        assertEquals(a.size, out.size)
+        assertEquals(a, out)
+    }
+
+    @Test
+    fun `filter per section hanya mengembalikan type yang cocok`() {
+        val a = mixed()
+        assertEquals(listOf("https://example.com/page"),
+            ArtifactsParser.filter(a, ArtifactSection.Links).map { it.value })
+        assertEquals(listOf("/Users/x/.hermes/images/upload_2026_0928_1.png"),
+            ArtifactsParser.filter(a, ArtifactSection.Photos).map { it.value })
+        assertEquals(listOf("/Users/x/out/demo.mp4"),
+            ArtifactsParser.filter(a, ArtifactSection.Videos).map { it.value })
+        // .md dan .apk dua-duanya file generik (sama-sama dari satu pesan,
+        // `at` identik — urutan antar tie bebas, cek sebagai set)
+        assertEquals(
+            setOf("/Users/x/Docs/laporan.md", "/Users/x/app-release.apk"),
+            ArtifactsParser.filter(a, ArtifactSection.Files).map { it.value }.toSet(),
+        )
+    }
+
+    @Test
+    fun `filter section kosong mengembalikan list kosong`() {
+        val out = ArtifactsParser.filter(mixed().filter { it.type == Artifact.Type.Link }, ArtifactSection.Files)
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
+    fun `enum section label dan emptyText lengkap dan unik`() {
+        assertEquals(listOf("All", "Links", "Photos", "Videos", "Files"), ArtifactSection.entries.map { it.label })
+        assertEquals(5, ArtifactSection.entries.map { it.emptyText }.toSet().size)
+        assertTrue(ArtifactSection.entries.all { it.emptyText.endsWith("yet") })
+    }
 }

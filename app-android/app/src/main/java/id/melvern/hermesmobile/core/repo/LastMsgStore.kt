@@ -1,6 +1,6 @@
 package id.melvern.hermesmobile.core.repo
 
-import java.util.concurrent.ConcurrentHashMap
+import java.util.LinkedHashMap
 
 /**
  * M17 (fix A): preview pesan TERAKHIR per stored session id — in-memory,
@@ -23,7 +23,7 @@ object LastMsgStore {
         val at: Long = System.currentTimeMillis(),
     )
 
-    private val map = ConcurrentHashMap<String, Last>(MAX_ENTRIES)
+    private val map = LinkedHashMap<String, Last>(16, 0.75f, false)
     /** Uji/migrasi: keputusan trim (bukan UI). */
     @Volatile
     var dropOlderThanMs: Long = 7L * 24 * 3600 * 1000
@@ -33,7 +33,7 @@ object LastMsgStore {
         val flat = rawText.replace('\n', ' ').trim()
         if (flat.isEmpty()) return
         map[storedId] = Last(flat.take(MAX_TEXT))
-        trim()
+        trim(keep = storedId)
     }
 
     fun get(storedId: String): Last? = map[storedId]
@@ -42,12 +42,13 @@ object LastMsgStore {
 
     fun size(): Int = map.size
 
-    /** Pangkas jumlah entry ke <= 64: buang yang paling tua dulu. */
-    private fun trim() {
+    /** Pangkas jumlah entry ke <= 64: buang yang paling tua dulu.
+     *  [keep]: entry yang baru ditulis tidak pernah ikut pass usia. */
+    private fun trim(keep: String? = null) {
         if (map.size <= MAX_ENTRIES) return
         val cutoff = System.currentTimeMillis() - dropOlderThanMs
-        // pass 1: buang entry lebih tua dari 7 hari (session mati lama).
-        map.entries.removeIf { it.value.at < cutoff }
+        // pass 1: buang entry lebih tua dari window (session mati lama).
+        map.entries.removeIf { it.key != keep && it.value.at < cutoff }
         // pass 2: masih overload → buang paling tua sampai muat.
         if (map.size > MAX_ENTRIES) {
             map.entries.sortedBy { it.value.at }

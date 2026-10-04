@@ -15,6 +15,13 @@ import org.junit.Test
  */
 class LastMsgStoreTest {
 
+    @org.junit.Before
+    fun resetStore() {
+        LastMsgStore.clear()
+        LastMsgStore.dropOlderThanMs = 7L * 24 * 3600 * 1000
+    }
+
+
     @After
     fun reset() {
         LastMsgStore.clear()
@@ -70,10 +77,14 @@ class LastMsgStoreTest {
 
     @Test
     fun `trim bisa buang entry lebih tua dari window`() {
-        LastMsgStore.dropOlderThanMs = 0 // semua entry dianggap basi saat trim berikut
-        LastMsgStore.put("s1", "lama")
-        LastMsgStore.put("s2", "baru") // trim jalan di put ini → s1 (age > 0ms) terbuang
-        assertNull(LastMsgStore.get("s1"))
-        assertTrue(LastMsgStore.get("s2") != null)
+        // age-pass hanya jalan saat overload (>64) — isi dummy sampai penuh dulu.
+        // dropOlderThanMs -1: cutoff = now+1 → semua entry (kecuali yang baru ditulis,
+        // dilindungi param keep) dianggap basi.
+        repeat(64) { i -> LastMsgStore.put("old$i", "pesan $i") }
+        LastMsgStore.dropOlderThanMs = -1
+        LastMsgStore.put("segar", "baru") // trim jalan di put ini → semua old* terbuang
+        assertNull(LastMsgStore.get("old0"))
+        assertNull(LastMsgStore.get("old63"))
+        assertTrue(LastMsgStore.get("segar") != null)
     }
 }

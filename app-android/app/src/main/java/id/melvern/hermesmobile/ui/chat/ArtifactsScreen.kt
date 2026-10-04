@@ -3,6 +3,7 @@ package id.melvern.hermesmobile.ui.chat
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
@@ -36,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,6 +53,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -70,6 +74,7 @@ import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Radius
 import id.melvern.hermesmobile.ui.theme.Type
+import id.melvern.hermesmobile.ui.theme.hairline
 import id.melvern.hermesmobile.ui.theme.pressClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -109,6 +114,10 @@ fun ArtifactsScreen(
     var previewImage by remember { mutableStateOf<String?>(null) }
     var previewVideo by remember { mutableStateOf<String?>(null) }
 
+    // M16: section tab (All default). rememberSaveable supaya rotate/ganti
+    // tab gak reset saat side sheet M15 re-compose.
+    var section by rememberSaveable { mutableStateOf(ArtifactSection.All) }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -130,14 +139,21 @@ fun ArtifactsScreen(
         Hairline()
 
         val list = artifacts
+        // M16: tab section — selalu tampil begitu parse selesai (All default).
+        // Badge ikon top bar chat TETAP total semua jenis (tidak difilter).
+        if (list != null) SectionTabs(section) { section = it }
         when {
             list == null -> ArtifactSkeleton()
             // Review M13 MED#4: cache gak ada (ter-evict / app baru start) = TIDAK
             // boleh bilang "Nothing shared yet" — transcript memang belum di-memori.
             list.isEmpty() && !cachePresent -> NotLoadedArtifacts()
-            list.isEmpty() -> EmptyArtifacts()
             else -> {
-                val rows = remember(list) { ArtifactsParser.rows(list) { RelTime.dayLabel(it) } }
+                // M16: filter pure client per section sebelum grouping hari.
+                val filtered = remember(list, section) { ArtifactsParser.filter(list, section) }
+                if (filtered.isEmpty()) {
+                    SectionEmptyArtifacts(section)
+                } else {
+                val rows = remember(filtered) { ArtifactsParser.rows(filtered) { RelTime.dayLabel(it) } }
                 // note hydrated: transcript yang ada di cache belum tentu full
                 // (session jarang dibuka → resume lazy cuma nambah delta).
                 LazyColumn(
@@ -166,6 +182,7 @@ fun ArtifactsScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -244,6 +261,65 @@ private fun EmptyArtifacts() {
             style = Type.Meta,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
+    }
+}
+
+/**
+ * M16: empty state kecil per section — teks dari ArtifactSection.emptyText.
+ * Ringkas (bukan empty state besar All) karena section lain pasti menampilkan
+ * konten di tab lain — ini cuma penanda "belum ada jenis ini".
+ */
+@Composable
+private fun SectionEmptyArtifacts(section: ArtifactSection) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = Dim.ScreenH, vertical = 48.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(section.emptyText, style = Type.Title)
+        Spacer(Modifier.height(4.dp))
+        Text("Switch tabs to see the rest", style = Type.Meta.copy(color = Ink.Text3))
+    }
+}
+
+/**
+ * M16: tab section — segmented 5 tombol teks meta (gaya Effort chips M9):
+ * track Surface1 + hairline border, aktif bg putih/teks hitam. Pure client,
+ * All = gabungan tanpa filter.
+ */
+@Composable
+private fun SectionTabs(section: ArtifactSection, onPick: (ArtifactSection) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dim.ScreenH, vertical = 10.dp)
+            .clip(Radius.Chip)
+            .background(Ink.Surface1)
+            .border(hairline(), Ink.Hairline, Radius.Chip)
+            .padding(3.dp),
+    ) {
+        ArtifactSection.entries.forEach { s ->
+            val active = s == section
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 32.dp)
+                    .clip(Radius.Inline)
+                    .then(if (active) Modifier.background(Ink.Accent) else Modifier)
+                    .pressClickable { onPick(s) }
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    s.label,
+                    style = Type.Meta.copy(
+                        color = if (active) Ink.OnAccent else Ink.Text2,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
@@ -420,6 +496,33 @@ private fun VideoPreviewDialog(
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // M16: Save langsung dari preview video (download video ke Movies).
+                var saved by remember(path) { mutableStateOf(false) }
+                var saving by remember(path) { mutableStateOf(false) }
+                val vScope = rememberCoroutineScope()
+                val vCtx = LocalContext.current
+                Row(
+                    Modifier
+                        .clip(Radius.Chip)
+                        .pressClickable(enabled = !saved && !saving) {
+                            saving = true
+                            vScope.launch {
+                                val ok = MediaFetchSave.saveAny(vCtx, path)
+                                saved = ok
+                                saving = false
+                                Toast.makeText(vCtx, if (ok) "Saved to Movies" else "Couldn't save — try again", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (saving) CircularProgressIndicator(Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+                    else Icon(if (saved) Icons.Rounded.Check else Icons.Rounded.Download, if (saved) "Saved" else "Save", tint = Color.White, modifier = Modifier.size(16.dp))
+                    if (!saved) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("Save", style = Type.Meta, color = Color.White)
+                    }
+                }
             }
             MarkdownVideo(path = path, fetch = videoFetch)
         }
