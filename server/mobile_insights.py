@@ -75,6 +75,29 @@ def last_messages(db: Path, ids: list[str]) -> dict[str, dict]:
     return out
 
 
+def user_messages_after(db: Path, session_id: str, after: float, limit: int = 20) -> list[dict]:
+    """User prompts in ``session_id`` newer than ``after`` (epoch s), oldest first.
+
+    The gateway emits no event for a prompt typed on ANOTHER surface (desktop):
+    a phone watching the session only sees ``message.start`` + the reply. The
+    prompt row is persisted before the turn streams, so the phone pulls it here.
+    """
+    if not _SESSION_RE.match(session_id or "") or not db.exists():
+        return []
+    con = _connect(db)
+    try:
+        rows = con.execute(
+            "SELECT id, content, timestamp FROM messages "
+            "WHERE session_id = ? AND role = 'user' AND timestamp > ? "
+            "AND content IS NOT NULL AND TRIM(content) != '' "
+            "ORDER BY id DESC LIMIT ?",
+            (session_id, float(after), max(1, min(int(limit), 50))),
+        ).fetchall()
+    finally:
+        con.close()
+    return [{"row_id": r[0], "text": r[1], "at": r[2]} for r in reversed(rows)]
+
+
 def usage_summary(db: Path, days: int = 30, now: float | None = None) -> dict:
     """Token usage in the last ``days`` (+ today), grouped by provider.
 

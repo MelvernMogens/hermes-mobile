@@ -88,5 +88,24 @@ class ProfilePaths(unittest.TestCase):
         self.assertIsNone(mi.state_db("a/b"))
 
 
+class UserTail(unittest.TestCase):
+    def test_only_user_prompts_after_watermark_oldest_first(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "state.db"
+            _make_db(db)
+            con = sqlite3.connect(db)
+            con.executemany(
+                "INSERT INTO messages(session_id, role, content, timestamp) VALUES (?,?,?,?)",
+                [("s", "user", "old", 10), ("s", "assistant", "a", 11),
+                 ("s", "user", "from desktop 1", 20), ("s", "tool", "t", 21),
+                 ("s", "user", "from desktop 2", 22), ("other", "user", "x", 30)],
+            )
+            con.commit()
+            con.close()
+            got = mi.user_messages_after(db, "s", after=15)
+        self.assertEqual([m["text"] for m in got], ["from desktop 1", "from desktop 2"])
+        self.assertEqual(mi.user_messages_after(db, "s;drop", after=0), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -233,6 +233,24 @@ async def handle_mobile_last(request: web.Request) -> web.Response:
     return web.json_response({"last": last})
 
 
+async def handle_mobile_user_tail(request: web.Request) -> web.Response:
+    """GET /api/mobile-user-tail?profile=<p>&id=<sid>&after=<epoch> → {"messages": [...]}.
+    Prompts typed on another surface (desktop) — the gateway emits no event for them."""
+    session: aiohttp.ClientSession = request.app["client"]
+    if not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    db = mobile_insights.state_db(request.query.get("profile"))
+    if db is None:
+        return web.json_response({"messages": []})
+    try:
+        after = float(request.query.get("after", "0") or 0)
+    except ValueError:
+        after = 0.0
+    msgs = await asyncio.get_running_loop().run_in_executor(
+        None, mobile_insights.user_messages_after, db, request.query.get("id", ""), after)
+    return web.json_response({"messages": msgs})
+
+
 async def handle_mobile_usage(request: web.Request) -> web.Response:
     """GET /api/mobile-usage?profile=<p> → token usage by provider (last 30 days)."""
     session: aiohttp.ClientSession = request.app["client"]
@@ -385,6 +403,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-media", handle_mobile_media)
     app.router.add_get("/api/mobile-last", handle_mobile_last)
     app.router.add_get("/api/mobile-usage", handle_mobile_usage)
+    app.router.add_get("/api/mobile-user-tail", handle_mobile_user_tail)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
     app.on_startup.append(on_startup)

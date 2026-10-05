@@ -329,6 +329,34 @@ fun ChatScreen(
         )
     }
 
+    /**
+     * Turn baru mulai (message.start) — mungkin dari surface lain. Ambil prompt
+     * user sejak pesan user terakhir yang kita tahu (minus 2 menit buat clock skew)
+     * dan sisipkan yang belum ada. Retry singkat: row prompt kadang baru tercatat
+     * sesaat setelah turn mulai.
+     */
+    fun pullForeignPrompts() {
+        val conn = app.connection ?: return
+        val sid = effectiveStoredId.takeIf { it.isNotBlank() } ?: return
+        val lastKnown = items.filterIsInstance<ChatItem.User>().mapNotNull { it.at }.maxOrNull()
+        val after = (lastKnown ?: (nowEpoch() - 600)) - 120
+        scope.launch {
+            for (attempt in 0..2) {
+                if (attempt > 0) delay(1500L * attempt)
+                val tail = id.melvern.hermesmobile.core.repo.InsightsRepo(conn)
+                    .userTail(app.profile.value, sid, after) ?: continue
+                val merged = id.melvern.hermesmobile.core.repo.InsightsRepo.mergeUserTail(items, tail) { RelTime.clock(it) }
+                if (merged !== items) {
+                    items = merged
+                    forceScroll = atBottom
+                    cacheSnapshot()
+                    break
+                }
+            }
+        }
+    }
+
+
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
         when {
             m.isUser -> listOf(ChatItem.User(m.text ?: "", m.rowId, time = RelTime.clock(m.timestamp), at = m.timestamp))
@@ -536,6 +564,8 @@ fun ChatScreen(
                     "message.start" -> {
                         running = true; thinking = false; thinkingText = ""; turnStartCount++
                         thinkStartMs = 0L; thoughtBuf = ""; pendingThought = null
+                        // Prompt yang diketik di desktop gak punya event sendiri — tarik dari Mac.
+                        pullForeignPrompts()
                     }
                     "message.interim" -> {
                         endThinking()

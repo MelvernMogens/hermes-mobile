@@ -48,6 +48,17 @@ class InsightsRepo(private val settings: ConnectionSettings) {
         parseLast(body)
     }
 
+    data class UserMsg(val rowId: Int?, val text: String, val at: Double)
+
+    /** Prompt user di session ini setelah [after] (epoch s) — termasuk yang diketik di desktop. */
+    suspend fun userTail(profile: String, storedId: String, after: Double): List<UserMsg>? = withContext(Dispatchers.IO) {
+        val auth = DashboardAuth(base())
+        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val body = auth.getJson("${base()}/api/mobile-user-tail?profile=${enc(profile)}&id=${enc(storedId)}&after=$after")
+            ?: return@withContext null
+        parseUserTail(body)
+    }
+
     suspend fun usage(profile: String): Usage? = withContext(Dispatchers.IO) {
         val auth = DashboardAuth(base())
         if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
@@ -69,6 +80,39 @@ class InsightsRepo(private val settings: ConnectionSettings) {
                 )
             }.filterValues { it.text.isNotBlank() }
         } catch (_: Throwable) { null }
+
+        fun parseUserTail(body: String): List<UserMsg>? = try {
+            json.parseToJsonElement(body).jsonObject["messages"]?.jsonArray?.mapNotNull { e ->
+                val o = e.jsonObject
+                val text = (o["text"] as? JsonPrimitive)?.content.orEmpty()
+                val at = (o["at"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
+                if (text.isBlank()) null else UserMsg((o["row_id"] as? JsonPrimitive)?.intOrNull, text, at)
+            } ?: emptyList()
+        } catch (_: Throwable) { null }
+
+        /**
+         * Sisipkan prompt user yang belum ada di transcript lokal. Pesan dari HP
+         * sendiri sudah ada (optimistic) → dedupe by rowId lalu teks. Disisip
+         * SEBELUM assistant yang sedang streaming supaya urutan tetap user → balasan.
+         */
+        fun mergeUserTail(items: List<id.melvern.hermesmobile.core.model.ChatItem>, tail: List<UserMsg>,
+                          clock: (Double) -> String): List<id.melvern.hermesmobile.core.model.ChatItem> {
+            if (tail.isEmpty()) return items
+            val users = items.filterIsInstance<id.melvern.hermesmobile.core.model.ChatItem.User>()
+            val haveIds = users.mapNotNull { it.rowId }.toSet()
+            val recentTexts = users.takeLast(12).map { it.text.trim() }.toMutableList()
+            val missing = tail.filter { m ->
+                if (m.rowId != null && m.rowId in haveIds) return@filter false
+                // pesan dari HP: teks yang dikirim bisa diawali "> quote" — cocokkan ekor teks
+                val t = m.text.trim()
+                val hit = recentTexts.indexOfFirst { it == t || t.endsWith(it) && it.isNotEmpty() }
+                if (hit >= 0) { recentTexts.removeAt(hit); false } else true
+            }
+            if (missing.isEmpty()) return items
+            val add = missing.map { id.melvern.hermesmobile.core.model.ChatItem.User(it.text, it.rowId, time = clock(it.at), at = it.at) }
+            val streamingIdx = items.indexOfLast { it is id.melvern.hermesmobile.core.model.ChatItem.Assistant && !it.done }
+            return if (streamingIdx >= 0) items.take(streamingIdx) + add + items.drop(streamingIdx) else items + add
+        }
 
         fun parseUsage(body: String): Usage? = try {
             val o = json.parseToJsonElement(body).jsonObject
