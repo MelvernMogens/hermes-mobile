@@ -1,5 +1,15 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -320,12 +330,11 @@ fun ThoughtRow(text: String, secs: Int?, steps: Int = 1) {
                 .heightIn(min = Dim.ToolRow)
                 .clip(Radius.Full)
                 .background(Ink.Surface1)
-                .border(hairline(), Ink.Hairline, Radius.Full)
                 .pressClickable { open = !open }
                 .padding(start = 10.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Psychology, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            Icon(Icons.Outlined.Psychology, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(6.dp))
             Text(
                 when {
@@ -387,18 +396,18 @@ private fun toolLook(name: String): ToolLook {
     val n = name.lowercase()
     return when {
         listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } ->
-            ToolLook(Icons.Rounded.Terminal, "Ran terminal", "Running terminal")
+            ToolLook(Icons.Outlined.Terminal, "Ran terminal", "Running terminal")
         listOf("search", "grep", "find").any { it in n } && "web" !in n ->
-            ToolLook(Icons.Rounded.Search, "Searched files", "Searching files")
+            ToolLook(Icons.Outlined.Search, "Searched files", "Searching files")
         "web" in n || "browser" in n || "fetch" in n || "http" in n ->
-            ToolLook(Icons.Rounded.Language, "Browsed the web", "Browsing the web")
+            ToolLook(Icons.Outlined.Language, "Browsed the web", "Browsing the web")
         listOf("write", "patch", "edit", "replace").any { it in n } ->
-            ToolLook(Icons.Rounded.Edit, "Edited file", "Editing file")
+            ToolLook(Icons.Outlined.Edit, "Edited file", "Editing file")
         listOf("read", "file", "cat", "view").any { it in n } ->
-            ToolLook(Icons.Rounded.Description, "Read file", "Reading file")
+            ToolLook(Icons.Outlined.Description, "Read file", "Reading file")
         listOf("todo", "memory", "note", "skill").any { it in n } ->
-            ToolLook(Icons.AutoMirrored.Rounded.Notes, "Updated ${name.replace('_', ' ')}", "Updating ${name.replace('_', ' ')}")
-        else -> ToolLook(Icons.Rounded.Build, "Used ${name.replace('_', ' ')}", "Using ${name.replace('_', ' ')}")
+            ToolLook(Icons.AutoMirrored.Outlined.Notes, "Updated ${name.replace('_', ' ')}", "Updating ${name.replace('_', ' ')}")
+        else -> ToolLook(Icons.Outlined.Build, "Used ${name.replace('_', ' ')}", "Using ${name.replace('_', ' ')}")
     }
 }
 
@@ -410,30 +419,8 @@ fun ToolGroup(tools: List<ChatItem.Tool>) {
         Box(Modifier.padding(horizontal = Dim.ScreenH)) { StepPill(tools, emptyList(), single = tools.first()) }
         return
     }
-    var open by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).animateContentSize()) {
-        Row(
-            Modifier
-                .heightIn(min = Dim.ToolRow)
-                .clip(Radius.Full)
-                .background(Ink.Surface1)
-                .border(hairline(), Ink.Hairline, Radius.Full)
-                .pressClickable { open = !open }
-                .padding(start = 10.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (anyRunning) PulsingDot(Ink.Live, size = 6.dp)
-            else Icon(Icons.Rounded.Build, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (anyRunning) "Using ${tools.size} tools" else "Used ${tools.size} tools",
-                style = Type.Caption.copy(color = Ink.Text2),
-            )
-            Spacer(Modifier.width(2.dp))
-            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
-        }
-        if (open) Column(Modifier.padding(start = 12.dp, top = 6.dp)) { tools.forEach { ToolLine(it) } }
-    }
+    // >1 tool = bahasa yang sama dengan run campuran: "Worked · N steps"
+    Box(Modifier.padding(horizontal = Dim.ScreenH)) { StepPill(tools, emptyList()) }
 }
 
 @Composable
@@ -454,7 +441,7 @@ private fun ToolLine(tool: ChatItem.Tool) {
             val failed = tool.status == "error"
             when {
                 running -> PulsingDot(Ink.Live, Modifier.padding(horizontal = 4.dp), size = 6.dp)
-                failed -> Icon(Icons.Rounded.ErrorOutline, "Failed", tint = Ink.Danger, modifier = Modifier.size(14.dp))
+                failed -> Icon(Icons.Outlined.ErrorOutline, "Failed", tint = Ink.Danger, modifier = Modifier.size(14.dp))
                 else -> Icon(look.icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
             }
             Spacer(Modifier.width(8.dp))
@@ -629,9 +616,9 @@ private fun StepPill(tools: List<ChatItem.Tool>, thoughts: List<String>, single:
         ) {
             when {
                 running -> PulsingDot(Ink.Live, size = 6.dp)
-                failed > 0 || single?.status == "error" -> Icon(Icons.Rounded.ErrorOutline, null, tint = Ink.Danger, modifier = Modifier.size(14.dp))
+                failed > 0 || single?.status == "error" -> Icon(Icons.Outlined.ErrorOutline, null, tint = Ink.Danger, modifier = Modifier.size(14.dp))
                 single != null -> Icon(toolLook(single.name).icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
-                else -> Icon(Icons.Rounded.Bolt, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+                else -> Icon(Icons.Outlined.Bolt, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
             }
             Spacer(Modifier.width(6.dp))
             Text(label, style = Type.Caption.copy(color = Ink.Text2))

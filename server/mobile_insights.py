@@ -94,7 +94,7 @@ def usage_summary(db: Path, days: int = 30, now: float | None = None) -> dict:
             "COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
             "COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(estimated_cost_usd),0) "
             "FROM sessions WHERE started_at >= ? AND source NOT IN ('tool','kanban') "
-            "GROUP BY p ORDER BY 3+4 DESC",
+            "GROUP BY p ORDER BY COALESCE(SUM(input_tokens),0)+COALESCE(SUM(output_tokens),0) DESC",
             (since,),
         ).fetchall()
         today = con.execute(

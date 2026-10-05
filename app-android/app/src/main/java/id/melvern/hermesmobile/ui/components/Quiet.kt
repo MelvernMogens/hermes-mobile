@@ -261,8 +261,7 @@ fun GroupSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope
             .padding(horizontal = Dim.GroupInset)
             .fillMaxWidth()
             .clip(Radius.Group)
-            .background(Ink.Surface1)
-            .border(hairline(), Ink.Hairline, Radius.Group),
+            .background(Ink.Surface1),
         content = content,
     )
 }

@@ -665,7 +665,7 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                 style = Type.Callout.copy(color = Ink.Danger),
                 modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
             )
-            else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
+            else -> Box { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
                 items(rows!!, key = { it.name }) { p ->
                     val selected = p.name == current
                     Row(
@@ -689,6 +689,10 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                         if (selected) Icon(Icons.Rounded.Check, "Active profile", tint = Ink.Text, modifier = Modifier.size(Dim.Icon))
                     }
                 }
+            }
+                // fade bawah — baris terakhir yang kepotong kebaca "masih bisa di-scroll"
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Surface2.copy(alpha = 0f), Ink.Surface2))))
             }
         }
         Hairline(Modifier.padding(top = 8.dp))

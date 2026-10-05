@@ -181,10 +181,15 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
                     }
                 }
             } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Column(Modifier.weight(1f, fill = false).widthIn(max = 640.dp).verticalScroll(rememberScrollState())) {
-                        sections(); usageBlock(); Spacer(Modifier.height(40.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        Column(Modifier.weight(1f, fill = false).widthIn(max = 640.dp).verticalScroll(rememberScrollState())) {
+                            sections(); usageBlock(); Spacer(Modifier.height(40.dp))
+                        }
                     }
+                    // fade di bawah judul — kartu masuk lembut, gak kepotong keras
+                    Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(18.dp)
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg, Ink.Bg.copy(alpha = 0f)))))
                 }
             }
         }
@@ -226,7 +231,6 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier, li
         modifier
             .clip(Radius.Card)
             .background(Ink.Surface1)
-            .border(hairline(), Ink.Hairline, Radius.Card)
             .padding(horizontal = Dim.GroupPadH + 4.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -336,6 +340,7 @@ private fun UsageSection(usage: UsageUi?, loaded: Boolean, tokens: id.melvern.he
 @Composable
 private fun TokenCard(u: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage) {
     val total = u.totalTokens.coerceAtLeast(1)
+    val providers = u.providers.sortedByDescending { it.tokens }
     GroupSurface {
         Column(Modifier.padding(horizontal = Dim.GroupPadH, vertical = 16.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
@@ -346,22 +351,22 @@ private fun TokenCard(u: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage) {
             }
             Spacer(Modifier.height(14.dp))
             // bar tersegmen: tiap provider satu segmen, abu bertingkat (warna = status saja)
-            val shades = listOf(Ink.Text, Ink.Text2, Ink.Text3, Ink.Text4, Ink.HairlineStrong)
+            val shades = listOf(Ink.Text, Ink.Text3, Ink.HairlineStrong, Ink.Text4, Ink.Raised)
             Row(Modifier.fillMaxWidth().height(8.dp).clip(Radius.Full).background(Ink.Surface3)) {
-                u.providers.forEachIndexed { i, p ->
+                providers.forEachIndexed { i, p ->
                     val f = p.tokens.toFloat() / total
                     if (f > 0.004f) Box(Modifier.weight(f).fillMaxSize().background(shades[i.coerceAtMost(shades.lastIndex)]))
                 }
             }
             Spacer(Modifier.height(14.dp))
-            u.providers.forEachIndexed { i, p ->
+            providers.forEachIndexed { i, p ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).clip(Radius.Full).background(shades[i.coerceAtMost(shades.lastIndex)]))
                     Spacer(Modifier.width(10.dp))
                     Text(id.melvern.hermesmobile.core.repo.InsightsRepo.providerName(p.provider), style = Type.Callout, modifier = Modifier.weight(1f))
                     Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(p.tokens), style = Type.FigureSmall)
                     Text(
-                        String.format(java.util.Locale.US, "%3d%%", (p.tokens * 100 / total).toInt()),
+                        (p.tokens * 1000 / total).let { pm -> if (pm < 10) "<1%" else "${(pm + 5) / 10}%" },
                         style = Type.MonoMeta.copy(color = Ink.Text4),
                         modifier = Modifier.widthIn(min = 44.dp).padding(start = 10.dp),
                     )
@@ -395,7 +400,6 @@ private fun UsageCard(u: UsageUi) {
             .fillMaxWidth()
             .clip(Radius.Group)
             .background(Ink.Surface1)
-            .border(hairline(), Ink.Hairline, Radius.Group)
             .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
         u.plan?.let { bar ->
