@@ -47,4 +47,12 @@ class ClarifyAndFilesTest {
         val blocks = MarkdownParser.parse("I saved it to /Users/me/out/notes.md for you.")
         assertTrue(blocks.none { it is MdBlock.FileRef })
     }
+
+    @Test
+    fun `user bubble hides attached context and file refs but keeps text and media`() {
+        val raw = "what is this?\n@file:.hermes/attachments/33.mp4\nMEDIA:/Users/m/.hermes/attachments/33.mp4\n\n" +
+            "--- Attached Context ---\n\n📎 @file:.hermes/attachments/33.mp4 (video/mp4) — binary file"
+        assertEquals("what is this?\nMEDIA:/Users/m/.hermes/attachments/33.mp4", userDisplayText(raw))
+        assertEquals("plain", userDisplayText("plain"))
+    }
 }

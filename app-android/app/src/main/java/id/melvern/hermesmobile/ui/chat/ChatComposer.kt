@@ -283,7 +283,7 @@ private fun AttachmentChip(att: Attachment?, thumb: ImageBitmap?, attaching: Boo
     }
 }
 
-/** Sheet attach: grid 4 tile (Camera / Gallery / Files / Location), gaya WhatsApp — tenang, monokrom. */
+/** Sheet attach: 4 tile (Camera / Gallery / Files / Location), gaya WhatsApp — monokrom, rapat. */
 @Composable
 fun AttachSheet(
     onDismiss: () -> Unit,
@@ -294,8 +294,8 @@ fun AttachSheet(
 ) {
     QuietSheet(onDismiss = onDismiss) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
         ) {
             AttachTile("Camera", Icons.Outlined.PhotoCamera) { onDismiss(); onCamera() }
             AttachTile("Gallery", Icons.Outlined.PhotoLibrary) { onDismiss(); onGallery() }
@@ -303,9 +303,9 @@ fun AttachSheet(
             AttachTile("Location", Icons.Outlined.LocationOn) { onDismiss(); onLocation() }
         }
         Text(
-            "Photos, videos and files up to 25 MB",
-            style = Type.Meta,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+            "Max 25 MB per file",
+            style = Type.Caption.copy(color = Ink.Text3),
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
@@ -315,17 +315,21 @@ fun AttachSheet(
 private fun AttachTile(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     Column(
         Modifier
-            .width(76.dp)
+            .width(72.dp)
             .clip(Radius.Card)
             .pressClickable(onClick = onClick)
-            .padding(vertical = 10.dp)
-            .semantics { contentDescription = label },
+            .padding(vertical = 6.dp)
+            .semantics(mergeDescendants = true) { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(52.dp).clip(Radius.Full).background(Ink.Surface2),
+            Modifier
+                .size(56.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+                .background(androidx.compose.ui.graphics.Color(0xFF2C2C31))
+                .border(hairline(), androidx.compose.ui.graphics.Color(0x1FFFFFFF), androidx.compose.foundation.shape.RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center,
-        ) { Icon(icon, null, tint = Ink.Text, modifier = Modifier.size(22.dp)) }
+        ) { Icon(icon, null, tint = Ink.Text, modifier = Modifier.size(24.dp)) }
         Spacer(Modifier.height(8.dp))
         Text(label, style = Type.Caption.copy(color = Ink.Text2))
     }

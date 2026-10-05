@@ -151,6 +151,8 @@ fun ChatScreen(
     // M4: approval + clarify card — server→client request.
     var approval by remember { mutableStateOf<AskApproval?>(null) }
     var clarify by remember { mutableStateOf<AskClarify?>(null) }
+    // agent berhenti nunggu jawaban (clarify/approval belum dijawab) → header "Waiting for you"
+    val waitingOnUser = (clarify?.responded == null && clarify != null) || (approval?.responded == null && approval != null)
     var modelSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val client = app.client
@@ -745,6 +747,12 @@ fun ChatScreen(
                             StatusDot(if (connState == ConnState.CLOSED) Ink.Danger else Ink.Warn)
                             Spacer(Modifier.width(6.dp))
                             Text(if (connState == ConnState.CLOSED) "Offline" else "Reconnecting…", style = Type.Meta, maxLines = 1)
+                        }
+                        running && waitingOnUser -> {
+                            StatusDot(Ink.Warn)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Waiting for you", style = Type.Meta.copy(color = Ink.Text2), maxLines = 1)
+                            Text(" · " + Pretty.model(headerModel), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1)
                         }
                         running -> {
                             PulsingDot(Ink.Live, size = 6.dp)

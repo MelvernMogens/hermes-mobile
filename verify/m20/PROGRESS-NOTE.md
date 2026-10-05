@@ -1,4 +1,4 @@
-# M20 — attach / files / clarify (PAUSED 2026-10-05 ~23:58, user: "besok baru lanjut")
+# M20 — attach / files / clarify — RELEASED v20
 
 ## Done (built, 144 unit tests green, NOT released)
 - Attach sheet: Camera / Gallery (photo+video picker) / Files / Location. Limit 25 MB (was 8 MB).

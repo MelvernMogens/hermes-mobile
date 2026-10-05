@@ -224,11 +224,9 @@ fun UserBubble(
                 }
             }
             if (id.melvern.hermesmobile.ui.components.MarkdownParser.containsMediaLine(item.text)) {
-                // ref "@file:…" untuk agent — bubble cukup tampilkan medianya
-                val shown = item.text.lineSequence().filterNot { it.trim().startsWith("@file:") }.joinToString("\n").trim()
-                MarkdownText(shown, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
+                MarkdownText(userDisplayText(item.text), style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
             } else {
-                SelectionContainer { Text(item.text, style = Type.Body) }
+                SelectionContainer { Text(userDisplayText(item.text), style = Type.Body) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
@@ -755,4 +753,17 @@ private fun StepPill(tools: List<ChatItem.Tool>, thoughts: List<String>, single:
             }
         }
     }
+}
+
+
+private val ATTACHED_CONTEXT_RE = Regex("""(?:^|\n)--- Attached Context ---\s*\n""")
+
+/**
+ * Teks prompt user untuk ditampilkan: buang blok "--- Attached Context ---"
+ * (isi file yang di-inline server untuk model — desktop juga memotongnya) dan
+ * baris ref "@file:…" (bubble menampilkan medianya lewat baris MEDIA:).
+ */
+fun userDisplayText(raw: String): String {
+    val cut = ATTACHED_CONTEXT_RE.find(raw)?.let { raw.substring(0, it.range.first) } ?: raw
+    return cut.lineSequence().filterNot { val l = it.trim(); l.startsWith("@file:") || l.startsWith("@image:") }.joinToString("\n").trim()
 }
