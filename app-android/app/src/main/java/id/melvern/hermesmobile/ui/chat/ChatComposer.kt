@@ -1,5 +1,7 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.LocationOn
@@ -89,13 +91,30 @@ fun Composer(
     onSend: () -> Unit, onStop: () -> Unit,
     /** M15: expanded → composer max 640 center (Discord style). */
     wide: Boolean = false,
+    /** Mic: null = voice tidak tersedia. */
+    voice: VoiceInput? = null,
+    onMic: () -> Unit = {},
+    /** Saran slash command untuk token `/xxx` yang sedang diketik. */
+    slashSuggestions: List<id.melvern.hermesmobile.core.repo.SlashRepo.Suggestion> = emptyList(),
+    onPickSlash: (String) -> Unit = {},
 ) {
     val canSend = connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true)
     val showStop = running && value.isBlank() && attachment == null && !readOnly
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier).fillMaxWidth().background(Ink.Bg)) {
+        if (slashSuggestions.isNotEmpty()) SlashSuggestionList(slashSuggestions, onPickSlash)
         attachError?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp))
+        }
+        voice?.error?.let {
+            Text(it, style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp))
+        }
+        if (voice?.listening == true) {
+            Row(Modifier.padding(start = Dim.ScreenH, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                id.melvern.hermesmobile.ui.components.PulsingDot(Ink.Danger, size = 6.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Listening… tap the mic to finish", style = Type.Meta.copy(color = Ink.Text2))
+            }
         }
         // M11: chip reply — kutipan pesan yang dibalas, X untuk batal.
         quote?.let { q ->
@@ -197,8 +216,13 @@ fun Composer(
                     }
                 },
             )
+            val listening = voice?.listening == true
             when {
+                listening -> MicAction(listening = true, level = voice?.level ?: 0f, onClick = { voice?.stop() })
                 showStop -> StopAction(enabled = connected, onClick = onStop)
+                // field kosong → mic (gaya WhatsApp); ada teks → kirim
+                voice != null && value.isBlank() && attachment == null && !readOnly ->
+                    MicAction(listening = false, level = 0f, onClick = onMic)
                 else -> RoundAction(Icons.Rounded.ArrowUpward, "Send", filled = canSend, enabled = canSend, onClick = { if (canSend) onSend() })
             }
         }
@@ -540,5 +564,62 @@ fun ModelSheet(
             style = Type.Callout.copy(color = Ink.Text3),
             modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
         )
+    }
+}
+
+
+/** Mic: tonal saat idle; merekam = putih dengan halo yang ikut level suara. */
+@Composable
+private fun MicAction(listening: Boolean, level: Float, onClick: () -> Unit) {
+    val halo by androidx.compose.animation.core.animateFloatAsState(if (listening) 1f + level * 0.35f else 1f, label = "micHalo")
+    Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+        if (listening) Box(
+            Modifier.size(36.dp).graphicsLayer { scaleX = halo; scaleY = halo }
+                .clip(Radius.Full).background(Ink.Text.copy(alpha = 0.16f)),
+        )
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(Radius.Full)
+                .background(if (listening) Ink.Accent else Ink.Surface3)
+                .pressClickable(onClick = onClick)
+                .semantics { contentDescription = if (listening) "Stop voice input" else "Voice input" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (listening) Icons.Rounded.Stop else Icons.Rounded.Mic, null,
+                tint = if (listening) Ink.OnAccent else Ink.Text2, modifier = Modifier.size(19.dp),
+            )
+        }
+    }
+}
+
+
+/** Daftar saran slash di atas composer: nama mono + deskripsi pendek, maks ~5 baris terlihat. */
+@Composable
+private fun SlashSuggestionList(items: List<id.melvern.hermesmobile.core.repo.SlashRepo.Suggestion>, onPick: (String) -> Unit) {
+    androidx.compose.foundation.lazy.LazyColumn(
+        Modifier.fillMaxWidth().heightIn(max = 260.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .clip(Radius.Card).background(Ink.Surface2),
+    ) {
+        items(items.size) { i ->
+            val it = items[i]
+            Row(
+                Modifier.fillMaxWidth().pressClickable { onPick(it.text) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    it.display.trim().let { d -> if (d.startsWith("/")) d else "/$d" },
+                    style = Type.Mono.copy(color = Ink.Text),
+                    maxLines = 1,
+                )
+                if (it.meta.isNotBlank()) {
+                    Spacer(Modifier.width(10.dp))
+                    Text(it.meta, style = Type.Caption.copy(color = Ink.Text3), maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                }
+            }
+        }
     }
 }

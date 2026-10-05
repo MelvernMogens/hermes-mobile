@@ -110,6 +110,8 @@ sealed interface ChatItem {
     /** M8: [toolId] = tool_id event live (match start↔complete); [detail] = args + output → code block saat expand. */
     data class Tool(val name: String, val status: String, val detail: String? = null, val toolId: String? = null) : ChatItem
     data class NoticeLine(val text: String) : ChatItem
+    /** Output slash command (lokal, tidak masuk transcript agent). */
+    data class Command(val command: String, val output: String?, val failed: Boolean = false) : ChatItem
 }
 
 /**

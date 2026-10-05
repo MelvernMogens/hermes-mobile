@@ -647,6 +647,16 @@ fun MdTable(table: MdBlock.Table, modifier: Modifier = Modifier) {
     val scrollable = cols > 4 || (table.rows.maxOfOrNull { r -> r.maxOfOrNull { spans -> spans.sumOf { it.text.length } } ?: 0 } ?: 0) > 40
     val hl = hairline()
     var cellSheet by remember { mutableStateOf<String?>(null) }
+    // Mode scroll horizontal: lebar dari parent jadi tak terbatas → weight(1f) = lebar 0
+    // (teks gak kegambar, sisa kotak kosong). Di mode ini tiap kolom dapat lebar PASTI
+    // dari panjang isi terpanjangnya.
+    val colWidths = if (!scrollable) null else (0 until cols).map { c ->
+        val longest = (listOf(table.header.getOrNull(c)) + table.rows.map { it.getOrNull(c) })
+            .maxOfOrNull { spans -> spans?.sumOf { it.text.length } ?: 0 } ?: 0
+        (longest * 7 + 24).coerceIn(88, 240).dp
+    }
+    fun Modifier.cellWidth(c: Int): Modifier =
+        colWidths?.let { this.width(it[c]) } ?: this.widthIn(max = TableCellMaxW)
     Column(
         modifier
             .fillMaxWidth()
@@ -665,9 +675,8 @@ fun MdTable(table: MdBlock.Table, modifier: Modifier = Modifier) {
                     style = Type.Title.copy(fontSize = Type.Callout.fontSize, lineHeight = Type.Callout.lineHeight),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .widthIn(max = TableCellMaxW)
+                    modifier = (if (colWidths == null) Modifier.weight(1f) else Modifier)
+                        .cellWidth(c)
                         .padding(horizontal = 6.dp)
                         .then(if (overflow) Modifier.pressClickable { cellSheet = cell.text } else Modifier),
                 )
@@ -691,9 +700,8 @@ fun MdTable(table: MdBlock.Table, modifier: Modifier = Modifier) {
                         color = Ink.Text2,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .weight(1f)
-                            .widthIn(max = TableCellMaxW)
+                        modifier = (if (colWidths == null) Modifier.weight(1f) else Modifier)
+                            .cellWidth(c)
                             .padding(horizontal = 6.dp)
                             .then(if (overflow) Modifier.pressClickable { cellSheet = cell.text } else Modifier),
                 )

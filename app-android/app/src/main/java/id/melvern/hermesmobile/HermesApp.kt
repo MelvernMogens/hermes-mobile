@@ -66,6 +66,11 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
     )
     val openChatRequests: kotlinx.coroutines.flow.SharedFlow<String> = _openChatRequests
 
+    /** Share masuk saat app sudah jalan → kembali ke tab Chats untuk memilih tujuan. */
+    private val _homeRequests = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val homeRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _homeRequests
+    fun offerHome() { _homeRequests.tryEmit(Unit) }
+
     fun offerOpenChat(storedId: String?) {
         // onCreate: extra dibaca langsung di AppNav; onNewIntent: lewat sini.
         if (!storedId.isNullOrBlank()) _openChatRequests.tryEmit(storedId)

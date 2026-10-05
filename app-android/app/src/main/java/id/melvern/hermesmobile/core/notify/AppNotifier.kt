@@ -56,20 +56,72 @@ class AppNotifier(private val context: Context) {
             .build()
     }
 
-    fun postAgent(d: NotifPolicy.Decision.Notify) {
+    /**
+     * Notif agent. [ask] terisi kalau agent sedang MENUNGGU (approval/clarify) — tombol
+     * Allow/Deny atau Reply langsung dari shade. Notif balasan biasa juga dapat Reply.
+     */
+    fun postAgent(d: NotifPolicy.Decision.Notify, ask: PendingAsk? = null) {
         ensureChannels()
-        val n = base(CHANNEL_AGENT)
+        val b = base(CHANNEL_AGENT)
             .setContentTitle(d.title)
-            .setContentText(d.preview)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(d.preview))
+            .setContentText(ask?.text ?: d.preview)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(ask?.text ?: d.preview))
             .setContentIntent(mainIntent(openChat = d.storedId))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH) // <26 fallback
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setGroup(GROUP_AGENT)
-            .build()
+        when (ask?.kind) {
+            "approval" -> {
+                b.addAction(0, "Deny", actionIntent(NotifActionReceiver.ACTION_DENY, d.storedId, ask))
+                b.addAction(0, "Allow", actionIntent(NotifActionReceiver.ACTION_APPROVE, d.storedId, ask))
+            }
+            else -> b.addAction(replyAction(d.storedId, ask, label = if (ask?.kind == "clarify") "Answer" else "Reply"))
+        }
         // id numerik per session: notif baru utk session sama nimpah yang lama.
-        nm.notify(d.storedId.hashCode(), n)
+        nm.notify(d.storedId.hashCode(), b.build())
+    }
+
+    /** Sesudah aksi dari shade: ganti notif dengan status singkat, lalu hilang sendiri. */
+    fun settle(storedId: String, status: String, reply: String?) {
+        ensureChannels()
+        val n = base(CHANNEL_AGENT)
+            .setContentTitle(status)
+            .setContentText(reply ?: "")
+            .setContentIntent(mainIntent(openChat = storedId))
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(4_000)
+            .setGroup(GROUP_AGENT)
+            .build()
+        nm.notify(storedId.hashCode(), n)
+    }
+
+    data class PendingAsk(val kind: String, val requestId: String, val text: String, val qid: String? = null)
+
+    private fun actionIntent(action: String, storedId: String, ask: PendingAsk?): PendingIntent {
+        val i = Intent(context, NotifActionReceiver::class.java).apply {
+            this.action = action
+            putExtra(NotifActionReceiver.EXTRA_STORED, storedId)
+            putExtra(NotifActionReceiver.EXTRA_REQUEST, ask?.requestId.orEmpty())
+            putExtra(NotifActionReceiver.EXTRA_KIND, ask?.kind.orEmpty())
+            ask?.qid?.let { putExtra(NotifActionReceiver.EXTRA_QID, it) }
+        }
+        return PendingIntent.getBroadcast(
+            context, (action + storedId).hashCode(), i,
+            // MUTABLE wajib untuk RemoteInput (sistem menyisipkan teks balasan)
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (action == NotifActionReceiver.ACTION_REPLY && Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE),
+        )
+    }
+
+    private fun replyAction(storedId: String, ask: PendingAsk?, label: String): NotificationCompat.Action {
+        val input = androidx.core.app.RemoteInput.Builder(NotifActionReceiver.KEY_REPLY).setLabel(label).build()
+        return NotificationCompat.Action.Builder(0, label, actionIntent(NotifActionReceiver.ACTION_REPLY, storedId, ask))
+            .addRemoteInput(input)
+            .setAllowGeneratedReplies(false)
+            .build()
     }
 
     fun cancelSessionNotifications() {
@@ -80,7 +132,7 @@ class AppNotifier(private val context: Context) {
 
     private fun base(channel: String) =
         NotificationCompat.Builder(context, channel)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_stat_hermes)
             .setColor(0xFFFFFFFF.toInt()) // putih — di atas background transparan
             // <26: sound default utk agent; 26+ channel yang pegang sound.
             .setSound(if (channel == CHANNEL_AGENT) android.media.RingtoneManager.getDefaultUri(

@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity() {
         )
         // M14: extra dari tap notif — baca SEKALI di onCreate (onNewIntent → flow).
         id.melvern.hermesmobile.core.store.AppPrefs.loadBlocking(this)
+        // Share dari app lain → simpan di ShareInbox, Chats menampilkan pemilih tujuan.
+        id.melvern.hermesmobile.core.share.ShareInbox.offer(intent, this)
         setContent {
             // M15: adaptive — WindowSizeClass dihitung di sini (satu-satunya tempat),
             // disimpan ke state app + CompositionLocal; screens baca dari situ.
@@ -108,6 +110,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         (application as HermesApp).offerOpenChat(intent.getStringExtra(AppNotifier.EXTRA_OPEN_CHAT))
+        if (id.melvern.hermesmobile.core.share.ShareInbox.offer(intent, this)) {
+            (application as HermesApp).offerHome()
+        }
     }
 }
 
@@ -133,6 +138,12 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
     LaunchedEffect(Unit) { notifOpenChat?.let { openChatFromNotif(it) } }
     LaunchedEffect(app) {
         app.openChatRequests.collect { openChatFromNotif(it) }
+    }
+    LaunchedEffect(app) {
+        app.homeRequests.collect {
+            homeTab = HomeTabs.CHATS
+            nav.popBackStack("sessions", inclusive = false)
+        }
     }
 
     // Shared axis X: slide 24dp + fade, 220ms, emphasized. Back = kebalikan.

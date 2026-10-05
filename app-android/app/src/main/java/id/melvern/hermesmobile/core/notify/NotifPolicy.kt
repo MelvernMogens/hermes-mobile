@@ -63,7 +63,8 @@ object NotifPolicy {
         val out = ArrayList<Decision>()
         for ((sid, row) in now) {
             val storedId = row.sessionKey.ifEmpty { sid }
-            if (storedId == ctx.openStoredId) continue
+            // (dulu: skip chat yang terakhir dibuka — salah: app di background =
+            // user TIDAK lihat chat itu, justru paling butuh notif.)
             val before = prev[sid]
             // count naik SAAT masih working = stream berjalan — bukan turn tamat.
             // Tanda selesai: keluar dari working, ATAU count naik saat status != working.

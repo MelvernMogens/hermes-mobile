@@ -767,3 +767,36 @@ fun userDisplayText(raw: String): String {
     val cut = ATTACHED_CONTEXT_RE.find(raw)?.let { raw.substring(0, it.range.first) } ?: raw
     return cut.lineSequence().filterNot { val l = it.trim(); l.startsWith("@file:") || l.startsWith("@image:") }.joinToString("\n").trim()
 }
+
+
+/** Kartu hasil slash command: baris perintah mono + output (dipotong, tap untuk buka semua). */
+@Composable
+fun CommandCard(item: ChatItem.Command) {
+    var expanded by remember { mutableStateOf(false) }
+    val out = item.output
+    val long = (out?.lines()?.size ?: 0) > 14
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH, vertical = 4.dp)
+            .clip(Radius.Card).background(Ink.Surface1)
+            .then(if (long) Modifier.pressClickable { expanded = !expanded } else Modifier)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(item.command, style = Type.Mono.copy(color = Ink.Text, fontWeight = FontWeight.Medium), maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            when {
+                out == null -> { Spacer(Modifier.width(8.dp)); PulsingDot(Ink.Live, size = 8.dp) }
+                item.failed -> { Spacer(Modifier.width(8.dp)); StatusDot(Ink.Danger) }
+            }
+        }
+        if (out != null) {
+            Spacer(Modifier.height(8.dp))
+            val shown = if (long && !expanded) out.lines().take(14).joinToString("\n") else out
+            Text(shown, style = Type.MonoMeta.copy(color = if (item.failed) Ink.Danger else Ink.Text2))
+            if (long) {
+                Spacer(Modifier.height(6.dp))
+                Text(if (expanded) "Show less" else "Show all", style = Type.Caption.copy(color = Ink.Text3))
+            }
+        }
+    }
+}

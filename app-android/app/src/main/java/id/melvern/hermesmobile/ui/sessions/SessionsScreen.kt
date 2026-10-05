@@ -1,5 +1,7 @@
 package id.melvern.hermesmobile.ui.sessions
 
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -95,6 +97,10 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         if (initialSelection != null) paneSelection = initialSelection
     }
     fun openChat(arg: String) {
+        // ada share yang menunggu → chat yang dibuka ini jadi tujuannya
+        if (id.melvern.hermesmobile.core.share.ShareInbox.pending.value != null) {
+            id.melvern.hermesmobile.core.share.ShareInbox.route(arg.substringBefore("|"))
+        }
         if (winSize.isExpanded) paneSelection = arg else onOpen(arg)
     }
     // M15: back di expanded = tutup pane (bukan keluar app).
@@ -119,6 +125,9 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
     var lastMsgs by remember { mutableStateOf<Map<String, id.melvern.hermesmobile.core.repo.InsightsRepo.Last>>(emptyMap()) }
     var pinned by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(Unit) { pinned = SettingsStore.loadPinned(ctx) }
+    LaunchedEffect(Unit) { id.melvern.hermesmobile.core.store.ChatGroups.load(ctx) }
+    var groupTarget by remember { mutableStateOf<SessionRow?>(null) }
+    var editGroup by remember { mutableStateOf<id.melvern.hermesmobile.core.store.ChatGroups.Group?>(null) }
     var creating by remember { mutableStateOf(false) }
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
@@ -237,7 +246,9 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
     fun lastAt(r: SessionRow): Double = lastMsgs[r.id]?.at ?: r.updatedAt ?: r.startedAt ?: 0.0
     val visibleAll = filtered.filterNot { it.id in hiddenIds }
     val pinnedRows = visibleAll.filter { it.id in pinned }.sortedByDescending { lastAt(it) }
-    val visibleRows = visibleAll.filterNot { it.id in pinned }.sortedByDescending { lastAt(it) }
+    val unpinned = visibleAll.filterNot { it.id in pinned }.sortedByDescending { lastAt(it) }
+    // Grup: chat ber-grup tampil di section grupnya (urut terbaru), sisanya di "All chats".
+    val (groupSections, visibleRows) = id.melvern.hermesmobile.core.store.ChatGroups.partition(unpinned, { it.id })
     val hiddenRows = filtered.filter { it.id in hiddenIds }.sortedByDescending { lastAt(it) }
 
 
@@ -309,6 +320,23 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
             }
         }
 
+        // Share masuk → pilih chat tujuan (tap chat mana pun / New chat).
+        val shared by id.melvern.hermesmobile.core.share.ShareInbox.pending.collectAsState()
+        shared?.let { sh ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Dim.GroupInset, vertical = 6.dp)
+                    .clip(Radius.Card).background(Ink.Surface2).padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Share to which chat?", style = Type.Callout.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                    Text(sh.summary, style = Type.Caption.copy(color = Ink.Text3), maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+                QuietIconButton(Icons.Rounded.Close, "Cancel share", onClick = { id.melvern.hermesmobile.core.share.ShareInbox.dismiss() })
+            }
+        }
+
         // ── Isi ────────────────────────────────────────────────────────
         val problem = when (connState) {
             ConnState.OPEN -> null
@@ -341,6 +369,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                             app, s,
                             running = s.id in active || s.running == true,
                             pinned = s.id in pinned,
+                            groupColor = id.melvern.hermesmobile.core.store.ChatGroups.groupOf(s.id)?.color,
                             last = lastMsgs[s.id],
                             stamp = lastAt(s),
                             divider = !last,
@@ -352,7 +381,19 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 if (pinnedRows.isNotEmpty() && !searching) {
                     item(key = "pinned-header") { SectionHeader("Pinned") }
                     pinnedRows.forEachIndexed { i, s -> rowItem(s, "p-", i == pinnedRows.lastIndex) }
-                    if (visibleRows.isNotEmpty()) item(key = "all-header") { SectionHeader("All chats") }
+                }
+                groupSections.filter { (_, rows) -> rows.isNotEmpty() || !searching }.forEach { (g, rows) ->
+                    item(key = "g-header-" + g.id) {
+                        GroupHeader(
+                            g, count = rows.size,
+                            onToggle = { scope.launch { id.melvern.hermesmobile.core.store.ChatGroups.update(ctx, g.id, collapsed = !g.collapsed) } },
+                            onEdit = { editGroup = g },
+                        )
+                    }
+                    if (!g.collapsed || searching) rows.forEachIndexed { i, s -> rowItem(s, "g-${g.id}-", i == rows.lastIndex) }
+                }
+                if ((pinnedRows.isNotEmpty() || groupSections.isNotEmpty()) && !searching && visibleRows.isNotEmpty()) {
+                    item(key = "all-header") { SectionHeader("All chats") }
                 }
                 visibleRows.forEachIndexed { i, s -> rowItem(s, "", i == visibleRows.lastIndex) }
                 if (searching) pinnedRows.forEachIndexed { i, s -> rowItem(s, "ps-", i == pinnedRows.lastIndex) }
@@ -406,6 +447,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         }
     }
 
+    groupTarget?.let { t -> GroupPickerSheet(t.id, t.displayTitle, onDismiss = { groupTarget = null }) }
+    editGroup?.let { g -> GroupEditSheet(g, onDismiss = { editGroup = null }) }
     if (profileSheet) {
         ProfileSheet(
             app,
@@ -439,6 +482,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 actionTarget = null
                 openChat("$storedId|$runtimeId")
             },
+            onGroup = { groupTarget = target },
         )
     }
 }
@@ -585,6 +629,7 @@ private fun SessionRowView(
     s: SessionRow,
     running: Boolean,
     pinned: Boolean,
+    groupColor: Int? = null,
     last: id.melvern.hermesmobile.core.repo.InsightsRepo.Last?,
     stamp: Double,
     divider: Boolean,
@@ -602,7 +647,7 @@ private fun SessionRowView(
         ) {
             // monogram per chat (identitas), bot avatar kecil di pojok kalau bukan profile aktif
             Box(Modifier.size(Dim.AvatarRow)) {
-                MonogramAvatar(s.id, s.displayTitle, Dim.AvatarRow)
+                MonogramAvatar(s.id, s.displayTitle, Dim.AvatarRow, groupColor = groupColor)
                 if (running) {
                     Box(
                         Modifier
@@ -718,5 +763,27 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                 ),
             )
         }
+    }
+}
+
+
+/** Header grup: dot warna + nama + jumlah; tap = lipat/buka, long-press = edit. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GroupHeader(g: id.melvern.hermesmobile.core.store.ChatGroups.Group, count: Int, onToggle: () -> Unit, onEdit: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .combinedClickable(onClick = onToggle, onLongClick = onEdit)
+            .padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 18.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(Radius.Full).background(id.melvern.hermesmobile.core.store.ChatGroups.color(g.color)))
+        Spacer(Modifier.width(8.dp))
+        Text(g.name.uppercase(), style = Type.Caption.copy(color = Ink.Text2, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium))
+        Spacer(Modifier.width(6.dp))
+        Text(count.toString(), style = Type.Caption.copy(color = Ink.Text4))
+        Spacer(Modifier.weight(1f))
+        Icon(if (g.collapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess, if (g.collapsed) "Expand" else "Collapse",
+            tint = Ink.Text4, modifier = Modifier.size(16.dp))
     }
 }

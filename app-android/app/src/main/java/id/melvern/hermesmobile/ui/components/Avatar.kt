@@ -184,8 +184,11 @@ val BotShape = RoundedCornerShape(percent = 30)
  * judul) — tiap chat punya identitas sendiri, tanpa aset. Lingkaran.
  */
 @Composable
-fun MonogramAvatar(key: String, label: String, size: Dp, modifier: Modifier = Modifier) {
-    val (bg, ink) = remember(key) { Ink.monoTint(key) }
+fun MonogramAvatar(key: String, label: String, size: Dp, modifier: Modifier = Modifier, groupColor: Int? = null) {
+    // chat di dalam grup → avatar ikut warna grup; lainnya abu tonal (warna = makna)
+    val (bg, ink) = remember(key, groupColor) {
+        groupColor?.let { id.melvern.hermesmobile.core.store.ChatGroups.avatarColors(it) } ?: Ink.monoTint(key)
+    }
     val letter = remember(label) {
         label.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "·"
     }

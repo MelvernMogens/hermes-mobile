@@ -213,6 +213,11 @@ fun ChatScreen(
     var attachError by remember { mutableStateOf<String?>(null) }
     var attachThumb by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var attachSheet by remember { mutableStateOf(false) }
+    // Voice input (mic di composer saat field kosong)
+    val voice = rememberVoiceInput()
+    val micPerm = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { ok -> if (ok) voice.start(input) { input = it } else voice.error = "Microphone permission needed" }
     /** Upload satu URI (foto / video / file) ke session → chip di composer. */
     fun attachUri(uri: android.net.Uri) {
         val c = app.client ?: return
@@ -285,6 +290,24 @@ fun ChatScreen(
                 attachError = "Couldn't attach: ${e.message}"
             } finally { attaching = false }
         }
+    }
+    // Slash: saran saat mengetik token /xxx (debounce 150ms, sama sumber dengan desktop).
+    var slashSuggestions by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.SlashRepo.Suggestion>>(emptyList()) }
+    LaunchedEffect(input) {
+        if (!id.melvern.hermesmobile.core.repo.SlashRepo.wantsSuggestions(input)) { slashSuggestions = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(150)
+        slashSuggestions = try {
+            id.melvern.hermesmobile.core.repo.SlashRepo(app.client ?: return@LaunchedEffect).suggest(input).take(40)
+        } catch (_: Throwable) { emptyList() }
+    }
+
+    // Share to Hermes: chat ini dipilih sebagai tujuan → teks ke draft, file pertama di-attach.
+    LaunchedEffect(effectiveStoredId, runtimeId) {
+        if (runtimeId.isBlank()) return@LaunchedEffect
+        val sh = id.melvern.hermesmobile.core.share.ShareInbox.take(effectiveStoredId) ?: return@LaunchedEffect
+        sh.text?.let { t -> input = listOf(input.trim(), t).filter { it.isNotEmpty() }.joinToString("\n") }
+        sh.uris.firstOrNull()?.let { attachUri(it) }
+        if (sh.uris.size > 1) attachError = "Attached the first file — send it, then share the rest"
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -844,6 +867,7 @@ fun ChatScreen(
                                     onRetry = if (loadFailed) ({ loading = true; items = emptyList(); reloadKey++ }) else null,
                                 )
                                 is ChatItem.Tool -> ToolGroup(listOf(item))
+                                is ChatItem.Command -> CommandCard(item)
                             }
                         }
                     }
@@ -962,7 +986,16 @@ fun ChatScreen(
                 onAttach = { attachSheet = true },
                 onRemoveAttachment = { attachment = null; attachThumb = null },
                 wide = wide,
+                voice = voice.takeIf { it.available },
+                slashSuggestions = slashSuggestions,
+                onPickSlash = { t -> input = (if (t.startsWith("/")) t else "/$t").trimEnd() + " "; slashSuggestions = emptyList() },
+                onMic = {
+                    val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (granted) voice.start(input) { input = it } else micPerm.launch(android.Manifest.permission.RECORD_AUDIO)
+                },
         onSend = {
+                voice.cancel()
                 val typed = input.trim()
                 // M11: reply — quote diselipkan sebagai konteks di atas pesan
                 val quote = replyQuote
@@ -978,6 +1011,40 @@ fun ChatScreen(
                     mediaLine,
                 )
                 if (typed.isEmpty() && att == null) return@Composer
+                // Slash command (tanpa lampiran): jalanin lewat slash.exec, output tampil
+                // sebagai kartu command. Skill/queue → balik jadi prompt dan dikirim normal.
+                if (att == null && quote == null && typed.startsWith("/") && typed.length > 1 && runtimeId.isNotBlank()) {
+                    input = ""
+                    slashSuggestions = emptyList()
+                    forceScroll = true
+                    val card = ChatItem.Command(typed, null)
+                    items = items + card
+                    scope.launch {
+                        val res = try {
+                            id.melvern.hermesmobile.core.repo.SlashRepo(app.client ?: return@launch).run(runtimeId, typed)
+                        } catch (e: Throwable) {
+                            items = items.map { if (it === card) ChatItem.Command(typed, e.message ?: "Command failed", failed = true) else it }
+                            return@launch
+                        }
+                        when (res) {
+                            is id.melvern.hermesmobile.core.repo.SlashRepo.Result.Output ->
+                                items = items.map { if (it === card) ChatItem.Command(typed, res.text) else it }
+                            is id.melvern.hermesmobile.core.repo.SlashRepo.Result.Send -> {
+                                items = items.filterNot { it === card } + ChatItem.User(typed, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch())
+                                try {
+                                    val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
+                                    val (newRuntime, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, res.message)
+                                    if (newRuntime != runtimeId) runtimeId = newRuntime
+                                    items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = status == SessionRepo.SubmitStatus.QUEUED) else it }
+                                    running = true
+                                } catch (e: Throwable) {
+                                    items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it } + ChatItem.NoticeLine(e.message ?: "Send failed")
+                                }
+                            }
+                        }
+                    }
+                    return@Composer
+                }
                 val sentQuote = quote?.let { q ->
                     val flat = q.lineSequence().joinToString(" ").trim()
                     if (flat.isEmpty()) null else "> ${flat.take(240)}"

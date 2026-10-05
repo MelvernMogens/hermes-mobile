@@ -128,7 +128,7 @@ fun ConnectScreen(app: HermesApp, onConnected: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Image(
-                    painterResource(R.drawable.ic_launcher_fg),
+                    painterResource(R.drawable.ic_launcher_mark),
                     contentDescription = null,
                     modifier = Modifier.size(Dim.LogoConnect).clip(Radius.Full),
                 )

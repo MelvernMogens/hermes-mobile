@@ -182,10 +182,11 @@ class NotifPolicyTest {
         assertTrue(NotifPolicy.onPollDiff(ctx(foreground = true), prev, now).isEmpty())
     }
 
-    @Test fun `poll diff utk chat terbuka = kosong`() {
+    @Test fun `poll diff tetap notif utk chat terakhir dibuka saat app di background`() {
+        // v22: poller cuma jalan di background — chat "terbuka" sebenarnya tidak dilihat user.
         val prev = mapOf("s" to row(status = "working", msgs = 5))
         val now = mapOf("s" to row(status = "idle", msgs = 7))
-        assertTrue(NotifPolicy.onPollDiff(ctx(open = "stored-abc"), prev, now).isEmpty())
+        assertEquals(1, NotifPolicy.onPollDiff(ctx(open = "stored-abc"), prev, now).size)
     }
 
     @Test fun `dedup juga berlaku di poll diff`() {

@@ -6,6 +6,7 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
@@ -62,6 +63,8 @@ fun SessionActionSheet(
     /** null = sembunyikan aksi pin (mis. dari menu chat). */
     pinned: Boolean? = null,
     onTogglePin: () -> Unit = {},
+    /** null = sembunyikan aksi grup. */
+    onGroup: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -149,6 +152,12 @@ fun SessionActionSheet(
             else -> {
                 if (pinned != null) SheetActionRow(if (pinned) "Unpin" else "Pin to top", Icons.Outlined.PushPin, enabled = !busy) {
                     onTogglePin(); onDismiss()
+                }
+                onGroup?.let { open ->
+                    val g = id.melvern.hermesmobile.core.store.ChatGroups.groupOf(row.id)
+                    SheetActionRow(if (g != null) "Group: ${g.name}" else "Add to group", Icons.Outlined.Folder, enabled = !busy) {
+                        onDismiss(); open()
+                    }
                 }
                 SheetActionRow("Rename", Icons.Outlined.DriveFileRenameOutline, enabled = !busy) { renaming = true }
                 SheetActionRow("New branch", Icons.AutoMirrored.Outlined.CallSplit, enabled = !busy) {

@@ -116,11 +116,37 @@ class NotifRouter(private val app: HermesApp) {
             if (d is NotifPolicy.Decision.Notify) {
                 lastNotifAt[d.storedId] = System.currentTimeMillis()
                 Log.i(TAG, "notif: ${d.title} | ${d.preview.take(40)}")
-                try { app.notifier.postAgent(d) } catch (e: Throwable) {
+                // Agent menunggu → ambil request terbuka (lazy, tanpa history) supaya notif
+                // punya tombol Allow/Deny atau kolom jawaban.
+                val ask = if (d.tag.endsWith("#approval")) pendingAsk(d.storedId) else null
+                val decided = if (ask?.kind == "clarify") d.copy(title = d.title.replace("needs your approval", "is asking you")) else d
+                try { app.notifier.postAgent(decided, ask) } catch (e: Throwable) {
                     Log.w(TAG, "post notif gagal: ${e.message}")
                 }
             }
         }
         return now
     }
+
+    /** Request terbuka paling lama untuk session ini → bahan tombol notif. */
+    private suspend fun pendingAsk(storedId: String): AppNotifier.PendingAsk? = try {
+        val c = app.client
+        if (c == null) null else {
+            val reqs = id.melvern.hermesmobile.core.repo.SessionRepo(c, app.profile.value).resumeOpenRequests(storedId)
+            reqs.firstOrNull { it.method == "approval" || it.method == "clarify" }?.let { r ->
+                fun str(k: String) = (r.params?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                if (r.method == "approval") {
+                    val cmd = str("command") ?: str("description") ?: "Approval is waiting for your response."
+                    AppNotifier.PendingAsk("approval", r.id, (str("tool_name")?.let { "$it: " } ?: "") + cmd.take(300))
+                } else {
+                    val q = r.params?.get("questions") as? kotlinx.serialization.json.JsonArray
+                    val first = q?.firstOrNull() as? kotlinx.serialization.json.JsonObject
+                    val qText = str("question") ?: (first?.get("question") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "The agent has a question."
+                    val qid = (first?.get("qid") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                    // pertanyaan batch > 1 → dijawab di app; notif cukup buka chat
+                    if ((q?.size ?: 0) > 1) null else AppNotifier.PendingAsk("clarify", r.id, qText.take(300), qid)
+                }
+            }
+        }
+    } catch (e: Throwable) { Log.w(TAG, "pendingAsk gagal: ${e.message}"); null }
 }
