@@ -163,7 +163,13 @@ _IMG_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", "
              ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv",
              ".apk": "application/vnd.android.package-archive", ".yaml": "application/yaml",
              ".yml": "application/yaml", ".py": "text/x-python", ".kt": "text/x-kotlin",
-             ".sh": "text/x-shellscript", ".html": "text/html", ".ts": "text/x-typescript"}
+             ".sh": "text/x-shellscript", ".html": "text/html", ".ts": "text/x-typescript",
+             ".tsx": "text/plain", ".js": "text/javascript", ".java": "text/x-java", ".xml": "text/xml",
+             ".log": "text/plain", ".toml": "text/plain", ".sql": "text/plain",
+             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+             ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+             ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
 _MEDIA_MAX = 20 * 1024 * 1024
 
 
@@ -358,7 +364,8 @@ async def proxy_ws(request: web.Request) -> web.WebSocketResponse:
         await wsr.prepare(request)
         await wsr.close(code=1014, message=b"upstream ws unavailable")
         return wsr
-    downstream = web.WebSocketResponse(protocols=[subproto] if subproto else None, autoping=False)
+    downstream = web.WebSocketResponse(protocols=[subproto] if subproto else None, autoping=False,
+                                       max_msg_size=0)  # aiohttp default 4 MB would kill file.attach >3 MB
     await downstream.prepare(request)
 
     async def pump(src, dst, *, close_dst: bool) -> None:

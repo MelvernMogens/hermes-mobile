@@ -1,5 +1,9 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -254,7 +258,7 @@ private fun AttachmentChip(att: Attachment?, thumb: ImageBitmap?, attaching: Boo
                 attaching -> CircularProgressIndicator(Modifier.size(16.dp), color = Ink.Text2, strokeWidth = 2.dp)
                 thumb != null -> Image(thumb, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 else -> Icon(
-                    if (att?.isImage == true) Icons.Rounded.Image else Icons.Rounded.Description,
+                    when { att?.isImage == true -> Icons.Rounded.Image; att?.isVideo == true -> Icons.Rounded.PlayArrow; else -> Icons.Rounded.Description },
                     null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon),
                 )
             }
@@ -279,12 +283,51 @@ private fun AttachmentChip(att: Attachment?, thumb: ImageBitmap?, attaching: Boo
     }
 }
 
-/** Sheet attach: Photo / File. */
+/** Sheet attach: grid 4 tile (Camera / Gallery / Files / Location), gaya WhatsApp — tenang, monokrom. */
 @Composable
-fun AttachSheet(onDismiss: () -> Unit, onPhoto: () -> Unit, onFile: () -> Unit) {
+fun AttachSheet(
+    onDismiss: () -> Unit,
+    onCamera: () -> Unit,
+    onGallery: () -> Unit,
+    onFile: () -> Unit,
+    onLocation: () -> Unit,
+) {
     QuietSheet(onDismiss = onDismiss) {
-        SheetActionRow("Photo", Icons.Outlined.Image) { onDismiss(); onPhoto() }
-        SheetActionRow("File", Icons.Outlined.Description) { onDismiss(); onFile() }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            AttachTile("Camera", Icons.Outlined.PhotoCamera) { onDismiss(); onCamera() }
+            AttachTile("Gallery", Icons.Outlined.PhotoLibrary) { onDismiss(); onGallery() }
+            AttachTile("Files", Icons.Outlined.Description) { onDismiss(); onFile() }
+            AttachTile("Location", Icons.Outlined.LocationOn) { onDismiss(); onLocation() }
+        }
+        Text(
+            "Photos, videos and files up to 25 MB",
+            style = Type.Meta,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun AttachTile(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .width(76.dp)
+            .clip(Radius.Card)
+            .pressClickable(onClick = onClick)
+            .padding(vertical = 10.dp)
+            .semantics { contentDescription = label },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(52.dp).clip(Radius.Full).background(Ink.Surface2),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, tint = Ink.Text, modifier = Modifier.size(22.dp)) }
+        Spacer(Modifier.height(8.dp))
+        Text(label, style = Type.Caption.copy(color = Ink.Text2))
     }
 }
 

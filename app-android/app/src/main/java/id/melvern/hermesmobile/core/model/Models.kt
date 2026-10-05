@@ -121,4 +121,7 @@ data class Attachment(
     val refText: String,
     val name: String,
     val isImage: Boolean,
+    /** Path absolut di Mac — ikut dikirim sebagai baris MEDIA: supaya bubble bisa render foto/video/kartu file. */
+    val path: String = "",
+    val isVideo: Boolean = false,
 )

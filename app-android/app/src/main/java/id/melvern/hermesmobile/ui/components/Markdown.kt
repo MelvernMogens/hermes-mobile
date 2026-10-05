@@ -74,6 +74,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
@@ -124,6 +133,8 @@ sealed interface MdBlock {
     data class ImageRef(val path: String) : MdBlock
     /** M9 (item 3): baris path file video — render player (via proxy mobile-media). */
     data class VideoRef(val path: String) : MdBlock
+    /** Baris yang isinya satu path file dokumen (MEDIA:/x/notes.md, `/x/a.pdf`, …). */
+    data class FileRef(val path: String) : MdBlock
     /** M9 (item 1): blok tabel markdown — header + baris body, sel = span inline. */
     data class Table(val header: List<List<MdSpan>>, val rows: List<List<List<MdSpan>>>) : MdBlock
 }
@@ -185,6 +196,16 @@ object MarkdownParser {
     )
 
 
+    /** File dokumen yang dirender sebagai kartu (bukan teks path). */
+    const val DOC_EXTS = "pdf|zip|txt|apk|json|md|csv|xml|yaml|yml|html|py|kt|java|sh|ts|tsx|js|log|toml|sql|docx|xlsx|pptx|mp3|wav|m4a"
+    private val DOC_PATH_LINE = Regex(
+        """^\s*(?:MEDIA:\s*|\[[^\]]*\]\()?\s*[`'"]?((?:/[\w.\-]+)+\.(?:$DOC_EXTS))[`'"]?\s*\)?\s*$""",
+        RegexOption.IGNORE_CASE,
+    )
+    /** Ekstensi yang isinya bisa dibaca sebagai teks di app. */
+    private val TEXT_EXTS = setOf("txt", "md", "json", "csv", "xml", "yaml", "yml", "html", "py", "kt", "java", "sh", "ts", "tsx", "js", "log", "toml", "sql")
+    fun isTextFile(path: String): Boolean = path.substringAfterLast('.', "").lowercase() in TEXT_EXTS
+
     /** M5: true kalau teks berisi setidaknya satu path file gambar. */
 
     /** M12: true kalau ada baris media (MEDIA:/path gambar/video) — dipakai UserBubble
@@ -192,7 +213,8 @@ object MarkdownParser {
     fun containsMediaLine(text: String): Boolean =
         text.lineSequence().any { ln ->
             (IMAGE_PATH_LINE.containsMatchIn(ln) && imagePathsIn(ln).isNotEmpty()) ||
-                (VIDEO_PATH_LINE.containsMatchIn(ln) && videoPathsIn(ln).isNotEmpty())
+                (VIDEO_PATH_LINE.containsMatchIn(ln) && videoPathsIn(ln).isNotEmpty()) ||
+                DOC_PATH_LINE.matches(ln)
         }
 
     fun containsImagePath(text: String): Boolean = IMAGE_PATH_ANYWHERE.containsMatchIn(text)
@@ -338,6 +360,11 @@ object MarkdownParser {
                     flushAll()
                     blocks += MdBlock.ImageRef(imagePathsIn(trimmed).first())
                 }
+                DOC_PATH_LINE.matches(trimmed) -> {
+                    // baris path dokumen → kartu file (tap = baca/simpan)
+                    flushAll()
+                    blocks += MdBlock.FileRef(DOC_PATH_LINE.find(trimmed)!!.groupValues[1])
+                }
                 else -> {
                     flushBullet(); flushOrdered(); flushQuote()
                     para += trimmedCollapsed
@@ -439,6 +466,7 @@ fun MarkdownText(
             when (block) {
                 is MdBlock.ImageRef -> MarkdownImage(block.path, modifier = gap, fetch = imageFetch)
                 is MdBlock.VideoRef -> MarkdownVideo(block.path, modifier = gap, fetch = videoFetch)
+                is MdBlock.FileRef -> MarkdownFile(block.path, modifier = gap)
                 is MdBlock.Table -> MdTable(block, modifier = gap)
                 is MdBlock.Paragraph -> InlineAwareText(
                     buildMd(block.spans, context), style = style, spans = block.spans, actions = actions, modifier = gap,
@@ -722,6 +750,7 @@ fun MarkdownVideo(
                 .border(hl, Ink.Hairline, Radius.Chip),
         ) {
             VideoPlayer(file = f, name = name)
+            MediaSavePill(path, Modifier.align(Alignment.TopEnd))
         }
         failed -> Row(
             modifier
@@ -852,41 +881,7 @@ fun MarkdownImage(
                 modifier = Modifier.fillMaxWidth(),
             )
             // M10: tombol save pojok kanan-atas foto
-            var saved by remember(path) { mutableStateOf(false) }
-            var saving by remember(path) { mutableStateOf(false) }
-            val scope = rememberCoroutineScope()
-            val ctx = androidx.compose.ui.platform.LocalContext.current
-            Row(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .size(height = 32.dp, width = if (saved) 32.dp else 84.dp)
-                    .clip(Radius.Chip)
-                    .background(Ink.Scrim)
-                    .pressClickable(enabled = !saving && !saved) {
-                        saving = true
-                        scope.launch {
-                            val res = MediaFetchSave.saveImage(ctx, path)
-                            saved = res != null
-                            saving = false
-                        }
-                    },
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (saving) {
-                    CircularProgressIndicator(Modifier.size(14.dp), color = Ink.Text2, strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        if (saved) Icons.Rounded.Check else Icons.Rounded.Download,
-                        if (saved) "Saved" else "Save",
-                        tint = Ink.Text,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    if (!saved) Spacer(Modifier.width(6.dp))
-                    if (!saved) Text("Save", style = Type.Meta, color = Ink.Text)
-                }
-            }
+            MediaSavePill(path, Modifier.align(Alignment.TopEnd))
         }
         failed -> Row(
             modifier
@@ -1033,4 +1028,167 @@ object MediaFetchSave {
 
     suspend fun saveAny(context: android.content.Context, path: String): Boolean =
         saveImage(context, path) != null
+}
+
+
+/**
+ * Kartu file dokumen di chat. Tap → file teks dibuka di reader layar penuh,
+ * file lain langsung disimpan ke Downloads. Ikon save selalu ada di kanan.
+ */
+@Composable
+fun MarkdownFile(path: String, modifier: Modifier = Modifier) {
+    val name = path.substringAfterLast('/')
+    val ext = name.substringAfterLast('.', "").uppercase()
+    val readable = MarkdownParser.isTextFile(path)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var save by remember(path) { mutableStateOf(SaveState.Idle) }
+    var reading by remember(path) { mutableStateOf(false) }
+    fun doSave() {
+        if (save == SaveState.Busy) return
+        save = SaveState.Busy
+        scope.launch { save = if (MediaFetchSave.saveAny(ctx, path)) SaveState.Done else SaveState.Fail }
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(Radius.Chip)
+            .background(Ink.Surface1)
+            .pressClickable { if (readable) reading = true else doSave() }
+            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(Ink.Surface2),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(ext.take(4), style = Type.Meta.copy(fontFamily = MonoFamily, fontSize = 10.sp), color = Ink.Text2, maxLines = 1)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when (save) {
+                    SaveState.Busy -> "Saving…"
+                    SaveState.Done -> "Saved to Downloads"
+                    SaveState.Fail -> "Couldn't save — tap to retry"
+                    SaveState.Idle -> if (readable) "Tap to read" else "Tap to save"
+                },
+                style = Type.Meta,
+                color = if (save == SaveState.Fail) Ink.Danger else Ink.Text3,
+            )
+        }
+        IconButton(onClick = { doSave() }, modifier = Modifier.size(40.dp)) {
+            Icon(
+                if (save == SaveState.Done) Icons.Outlined.Check else Icons.Outlined.FileDownload,
+                "Save $name", tint = Ink.Text2, modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+    if (reading) TextFileReader(path = path, onSave = { doSave() }, saved = save == SaveState.Done, onDismiss = { reading = false })
+}
+
+/** Reader file teks layar penuh: ambil isi dari Mac, tampilkan mono, bisa diseleksi. */
+@Composable
+fun TextFileReader(path: String, onSave: () -> Unit, saved: Boolean, onDismiss: () -> Unit) {
+    val name = path.substringAfterLast('/')
+    var text by remember(path) { mutableStateOf<String?>(null) }
+    var failed by remember(path) { mutableStateOf(false) }
+    LaunchedEffect(path) {
+        val conn = MediaFetchSave.connection
+        val got = conn?.let { c ->
+            try { id.melvern.hermesmobile.core.repo.MediaRepo(c).fetchBytes(path) } catch (_: Throwable) { null }
+        }
+        if (got == null) failed = true
+        else {
+            val raw = got.first
+            text = if (raw.size > 400_000) String(raw, 0, 400_000, Charsets.UTF_8) + "\n\n… (truncated — save to read the full file)"
+            else String(raw, Charsets.UTF_8)
+        }
+    }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(Modifier.fillMaxSize().background(Ink.Bg)) {
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "Close", tint = Ink.Text) }
+                Column(Modifier.weight(1f)) {
+                    Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    text?.let { Text("${it.lines().size} lines", style = Type.Meta) }
+                }
+                IconButton(onClick = onSave) {
+                    Icon(if (saved) Icons.Outlined.Check else Icons.Outlined.FileDownload, "Save", tint = Ink.Text)
+                }
+            }
+            val t = text
+            when {
+                t != null -> androidx.compose.foundation.text.selection.SelectionContainer {
+                    val isMd = name.endsWith(".md", ignoreCase = true)
+                    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+                        if (isMd) {
+                            MarkdownText(t, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                        } else {
+                            Box(Modifier.horizontalScroll(rememberScrollState())) {
+                                Text(
+                                    t,
+                                    style = Type.Body.copy(fontFamily = MonoFamily, fontSize = 13.sp, lineHeight = 19.sp),
+                                    color = Ink.Text,
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                failed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Couldn't load this file", style = Type.Meta)
+                }
+                else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Ink.Text3, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+    }
+}
+
+
+/** Pill "Save" di pojok media (foto & video) → simpan ke galeri HP (Pictures/Movies/Hermes). */
+@Composable
+fun MediaSavePill(path: String, modifier: Modifier = Modifier) {
+    var saved by remember(path) { mutableStateOf(false) }
+    var saving by remember(path) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Row(
+        modifier
+            .padding(8.dp)
+            .size(height = 32.dp, width = if (saved) 32.dp else 84.dp)
+            .clip(Radius.Chip)
+            .background(Ink.Scrim)
+            .pressClickable(enabled = !saving && !saved) {
+                saving = true
+                scope.launch {
+                    saved = MediaFetchSave.saveImage(ctx, path) != null
+                    saving = false
+                }
+            },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (saving) {
+            CircularProgressIndicator(Modifier.size(14.dp), color = Ink.Text2, strokeWidth = 2.dp)
+        } else {
+            Icon(
+                if (saved) Icons.Rounded.Check else Icons.Rounded.Download,
+                if (saved) "Saved" else "Save ${path.substringAfterLast('/')}",
+                tint = Ink.Text,
+                modifier = Modifier.size(16.dp),
+            )
+            if (!saved) Spacer(Modifier.width(6.dp))
+            if (!saved) Text("Save", style = Type.Meta, color = Ink.Text)
+        }
+    }
 }

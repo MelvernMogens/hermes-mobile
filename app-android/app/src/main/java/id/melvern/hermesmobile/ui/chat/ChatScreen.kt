@@ -211,79 +211,116 @@ fun ChatScreen(
     var attachError by remember { mutableStateOf<String?>(null) }
     var attachThumb by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var attachSheet by remember { mutableStateOf(false) }
-    val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val c = app.client ?: return@rememberLauncherForActivityResult
+    /** Upload satu URI (foto / video / file) ke session → chip di composer. */
+    fun attachUri(uri: android.net.Uri) {
+        val c = app.client ?: return
         attaching = true; attachError = null
         scope.launch {
             try {
-                // M5 fix: balik dari file picker → activity sempat background → WS drop
-                // & reconnect (backoff sampai ~15s). Tunggu ConnState.OPEN dulu (deadline
-                // 20s) sebelum attach — kalau gak, RPC pasti gagal "not connected".
+                // balik dari picker → activity sempat background → WS bisa reconnect. Tunggu OPEN.
                 val deadline = System.currentTimeMillis() + 20_000
-                while (c.state.value != ConnState.OPEN && System.currentTimeMillis() < deadline) {
-                    delay(500)
-                }
-                if (c.state.value != ConnState.OPEN) {
-                    throw IllegalStateException("still reconnecting — try again")
-                }
+                while (c.state.value != ConnState.OPEN && System.currentTimeMillis() < deadline) delay(500)
+                if (c.state.value != ConnState.OPEN) throw IllegalStateException("still reconnecting — try again")
                 val (name, mime) = withContext(Dispatchers.IO) { readUriMeta(context, uri) }
-                val bytes = withContext(Dispatchers.IO) {
-                    // M5 fix: guard ukuran — file gede (video dll) bikin OOM/ANR
-                    // kalau dibaca full ke memori + base64 (1.33x ukuran file).
-                    context.contentResolver.openInputStream(uri)?.use { st ->
-                        val size = st.available().toLong().coerceAtLeast(0)
-                        val realSize = querySize(context, uri) ?: size
-                        if (realSize > 8L * 1024 * 1024) {
-                            throw IllegalStateException("file is ${(realSize / 1024 / 1024)}MB — max is 8MB")
-                        }
-                        st.readBytes()
-                    } ?: throw IllegalStateException("can't read file")
-                }
                 val isImage = mime?.startsWith("image/") == true
-                val b64 = withContext(Dispatchers.Default) {
-                    Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val isVideo = mime?.startsWith("video/") == true
+                val bytes = withContext(Dispatchers.IO) {
+                    val realSize = querySize(context, uri)
+                    val cap = 25L * 1024 * 1024 // = batas server image.attach_bytes
+                    if (realSize != null && realSize > cap) {
+                        throw IllegalStateException("file is ${realSize / 1024 / 1024}MB — max is 25MB")
+                    }
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("can't read file")
                 }
+                if (bytes.size > 25 * 1024 * 1024) throw IllegalStateException("file is ${bytes.size / 1024 / 1024}MB — max is 25MB")
+                val b64 = withContext(Dispatchers.Default) { Base64.encodeToString(bytes, Base64.NO_WRAP) }
                 val repo = MetaRepo(c)
                 val att = if (isImage) {
-                    // image.attach_bytes — gambar auto-queued server utk submit berikutnya
+                    // image.attach_bytes — gambar auto-queued (vision) untuk submit berikutnya
                     val out = repo.attachImageBytes(
                         runtimeId, b64,
-                        filename = name ?: "foto.jpg",
+                        filename = name ?: "photo.jpg",
                         ext = name?.substringAfterLast('.', "") ?: "",
                         profile = app.profile.value,
                     )
                     if (!out.attached) throw RpcException(-1, "image.attach_bytes: failed")
-                    // path balikan = lokasi di Mac → simpan biar bisa dirender ulang
-                    Attachment(refText = "", name = name ?: "foto", isImage = true)
+                    Attachment(refText = "", name = name ?: "photo", isImage = true, path = out.path)
                 } else {
-                    // file.attach data_url — ref_text HARUS masuk prompt
-                    val fileMime = mime ?: "application/octet-stream"
+                    // file.attach data_url — ref_text masuk prompt (video = stub path, agent tetap tahu filenya)
                     val out = repo.attachFileDataUrl(
                         runtimeId,
-                        dataUrl = "data:$fileMime;base64,$b64",
-                        name = name ?: "file",
+                        dataUrl = "data:${mime ?: "application/octet-stream"};base64,$b64",
+                        name = name ?: if (isVideo) "video.mp4" else "file",
                         profile = app.profile.value,
                     )
-                    Attachment(refText = out.refText, name = out.name, isImage = false)
+                    Attachment(refText = out.refText, name = out.name, isImage = false, path = out.path, isVideo = isVideo)
                 }
                 attachment = att
-                // M8: thumbnail 40dp di chip — decode downsampled (~120px)
-                attachThumb = if (isImage) withContext(Dispatchers.Default) {
-                    val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
-                    var sample = 1
-                    while (o.outWidth / (sample * 2) >= 120 && o.outHeight / (sample * 2) >= 120) sample *= 2
-                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
-                        ?.asImageBitmap()
-                } else null
+                attachThumb = withContext(Dispatchers.Default) {
+                    when {
+                        isImage -> {
+                            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+                            var sample = 1
+                            while (o.outWidth / (sample * 2) >= 120 && o.outHeight / (sample * 2) >= 120) sample *= 2
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                                android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+                        }
+                        isVideo -> try {
+                            android.media.MediaMetadataRetriever().run {
+                                setDataSource(context, uri)
+                                val f = getFrameAtTime(0)
+                                release()
+                                f?.let { android.graphics.Bitmap.createScaledBitmap(it, 160, (160f * it.height / it.width).toInt().coerceAtLeast(1), true) }
+                                    ?.asImageBitmap()
+                            }
+                        } catch (_: Throwable) { null }
+                        else -> null
+                    }
+                }
             } catch (e: Throwable) {
                 attachError = "Couldn't attach: ${e.message}"
             } finally { attaching = false }
         }
     }
+    val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri -> if (uri != null) attachUri(uri) }
+    // Galeri: foto + video (photo picker sistem, tanpa izin storage)
+    val pickMedia = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri -> if (uri != null) attachUri(uri) }
+    // Kamera: hasil ditulis ke cache via FileProvider
+    var cameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val takePhoto = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.TakePicture()
+    ) { ok -> cameraUri?.let { if (ok) attachUri(it) } }
+    fun launchCamera() {
+        try {
+            val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+            val f = java.io.File(dir, "photo_${System.currentTimeMillis()}.jpg")
+            val u = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", f)
+            cameraUri = u
+            takePhoto.launch(u)
+        } catch (e: Throwable) { attachError = "Camera unavailable: ${e.message}" }
+    }
+    // Lokasi: izin → lokasi terakhir/terkini → kirim link maps
+    var locating by remember { mutableStateOf(false) }
+    fun sendLocation() {
+        locating = true
+        scope.launch {
+            val loc = withContext(Dispatchers.IO) { currentLocation(context) }
+            locating = false
+            if (loc == null) { attachError = "Couldn't get your location — is location on?"; return@launch }
+            val (lat, lng) = loc
+            val link = "https://maps.google.com/?q=%.6f,%.6f".format(java.util.Locale.US, lat, lng)
+            input = (input.trim() + (if (input.isBlank()) "" else "\n") + "My location: $link").trim()
+        }
+    }
+    val locationPerm = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted -> if (granted.values.any { it }) sendLocation() else attachError = "Location permission denied" }
     // M5: fetcher gambar buat MarkdownImage (auth /api/media → bitmap)
     val mediaFetch = remember(app.connection) { mediaFetcherFor(app.connection) }
     // M9 (item 3): fetcher video (proxy mobile-media → file cacheDir)
@@ -308,16 +345,7 @@ fun ChatScreen(
                 title = req.params?.get("tool_name")?.jsonStr()?.takeIf { it.isNotBlank() } ?: "COMMAND",
                 command = req.params?.get("command")?.jsonStr() ?: req.params?.get("description")?.jsonStr() ?: "",
             )
-            "clarify" -> {
-                val qArr = req.params?.get("questions")?.jsonArray
-                clarify = AskClarify(
-                    id = req.id,
-                    question = req.params?.get("question")?.jsonStr()
-                        ?: qArr?.firstOrNull()?.jsonObject?.get("question")?.jsonStr()
-                        ?: "Something needs confirmation",
-                    questionId = qArr?.firstOrNull()?.jsonObject?.get("qid")?.jsonStr(),
-                )
-            }
+            "clarify" -> clarify = AskClarify.parse(req.id, req.params)
         }
     }
 
@@ -491,25 +519,8 @@ fun ChatScreen(
                         running = true // agent nunggu jawaban — jangan biarkan composer bunuh turn
                     }
                     "clarify" -> {
-                        val p = ev.params
-                        // batch: {questions:[{qid,question,...}]} — single: {question}
-                        val qArr = p?.get("questions")?.jsonArray
-                        val qid = qArr?.firstOrNull()?.jsonObject?.get("qid")?.jsonStr()
-                        clarify = AskClarify(
-                            id = ev.id,
-                            question = p?.get("question")?.jsonStr()
-                                ?: qArr?.firstOrNull()?.jsonObject?.get("question")?.jsonStr()
-                                ?: "Something needs confirmation",
-                            questionId = qid,
-                            respondRaw = { answer ->
-                                if (qid != null) {
-                                    // batch: lock jawaban pertanyaan ini
-                                    ev.respond(buildJsonObject { put("answers", buildJsonObject { put(qid, answer) }) })
-                                } else {
-                                    ev.respond(buildJsonObject { put("answer", answer) })
-                                }
-                            },
-                        )
+                        // single {question,choices} atau batch {questions:[{qid,question,choices}]}
+                        clarify = AskClarify.parse(ev.id, ev.params).copy(respondRaw = { result -> ev.respond(result) })
                         running = true
                     }
                     else -> ev.fail(-32601, "no handler: ${ev.method}")
@@ -863,19 +874,17 @@ fun ChatScreen(
                 // M4: clarify card
                 clarify?.let { cq ->
                     item(key = "clarify-${cq.id}") {
-                        ClarifyCard(cq, onSubmit = { answer ->
+                        ClarifyCard(cq, onSubmit = { answers ->
                             if (cq.responded != null) return@ClarifyCard
-                            clarify = cq.copy(responded = answer)
+                            clarify = cq.copy(responded = answers.joinToString(" · ") { it.ifBlank { "Skipped" } })
+                            val result = cq.result(answers)
                             scope.launch {
-                                if (cq.respondRaw(answer)) return@launch
+                                if (cq.respondRaw(result)) return@launch
                                 val c = app.client ?: return@launch
                                 try {
                                     c.call("request.answer", buildJsonObject {
                                         put("id", cq.id)
-                                        put("result", buildJsonObject {
-                                            if (cq.questionId != null) put("answers", buildJsonObject { put(cq.questionId, answer) })
-                                            else put("answer", answer)
-                                        })
+                                        put("result", result)
                                         val prof = app.profile.value
                                         if (prof.isNotBlank() && prof != "default") put("profile", prof)
                                     })
@@ -952,27 +961,30 @@ fun ChatScreen(
                 replyQuote = null
                 // file non-gambar WAJIB bawa ref; gambar auto-queued server
                 val att = attachment
+                // Lampiran: @file ref (agent baca isinya) + baris MEDIA:<path Mac> supaya
+                // bubble (live & setelah reload) render foto/video/kartu file, bukan teks path.
+                val mediaLine = att?.path?.takeIf { it.isNotBlank() }?.let { "MEDIA:$it" }
                 val parts = listOfNotNull(
-                    att?.takeIf { !it.isImage }?.refText?.takeIf { it.isNotBlank() },
                     typed.takeIf { it.isNotEmpty() },
+                    att?.takeIf { !it.isImage }?.refText?.takeIf { it.isNotBlank() },
+                    mediaLine,
                 )
-                // M5: chip foto tanpa teks tetap bisa dikirim — gambar sudah
-                // auto-queued server-side; teks "Sent a photo: nama" cuma trigger turn.
-                if (parts.isEmpty() && att?.isImage != true) return@Composer
+                if (typed.isEmpty() && att == null) return@Composer
                 val sentQuote = quote?.let { q ->
                     val flat = q.lineSequence().joinToString(" ").trim()
                     if (flat.isEmpty()) null else "> ${flat.take(240)}"
                 }
                 val text = listOfNotNull(
                     sentQuote,
-                    if (parts.isEmpty() && att?.isImage == true) "Sent a photo: ${att?.name}" else parts.joinToString("\n").takeIf { it.isNotEmpty() },
+                    (if (typed.isEmpty() && att?.isImage == true && mediaLine == null) "Sent a photo: ${att.name}" else parts.joinToString("\n")).takeIf { it.isNotEmpty() },
                 ).joinToString("\n\n")
                 input = ""
                 attachment = null
                 attachThumb = null
                 forceScroll = true
                 items = items + ChatItem.User(
-                    if (typed.isEmpty() && att != null) "Sent a photo: ${att.name}" else typed.ifEmpty { "Sent a photo: ${att?.name}" },
+                    listOfNotNull(typed.takeIf { it.isNotEmpty() }, mediaLine).joinToString("\n")
+                        .ifEmpty { "Sent ${att?.name.orEmpty()}" },
                     pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
                     quote = quote,
                 )
@@ -1058,8 +1070,19 @@ fun ChatScreen(
     if (attachSheet) {
         AttachSheet(
             onDismiss = { attachSheet = false },
-            onPhoto = { pickFile.launch("image/*") },
+            onCamera = { launchCamera() },
+            onGallery = {
+                pickMedia.launch(androidx.activity.result.PickVisualMediaRequest(
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            },
             onFile = { pickFile.launch("*/*") },
+            onLocation = {
+                val fine = android.Manifest.permission.ACCESS_FINE_LOCATION
+                val coarse = android.Manifest.permission.ACCESS_COARSE_LOCATION
+                val has = androidx.core.content.ContextCompat.checkSelfPermission(context, coarse) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (has) sendLocation() else locationPerm.launch(arrayOf(fine, coarse))
+            },
         )
     }
     // Model sheet: live chat → switch this chat's model in place (desktop parity).
@@ -1275,4 +1298,25 @@ internal fun toolFailed(result: kotlinx.serialization.json.JsonElement?): Boolea
     (o["success"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { if (it == "false") return true }
     val code = (o["exit_code"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
     return code != null && code != 0
+}
+
+
+/** Lokasi terkini (≤10 dtk) atau last-known. null = gagal/izin tidak ada. */
+@android.annotation.SuppressLint("MissingPermission")
+private fun currentLocation(context: android.content.Context): Pair<Double, Double>? {
+    val lm = context.getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager ?: return null
+    val providers = listOf(android.location.LocationManager.FUSED_PROVIDER, android.location.LocationManager.GPS_PROVIDER,
+        android.location.LocationManager.NETWORK_PROVIDER).filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+    return try {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && providers.isNotEmpty()) {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var got: android.location.Location? = null
+            val cancel = android.os.CancellationSignal()
+            lm.getCurrentLocation(providers.first(), cancel, context.mainExecutor) { got = it; latch.countDown() }
+            if (!latch.await(10, java.util.concurrent.TimeUnit.SECONDS)) cancel.cancel()
+            got?.let { return it.latitude to it.longitude }
+        }
+        providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .maxByOrNull { it.time }?.let { it.latitude to it.longitude }
+    } catch (_: Throwable) { null }
 }

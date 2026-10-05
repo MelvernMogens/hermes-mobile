@@ -1,5 +1,8 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.material.icons.rounded.CheckBox
+import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Terminal
@@ -221,7 +224,9 @@ fun UserBubble(
                 }
             }
             if (id.melvern.hermesmobile.ui.components.MarkdownParser.containsMediaLine(item.text)) {
-                MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
+                // ref "@file:…" untuk agent — bubble cukup tampilkan medianya
+                val shown = item.text.lineSequence().filterNot { it.trim().startsWith("@file:") }.joinToString("\n").trim()
+                MarkdownText(shown, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
             } else {
                 SelectionContainer { Text(item.text, style = Type.Body) }
             }
@@ -482,14 +487,68 @@ data class AskApproval(
     val respondRaw: (String) -> Boolean = { false },
 )
 
-/** State clarify card. `questionId` = qid pertanyaan batch pertama (null = single). */
+/** Satu pertanyaan clarify. `qid` null = mode single (server lama / pertanyaan tunggal). */
+data class ClarifyQ(
+    val qid: String?,
+    val question: String,
+    val choices: List<String> = emptyList(),
+    val multi: Boolean = false,
+)
+
+/**
+ * State clarify card. Single → result {answer}; batch → {answers:{qid:…}} untuk
+ * SEMUA pertanyaan sekaligus (server menunggu set lengkap).
+ */
 data class AskClarify(
     val id: String,
-    val question: String,
-    val questionId: String? = null,
+    val questions: List<ClarifyQ>,
     val responded: String? = null,
-    val respondRaw: (String) -> Boolean = { false },
-)
+    val respondRaw: (kotlinx.serialization.json.JsonObject) -> Boolean = { false },
+) {
+    val question: String get() = questions.firstOrNull()?.question ?: "Something needs confirmation"
+
+    fun result(answers: List<String>): kotlinx.serialization.json.JsonObject =
+        kotlinx.serialization.json.buildJsonObject {
+            val batch = questions.any { it.qid != null }
+            if (!batch) put("answer", kotlinx.serialization.json.JsonPrimitive(answers.firstOrNull().orEmpty()))
+            else put("answers", kotlinx.serialization.json.buildJsonObject {
+                questions.forEachIndexed { i, q ->
+                    put(q.qid ?: "q$i", kotlinx.serialization.json.JsonPrimitive(answers.getOrNull(i).orEmpty()))
+                }
+            })
+        }
+
+    companion object {
+        /** Parse params request clarify (single atau batch). Pure — di-unit-test. */
+        fun parse(id: String, p: kotlinx.serialization.json.JsonObject?): AskClarify {
+            fun strs(e: kotlinx.serialization.json.JsonElement?): List<String> =
+                (e as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+                    (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { s -> s.isNotBlank() }
+                } ?: emptyList()
+            fun bool(e: kotlinx.serialization.json.JsonElement?) =
+                (e as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+            fun str(e: kotlinx.serialization.json.JsonElement?) =
+                (e as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.content
+            val arr = p?.get("questions") as? kotlinx.serialization.json.JsonArray
+            val qs = arr?.mapNotNull { e ->
+                val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                ClarifyQ(
+                    qid = str(o["qid"]) ?: return@mapNotNull null,
+                    question = str(o["question"]).orEmpty(),
+                    choices = strs(o["choices"]),
+                    multi = bool(o["multi_select"]),
+                )
+            }.orEmpty()
+            return if (qs.isNotEmpty()) AskClarify(id, qs)
+            else AskClarify(id, listOf(ClarifyQ(
+                qid = null,
+                question = str(p?.get("question")) ?: "Something needs confirmation",
+                choices = strs(p?.get("choices")),
+                multi = bool(p?.get("multi_select")),
+            )))
+        }
+    }
+}
 
 @Composable
 private fun CardShell(dim: Boolean, content: @Composable ColumnScope.() -> Unit) {
@@ -539,40 +598,98 @@ fun ApprovalCard(ap: AskApproval, onChoice: (String) -> Unit) {
     }
 }
 
-/** M4→M8 clarify card: pertanyaan + field + "Send"; setelah jawab → dim. */
+/**
+ * Clarify card: pertanyaan + pilihan yang bisa di-tap (seperti desktop), plus
+ * "Other" untuk jawaban bebas. Batch → satu per satu ("1 of 3"), jawaban dikirim
+ * sekaligus di akhir. Multi-select → centang lalu "Done".
+ */
 @Composable
-fun ClarifyCard(cq: AskClarify, onSubmit: (String) -> Unit) {
-    var answer by remember(cq.id) { mutableStateOf("") }
+fun ClarifyCard(cq: AskClarify, onSubmit: (List<String>) -> Unit) {
+    var step by remember(cq.id) { mutableStateOf(0) }
+    val answers = remember(cq.id) { mutableStateListOf<String>() }
+    var typed by remember(cq.id, step) { mutableStateOf("") }
+    var typing by remember(cq.id, step) { mutableStateOf(false) }
+    val picked = remember(cq.id, step) { mutableStateListOf<String>() }
     val answered = cq.responded != null
+    val q = cq.questions.getOrNull(step) ?: cq.questions.first()
+    val total = cq.questions.size
+
+    fun commit(answer: String) {
+        if (answered) return
+        answers.add(answer)
+        if (answers.size >= total) onSubmit(answers.toList()) else step++
+    }
+
     CardShell(dim = answered) {
-        Text(cq.question, style = Type.Title, modifier = Modifier.padding(end = 8.dp))
-        Spacer(Modifier.height(8.dp))
+        if (total > 1 && !answered) {
+            Text("${step + 1} of $total", style = Type.Meta, modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Text(if (answered) cq.questions.joinToString("\n") { it.question } else q.question,
+            style = Type.Title, modifier = Modifier.padding(end = 8.dp))
+        Spacer(Modifier.height(10.dp))
         if (answered) {
-            Text(cq.responded ?: "", style = Type.Callout.copy(color = Ink.Text2), modifier = Modifier.padding(bottom = 8.dp, end = 8.dp))
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(cq.responded ?: "", style = Type.Callout.copy(color = Ink.Text2), modifier = Modifier.padding(bottom = 10.dp, end = 8.dp))
+            return@CardShell
+        }
+        q.choices.forEach { choice ->
+            val on = choice in picked
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(end = 8.dp, bottom = 6.dp)
+                    .clip(Radius.Chip)
+                    .background(if (on) Ink.Surface3 else Ink.Surface2)
+                    .pressClickable {
+                        if (q.multi) { if (on) picked.remove(choice) else picked.add(choice) }
+                        else commit(choice)
+                    }
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (q.multi) {
+                    Icon(if (on) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank, null,
+                        tint = if (on) Ink.Text else Ink.Text3, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                }
+                Text(choice, style = Type.Callout, modifier = Modifier.weight(1f))
+            }
+        }
+        if (q.choices.isEmpty() || typing) {
+            Row(Modifier.padding(end = 0.dp), verticalAlignment = Alignment.CenterVertically) {
                 BasicTextField(
-                    value = answer,
-                    onValueChange = { answer = it },
+                    value = typed,
+                    onValueChange = { typed = it },
                     textStyle = Type.Callout,
                     cursorBrush = SolidColor(Ink.Text),
-                    singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (answer.isNotBlank()) onSubmit(answer.trim()) }),
+                    keyboardActions = KeyboardActions(onSend = { if (typed.isNotBlank()) commit(typed.trim()) }),
                     modifier = Modifier
                         .weight(1f)
                         .clip(Radius.Chip)
                         .background(Ink.Surface2)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
                     decorationBox = { inner ->
                         Box {
-                            if (answer.isEmpty()) Text("Your answer", style = Type.Callout.copy(color = Ink.Text3))
+                            if (typed.isEmpty()) Text("Your answer", style = Type.Callout.copy(color = Ink.Text3))
                             inner()
                         }
                     },
                 )
-                TextButton(onClick = { if (answer.isNotBlank()) onSubmit(answer.trim()) }, enabled = answer.isNotBlank()) {
-                    Text("Send", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold, color = if (answer.isNotBlank()) Ink.Text else Ink.Text3))
+                TextButton(onClick = { if (typed.isNotBlank()) commit(typed.trim()) }, enabled = typed.isNotBlank()) {
+                    Text("Send", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold, color = if (typed.isNotBlank()) Ink.Text else Ink.Text3))
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (q.choices.isNotEmpty() && !typing) {
+                TextButton(onClick = { typing = true }) { Text("Other…", style = Type.Callout.copy(color = Ink.Text2)) }
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { commit("") }) { Text("Skip", style = Type.Callout.copy(color = Ink.Text3)) }
+            if (q.multi) {
+                TextButton(onClick = { commit(picked.joinToString(", ")) }, enabled = picked.isNotEmpty()) {
+                    Text("Done", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold, color = if (picked.isNotEmpty()) Ink.Text else Ink.Text3))
                 }
             }
         }
