@@ -787,7 +787,8 @@ private fun VideoPlayer(file: java.io.File, name: String) {
     DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> exo.play()
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME ->
+                    if (id.melvern.hermesmobile.core.store.AppPrefs.autoplayVideo) exo.play()
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> exo.pause()
                 else -> {}
             }

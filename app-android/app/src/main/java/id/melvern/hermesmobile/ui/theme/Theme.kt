@@ -31,7 +31,7 @@ private val HermesTypography = Typography(
     labelSmall = Type.Caption,
 )
 
-private val Scheme = darkColorScheme(
+private fun scheme() = darkColorScheme(
     primary = Ink.Accent,
     onPrimary = Ink.OnAccent,
     primaryContainer = Ink.Surface2,
@@ -72,10 +72,15 @@ private val Selection = TextSelectionColors(handleColor = Ink.Text, backgroundCo
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HermesTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, typography = HermesTypography) {
+    // tema & ukuran teks dari Settings — dibaca sebagai snapshot state → recompose instan
+    val theme = id.melvern.hermesmobile.core.store.AppPrefs.theme
+    val scale = id.melvern.hermesmobile.core.store.AppPrefs.textSize.scale
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    MaterialTheme(colorScheme = androidx.compose.runtime.remember(theme) { scheme() }, typography = HermesTypography) {
         CompositionLocalProvider(
             LocalRippleConfiguration provides QuietRipple,
             LocalTextSelectionColors provides Selection,
+            androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, d.fontScale * scale),
             content = content,
         )
     }

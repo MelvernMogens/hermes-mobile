@@ -36,6 +36,7 @@ import yarl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mobile_insights  # noqa: E402  (sibling module, read-only state.db queries)
+import mobile_limits  # noqa: E402  (plan limits via hermes-agent + Mac RAM)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -269,6 +270,15 @@ async def handle_mobile_usage(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
+async def handle_mobile_limits(request: web.Request) -> web.Response:
+    """GET /api/mobile-limits → {plans:[{label, windows:[{label,used_percent,resets_at}]}], ram:{...}}."""
+    session: aiohttp.ClientSession = request.app["client"]
+    if not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    data = await asyncio.get_running_loop().run_in_executor(None, mobile_limits.limits_snapshot)
+    return web.json_response(data)
+
+
 async def handle_desktop_port(request: web.Request) -> web.Response:
     port, pid = await asyncio.get_running_loop().run_in_executor(None, _desktop_alive)
     if port == 0 and DESKTOP_HINT_PORT:
@@ -411,6 +421,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-last", handle_mobile_last)
     app.router.add_get("/api/mobile-usage", handle_mobile_usage)
     app.router.add_get("/api/mobile-user-tail", handle_mobile_user_tail)
+    app.router.add_get("/api/mobile-limits", handle_mobile_limits)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
     app.on_startup.append(on_startup)

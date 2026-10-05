@@ -15,7 +15,8 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import id.melvern.hermesmobile.core.store.AppPrefs
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -156,18 +157,24 @@ fun Composer(
                 maxLines = 6,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
-                    // Enter biasa = kirim, Shift+Enter = baris baru (perilaku WhatsApp).
-                    imeAction = ImeAction.Send,
+                    // Keyboard layar: default Enter = baris baru (HP gak punya Shift+Enter);
+                    // bisa diubah ke "Send" di Settings. Kirim = tombol panah.
+                    imeAction = if (AppPrefs.softEnter == AppPrefs.EnterKey.SEND) ImeAction.Send else ImeAction.Default,
                     autoCorrect = true,
                 ),
                 keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
                 modifier = Modifier
                     .weight(1f)
-                    .onKeyEvent { e ->
-                        if (e.key == Key.Enter && e.type == KeyEventType.KeyUp) {
-                            val shifted = e.isShiftPressed
-                            if (!shifted && canSend) { onSend(); true } else false
-                        } else false
+                    // Keyboard fisik (tablet): Enter kirim, Shift+Enter baris baru (Settings).
+                    // Dicegat di KeyDown sebelum field menyisipkan "\n".
+                    .onPreviewKeyEvent { e ->
+                        if (e.key != Key.Enter && e.key != Key.NumPadEnter) return@onPreviewKeyEvent false
+                        val ne = e.nativeKeyEvent
+                        val hardware = ne.deviceId != android.view.KeyCharacterMap.VIRTUAL_KEYBOARD &&
+                            ne.device?.isVirtual != true
+                        if (!AppPrefs.enterShouldSend(hardwareKey = hardware, shift = e.isShiftPressed)) return@onPreviewKeyEvent false
+                        if (e.type == KeyEventType.KeyDown && canSend) onSend()
+                        true
                     },
                 decorationBox = { inner ->
                     Box(

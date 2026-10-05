@@ -12,13 +12,16 @@ import androidx.compose.ui.graphics.Color
  */
 object Ink {
     // canvas & surface — tonal ladder (tiap step ±4% luminance)
-    val Bg = Color(0xFF000000)         // canvas OLED: hitam murni
-    val Surface1 = Color(0xFF0E0E10)   // grouped surface, composer field, sheet
-    val Surface2 = Color(0xFF17171A)   // user bubble, inline code, chip, pressed
-    val Surface3 = Color(0xFF212125)   // code header, selected segment track
-    val Raised = Color(0xFF2A2A2F)     // elevated control (scroll fab, toast)
+    // Tema (Settings): Black = OLED murni; Graphite = abu sangat gelap, surface naik satu step.
+    // Getter membaca snapshot state → semua layar ikut recompose saat tema diganti.
+    private val graphite get() = id.melvern.hermesmobile.core.store.AppPrefs.theme == id.melvern.hermesmobile.core.store.AppPrefs.Theme.GRAPHITE
+    val Bg: Color get() = if (graphite) Color(0xFF111113) else Color(0xFF000000)         // canvas
+    val Surface1: Color get() = if (graphite) Color(0xFF1A1A1D) else Color(0xFF0E0E10)   // grouped surface, composer field, sheet
+    val Surface2: Color get() = if (graphite) Color(0xFF232327) else Color(0xFF17171A)   // user bubble, inline code, chip, pressed
+    val Surface3: Color get() = if (graphite) Color(0xFF2C2C31) else Color(0xFF212125)   // code header, selected segment track
+    val Raised: Color get() = if (graphite) Color(0xFF34343A) else Color(0xFF2A2A2F)     // elevated control (scroll fab, toast)
     /** Garis halus — dipakai SEDIKIT (pemisah grouped list di dalam surface). */
-    val Hairline = Color(0xFF1C1C20)
+    val Hairline: Color get() = if (graphite) Color(0xFF26262B) else Color(0xFF1C1C20)
     /** Border field idle, garis blockquote, outline tombol non-aktif. */
     val HairlineStrong = Color(0xFF34343A)
 

@@ -12,6 +12,10 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +48,8 @@ import id.melvern.hermesmobile.ui.theme.hairline
 object HomeTabs {
     const val CHATS = 0
     const val OVERVIEW = 1
+    const val LIMITS = 2
+    const val SETTINGS = 3
 }
 
 @Composable
@@ -52,6 +58,8 @@ fun HomeShell(
     onTab: (Int) -> Unit,
     chats: @Composable () -> Unit,
     overview: @Composable () -> Unit,
+    limits: @Composable () -> Unit = {},
+    settings: @Composable () -> Unit = {},
 ) {
     val winSize = currentWinSize()
     // Badge tab Overview: jumlah bot Running (dari snapshot poller M14).
@@ -66,7 +74,7 @@ fun HomeShell(
                 modifier = Modifier.width(80.dp).fillMaxHeight(),
             )
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (tab == HomeTabs.CHATS) chats() else overview()
+                when (tab) { HomeTabs.CHATS -> chats(); HomeTabs.LIMITS -> limits(); HomeTabs.SETTINGS -> settings(); else -> overview() }
             }
         }
     } else {
@@ -79,7 +87,7 @@ fun HomeShell(
                     .fillMaxWidth()
                     .consumeWindowInsets(WindowInsets.navigationBars),
             ) {
-                if (tab == HomeTabs.CHATS) chats() else overview()
+                when (tab) { HomeTabs.CHATS -> chats(); HomeTabs.LIMITS -> limits(); HomeTabs.SETTINGS -> settings(); else -> overview() }
                 // konten melebur ke nav (gak ada seam / baris kepotong keras)
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
                     .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg.copy(alpha = 0f), Ink.Bg))))
@@ -94,12 +102,16 @@ private fun BottomBar(tab: Int, onTab: (Int) -> Unit, running: Int) {
     // Surface terangkat (bukan hitam + garis) — konten scroll di belakangnya
     // kebaca sebagai lapisan, bukan dipotong.
     Column(Modifier.fillMaxWidth().background(Ink.Bg).navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().height(Dim.NavBar).padding(horizontal = 48.dp)) {
+        Row(Modifier.fillMaxWidth().height(Dim.NavBar).padding(horizontal = 8.dp)) {
             TabItem(Icons.Rounded.ChatBubble, Icons.Outlined.ChatBubbleOutline, "Chats", selected = tab == HomeTabs.CHATS,
                 badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.CHATS) }
             // badge cuma muncul kalau kita TIDAK di tab Overview (di sana angkanya sudah kelihatan)
             TabItem(Icons.Rounded.Hub, Icons.Outlined.Hub, "Agents", selected = tab == HomeTabs.OVERVIEW,
                 badge = running.takeIf { tab != HomeTabs.OVERVIEW }, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.OVERVIEW) }
+            TabItem(Icons.Rounded.Speed, Icons.Outlined.Speed, "Limits", selected = tab == HomeTabs.LIMITS,
+                badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.LIMITS) }
+            TabItem(Icons.Rounded.Settings, Icons.Outlined.Settings, "Settings", selected = tab == HomeTabs.SETTINGS,
+                badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.SETTINGS) }
         }
     }
 }
@@ -116,6 +128,14 @@ private fun Rail(tab: Int, onTab: (Int) -> Unit, running: Int, modifier: Modifie
             RailItem(Icons.Rounded.Hub, Icons.Outlined.Hub, "Agents", selected = tab == HomeTabs.OVERVIEW,
                 badge = running.takeIf { tab != HomeTabs.OVERVIEW }) {
                 onTab(HomeTabs.OVERVIEW)
+            }
+            Spacer(Modifier.height(4.dp))
+            RailItem(Icons.Rounded.Speed, Icons.Outlined.Speed, "Limits", selected = tab == HomeTabs.LIMITS, badge = null) {
+                onTab(HomeTabs.LIMITS)
+            }
+            Spacer(Modifier.height(4.dp))
+            RailItem(Icons.Rounded.Settings, Icons.Outlined.Settings, "Settings", selected = tab == HomeTabs.SETTINGS, badge = null) {
+                onTab(HomeTabs.SETTINGS)
             }
         }
         Hairline(Modifier.width(hairline()).fillMaxHeight())

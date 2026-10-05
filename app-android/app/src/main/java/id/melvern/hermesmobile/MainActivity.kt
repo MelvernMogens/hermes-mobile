@@ -1,5 +1,10 @@
 package id.melvern.hermesmobile
 
+import id.melvern.hermesmobile.core.store.SettingsStore
+import id.melvern.hermesmobile.core.store.ConnectionSettings
+import kotlinx.coroutines.launch
+import id.melvern.hermesmobile.ui.overview.LimitsScreen
+import id.melvern.hermesmobile.ui.overview.SettingsScreen
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -74,6 +79,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         // M14: extra dari tap notif — baca SEKALI di onCreate (onNewIntent → flow).
+        id.melvern.hermesmobile.core.store.AppPrefs.loadBlocking(this)
         setContent {
             // M15: adaptive — WindowSizeClass dihitung di sini (satu-satunya tempat),
             // disimpan ke state app + CompositionLocal; screens baca dari situ.
@@ -183,6 +189,18 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
                                 homeTab = HomeTabs.CHATS
                                 nav.navigate("chat/$arg") { popUpTo("sessions") }
                             }
+                        })
+                    },
+                    limits = { LimitsScreen(app) },
+                    settings = {
+                        SettingsScreen(app, onSignOut = {
+                            app.disconnect()
+                            // kosongkan kredensial tersimpan (URL disisakan biar login ulang gampang)
+                            val keep = ConnectionSettings(baseUrl = s.baseUrl, username = s.username)
+                            app.appScope.launch { SettingsStore.save(app, keep) }
+                            app.settings.value = keep
+                            homeTab = HomeTabs.CHATS
+                            nav.navigate("connect") { popUpTo(0) }
                         })
                     },
                 )
