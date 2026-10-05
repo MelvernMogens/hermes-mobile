@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -730,13 +731,13 @@ fun MarkdownVideo(
 ) {
     var file by remember(path) { mutableStateOf<java.io.File?>(null) }
     var failed by remember(path) { mutableStateOf(false) }
-    var savedVideo by remember(path) { mutableStateOf(SaveState.Idle) }
-    val chipScope = rememberCoroutineScope()
-    val chipCtx = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(path) {
+    var attempt by remember(path) { mutableStateOf(0) }
+    LaunchedEffect(path, attempt) {
         if (fetch == null) { failed = true; return@LaunchedEffect }
-        val f = try { fetch(path) } catch (_: Throwable) { null }
-        if (f != null && f.exists() && f.length() > 0) file = f else failed = true
+        failed = false
+        // pesan masih streaming → path belum tersimpan di Mac → server tolak sementara. Coba ulang.
+        file = fetchWithRetry { fetch(path)?.takeIf { it.exists() && it.length() > 0 } }
+        if (file == null) failed = true
     }
     val name = path.substringAfterLast('/')
     val hl = hairline()
@@ -750,40 +751,10 @@ fun MarkdownVideo(
                 .border(hl, Ink.Hairline, Radius.Chip),
         ) {
             VideoPlayer(file = f, name = name)
-            MediaSavePill(path, Modifier.align(Alignment.TopEnd))
+            // di atas PlayerView (AndroidView) — zIndex supaya pill gak ketimpa layer kontrol
+            MediaSavePill(path, Modifier.align(Alignment.TopEnd).zIndex(1f))
         }
-        failed -> Row(
-            modifier
-                .fillMaxWidth()
-                .clip(Radius.Chip)
-                .background(Ink.Surface1)
-                .border(hl, Ink.Hairline, Radius.Chip)
-                .pressClickable {
-                    // M10: chip fallback = save ke Downloads (bukan dead-end "Open on your Mac")
-                    savedVideo = SaveState.Busy
-                    chipScope.launch {
-                        val ok = MediaFetchSave.saveAny(chipCtx, path)
-                        savedVideo = if (ok) SaveState.Done else SaveState.Fail
-                    }
-                }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.PlayArrow, null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    when (savedVideo) {
-                        SaveState.Busy -> "Saving…"
-                        SaveState.Done -> "Saved to Downloads"
-                        SaveState.Fail -> "Tap to save to Downloads"
-                        SaveState.Idle -> "Tap to save to Downloads"
-                    },
-                    style = Type.Meta,
-                )
-            }
-        }
+        failed -> MediaFailedCard(path, "Video", onRetry = { attempt++ }, modifier = modifier)
         else -> Box(
             modifier
                 .fillMaxWidth()
@@ -860,10 +831,12 @@ fun MarkdownImage(
 ) {
     var image by remember(path) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var failed by remember(path) { mutableStateOf(false) }
-    LaunchedEffect(path) {
+    var attempt by remember(path) { mutableStateOf(0) }
+    LaunchedEffect(path, attempt) {
         if (fetch == null) { failed = true; return@LaunchedEffect }
-        val bmp = try { fetch(path) } catch (_: Throwable) { null }
-        if (bmp != null) image = bmp else failed = true
+        failed = false
+        image = fetchWithRetry { fetch(path) }
+        if (image == null) failed = true
     }
     val name = path.substringAfterLast('/')
     val hl = hairline()
@@ -883,22 +856,7 @@ fun MarkdownImage(
             // M10: tombol save pojok kanan-atas foto
             MediaSavePill(path, Modifier.align(Alignment.TopEnd))
         }
-        failed -> Row(
-            modifier
-                .fillMaxWidth()
-                .clip(Radius.Chip)
-                .background(Ink.Surface1)
-                .border(hl, Ink.Hairline, Radius.Chip)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.Image, null, tint = Ink.Text2, modifier = Modifier.size(Dim.Icon))
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Only viewable on your Mac", style = Type.Meta)
-            }
-        }
+        failed -> MediaFailedCard(path, "Photo", onRetry = { attempt++ }, modifier = modifier)
         else -> Box(
             modifier
                 .fillMaxWidth()
@@ -1059,7 +1017,7 @@ fun MarkdownFile(path: String, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(Ink.Surface2),
+            Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(androidx.compose.ui.graphics.Color(0xFF2C2C31)),
             contentAlignment = Alignment.Center,
         ) {
             Text(ext.take(4), style = Type.Meta.copy(fontFamily = MonoFamily, fontSize = 10.sp), color = Ink.Text2, maxLines = 1)
@@ -1097,7 +1055,7 @@ fun TextFileReader(path: String, onSave: () -> Unit, saved: Boolean, onDismiss: 
     LaunchedEffect(path) {
         val conn = MediaFetchSave.connection
         val got = conn?.let { c ->
-            try { id.melvern.hermesmobile.core.repo.MediaRepo(c).fetchBytes(path) } catch (_: Throwable) { null }
+            fetchWithRetry { id.melvern.hermesmobile.core.repo.MediaRepo(c).fetchBytes(path) }
         }
         if (got == null) failed = true
         else {
@@ -1167,7 +1125,7 @@ fun MediaSavePill(path: String, modifier: Modifier = Modifier) {
             .padding(8.dp)
             .size(height = 32.dp, width = if (saved) 32.dp else 84.dp)
             .clip(Radius.Chip)
-            .background(Ink.Scrim)
+            .background(androidx.compose.ui.graphics.Color(0xCC000000))
             .pressClickable(enabled = !saving && !saved) {
                 saving = true
                 scope.launch {
@@ -1189,6 +1147,68 @@ fun MediaSavePill(path: String, modifier: Modifier = Modifier) {
             )
             if (!saved) Spacer(Modifier.width(6.dp))
             if (!saved) Text("Save", style = Type.Meta, color = Ink.Text)
+        }
+    }
+}
+
+
+/**
+ * Ambil media dengan retry bertahap (±1 menit total). Saat agent baru kirim MEDIA:
+ * dan pesannya masih streaming, server Mac menolak (path belum tercatat di chat) —
+ * beberapa detik kemudian sudah boleh.
+ */
+internal suspend fun <T> fetchWithRetry(block: suspend () -> T?): T? {
+    for (wait in longArrayOf(0, 1500, 3000, 5000, 8000, 12000, 20000)) {
+        if (wait > 0) kotlinx.coroutines.delay(wait)
+        val got = try { block() } catch (_: Throwable) { null }
+        if (got != null) return got
+    }
+    return null
+}
+
+/** Kartu media gagal dimuat — bentuk sama dengan kartu file; tap = coba lagi, ikon = simpan. */
+@Composable
+private fun MediaFailedCard(path: String, kind: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val name = path.substringAfterLast('/')
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var save by remember(path) { mutableStateOf(SaveState.Idle) }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(Radius.Chip)
+            .background(Ink.Surface1)
+            .pressClickable(onClick = onRetry)
+            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(androidx.compose.ui.graphics.Color(0xFF2C2C31)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (kind == "Video") Icons.Rounded.PlayArrow else Icons.Rounded.Image, null,
+                tint = Ink.Text2, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when (save) {
+                    SaveState.Busy -> "Saving…"
+                    SaveState.Done -> "Saved"
+                    SaveState.Fail -> "Couldn't load — tap to retry"
+                    SaveState.Idle -> "$kind didn't load — tap to retry"
+                },
+                style = Type.Meta, color = Ink.Text3,
+            )
+        }
+        IconButton(onClick = {
+            if (save == SaveState.Busy) return@IconButton
+            save = SaveState.Busy
+            scope.launch { save = if (MediaFetchSave.saveAny(ctx, path)) SaveState.Done else SaveState.Fail }
+        }, modifier = Modifier.size(40.dp)) {
+            Icon(if (save == SaveState.Done) Icons.Outlined.Check else Icons.Outlined.FileDownload,
+                "Save $name", tint = Ink.Text2, modifier = Modifier.size(20.dp))
         }
     }
 }
