@@ -18,13 +18,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Terminal
@@ -128,12 +133,8 @@ fun buildRows(items: List<ChatItem>, dayOf: (Double?) -> java.time.LocalDate?, l
 
 @Composable
 fun DayChip(label: String) {
-    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-        Text(
-            label,
-            style = Type.Caption.copy(color = Ink.Text2),
-            modifier = Modifier.clip(Radius.Chip).background(Ink.Surface1).padding(horizontal = 10.dp, vertical = 4.dp),
-        )
+    Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = Type.Caption.copy(color = Ink.Text4))
     }
 }
 
@@ -167,7 +168,7 @@ fun UserBubble(
                 .pointerInput(item.text) {
                     detectTapGestures(onLongPress = { onLongPress(item.text) })
                 }
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
             horizontalAlignment = Alignment.End,
         ) {
             item.quote?.let { q ->
@@ -215,6 +216,8 @@ fun AssistantBlock(
     mediaFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)?,
     videoFetch: (suspend (String) -> java.io.File?)? = null,
     onReply: ((String) -> Unit)? = null,
+    /** false = pesan antara dalam satu turn → tanpa baris aksi (kurangi tangga ikon). */
+    showMeta: Boolean = true,
 ) {
     Column(
         Modifier
@@ -239,27 +242,36 @@ fun AssistantBlock(
         SelectionContainer {
             MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 4.dp),
-        ) {
-            if (item.done && onReply != null) {
-                Row(
-                    Modifier
-                        .clip(Radius.Chip)
-                        .pressClickable { onReply(item.text) }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.Reply, "Reply", tint = Ink.Text3, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Reply", style = Type.Caption.copy(color = Ink.Text3))
+        if (item.done && showMeta) {
+            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+            var copied by remember(item.text) { mutableStateOf(false) }
+            LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1400); copied = false } }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                // ikon 16 di target 32: geser −8dp supaya glyph sejajar tepi teks
+                modifier = Modifier.padding(top = 6.dp).offset(x = (-8).dp),
+            ) {
+                MetaAction(if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy, if (copied) "Copied" else "Copy") {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(item.text)); copied = true
+                }
+                if (onReply != null) MetaAction(Icons.AutoMirrored.Rounded.Reply, "Reply") { onReply(item.text) }
+                if (item.time.isNotEmpty()) {
+                    Text(item.time, style = Type.Caption.copy(color = Ink.Text4), modifier = Modifier.padding(start = 6.dp))
                 }
             }
-            if (item.done && item.time.isNotEmpty()) {
-                Text(item.time, style = Type.Caption, modifier = Modifier.padding(start = 10.dp, top = 2.dp))
-            }
         }
+    }
+}
+
+/** Ikon aksi meta di bawah pesan — 16dp di target 32, redup. */
+@Composable
+private fun MetaAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(32.dp).clip(Radius.Full).pressClickable(onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = Ink.Text3, modifier = Modifier.size(15.dp))
     }
 }
 
@@ -278,19 +290,27 @@ fun ThoughtRow(text: String, secs: Int?, steps: Int = 1) {
     var open by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.heightIn(min = Dim.ToolRow).clip(Radius.Chip).pressClickable { open = !open }.padding(end = 6.dp),
+            Modifier
+                .heightIn(min = Dim.ToolRow)
+                .clip(Radius.Full)
+                .background(Ink.Surface1)
+                .border(hairline(), Ink.Hairline, Radius.Full)
+                .pressClickable { open = !open }
+                .padding(start = 10.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Rounded.Psychology, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
                 when {
                     secs != null -> "Thought for ${secs}s"
-                    steps > 1 -> "Thought · $steps steps"
-                    else -> "Thought"
+                    steps > 1 -> "Reasoned · $steps steps"
+                    else -> "Reasoning"
                 },
-                style = Type.Meta.copy(color = Ink.Text3),
+                style = Type.Caption.copy(color = Ink.Text2),
             )
             Spacer(Modifier.width(2.dp))
-            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconSmall))
+            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
         }
         if (open && text.isNotBlank()) QuoteText(text)
     }
@@ -367,20 +387,26 @@ fun ToolGroup(tools: List<ChatItem.Tool>) {
     var open by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).animateContentSize()) {
         Row(
-            Modifier.heightIn(min = Dim.ToolRow).clip(Radius.Chip).pressClickable { open = !open }.padding(end = 6.dp),
+            Modifier
+                .heightIn(min = Dim.ToolRow)
+                .clip(Radius.Full)
+                .background(Ink.Surface1)
+                .border(hairline(), Ink.Hairline, Radius.Full)
+                .pressClickable { open = !open }
+                .padding(start = 10.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (anyRunning) PulsingDot(Ink.Live, Modifier.padding(horizontal = 4.dp))
-            else Icon(Icons.Rounded.Build, null, tint = Ink.Text2, modifier = Modifier.size(Dim.IconSmall))
-            Spacer(Modifier.width(8.dp))
+            if (anyRunning) PulsingDot(Ink.Live, size = 6.dp)
+            else Icon(Icons.Rounded.Build, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
                 if (anyRunning) "Using ${tools.size} tools" else "Used ${tools.size} tools",
-                style = Type.Meta,
+                style = Type.Caption.copy(color = Ink.Text2),
             )
             Spacer(Modifier.width(2.dp))
-            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconSmall))
+            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
         }
-        if (open) Column(Modifier.padding(start = 24.dp)) { tools.forEach { ToolLine(it) } }
+        if (open) Column(Modifier.padding(start = 12.dp, top = 6.dp)) { tools.forEach { ToolLine(it) } }
     }
 }
 
@@ -399,10 +425,10 @@ private fun ToolLine(tool: ChatItem.Tool) {
                 .padding(end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (running) PulsingDot(Ink.Live, Modifier.padding(horizontal = 4.dp))
-            else Icon(look.icon, null, tint = Ink.Text2, modifier = Modifier.size(Dim.IconSmall))
+            if (running) PulsingDot(Ink.Live, Modifier.padding(horizontal = 4.dp), size = 6.dp)
+            else Icon(look.icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(8.dp))
-            Text(if (running) look.running + "…" else look.done, style = Type.Meta)
+            Text(if (running) look.running + "…" else look.done, style = Type.Caption.copy(color = Ink.Text2))
             if (detail != null) {
                 Spacer(Modifier.width(2.dp))
                 Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconSmall))
@@ -482,7 +508,12 @@ fun ApprovalCard(ap: AskApproval, onChoice: (String) -> Unit) {
                 Text(if (ap.responded == "once") "Allowed" else "Denied", style = Type.Meta, modifier = Modifier.padding(end = 8.dp))
             } else {
                 TextButton(onClick = { onChoice("deny") }) { Text("Deny", style = Type.Callout.copy(color = Ink.Text2)) }
-                TextButton(onClick = { onChoice("once") }) { Text("Allow", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold)) }
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    Modifier.padding(end = 6.dp).heightIn(min = 36.dp).clip(Radius.Full).background(Ink.Accent)
+                        .pressClickable { onChoice("once") }.padding(horizontal = 18.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Allow", style = Type.Callout.copy(color = Ink.OnAccent, fontWeight = FontWeight.SemiBold)) }
             }
         }
     }

@@ -3,42 +3,65 @@ package id.melvern.hermesmobile.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /**
- * M8 "Quiet Mono" — SATU sumber warna app. Screen dilarang pakai hex sendiri.
+ * "Graphite" — SATU sumber warna app. Screen dilarang pakai hex sendiri.
  *
- * Neutral ramp hangat tipis (bukan biru GitHub). Aksen = putih (tombol send
- * aktif, Connect). Warna semantik HANYA untuk makna (dot 8dp / teks status
- * kecil) — tidak pernah jadi fill besar atau hiasan.
+ * Kenapa kelihatan mahal: hitam murni (bukan abu tua) + permukaan yang
+ * dibangun dari tonal step kecil (bukan garis), teks putih hangat tipis,
+ * dan warna HANYA untuk status (dot kecil / teks status) — tidak pernah fill
+ * besar. Aksen tunggal = putih (tombol kirim, pilihan aktif).
  */
 object Ink {
-    // canvas & surface
-    val Bg = Color(0xFF0B0B0C)        // canvas
-    val Surface1 = Color(0xFF141416)  // composer fill, sheet, code body, banner
-    val Surface2 = Color(0xFF1C1C1F)  // user bubble, pressed row, chip, inline code
-    val Surface3 = Color(0xFF26262A)  // code header, input focus bg
-    val Hairline = Color(0xFF232326)  // divider
-    /** "Hairline-terang": border field idle, garis blockquote, outline send redup. */
-    val HairlineStrong = Color(0xFF3A3A3F)
+    // canvas & surface — tonal ladder (tiap step ±4% luminance)
+    val Bg = Color(0xFF000000)         // canvas OLED: hitam murni
+    val Surface1 = Color(0xFF0E0E10)   // grouped surface, composer field, sheet
+    val Surface2 = Color(0xFF17171A)   // user bubble, inline code, chip, pressed
+    val Surface3 = Color(0xFF212125)   // code header, selected segment track
+    val Raised = Color(0xFF2A2A2F)     // elevated control (scroll fab, toast)
+    /** Garis halus — dipakai SEDIKIT (pemisah grouped list di dalam surface). */
+    val Hairline = Color(0xFF1C1C20)
+    /** Border field idle, garis blockquote, outline tombol non-aktif. */
+    val HairlineStrong = Color(0xFF34343A)
 
     // teks
-    val Text = Color(0xFFF2F2F3)      // primary — 18.1:1 di Bg
-    val Text2 = Color(0xFFA1A1A6)     // secondary — 7.65:1 di Bg, 7.15:1 di Surface1
-    /**
-     * Tertiary (timestamp, placeholder). Brief minta #6C6C72 → 3.77:1 (gagal
-     * 4.5); fallback brief #7A7A80 → 4.61 di Bg tapi 4.31 di Surface1 (placeholder
-     * composer ada di Surface1 → masih gagal). #808086 = 5.01 Bg / 4.69 Surface1.
-     */
-    val Text3 = Color(0xFF808086)
+    val Text = Color(0xFFF5F5F4)       // primary — 19.6:1 di Bg
+    val Text2 = Color(0xFF9E9EA4)      // secondary — 7.9:1 di Bg, 7.4:1 di Surface1
+    /** Tertiary (timestamp, placeholder) — 5.1:1 di Bg, 4.8:1 di Surface1. */
+    val Text3 = Color(0xFF7C7C83)
+    /** Paling redup: label section, ikon disabled. 3.4:1 — hanya teks ≥ 13sp medium / ikon. */
+    val Text4 = Color(0xFF5E5E65)
 
     // aksen = putih; OnAccent = ikon/teks di atas fill putih
     val Accent = Text
     val OnAccent = Bg
 
-    // semantik — dot / teks status kecil saja
-    val Live = Color(0xFF34C759)
-    val Warn = Color(0xFFFF9F0A)
-    val Danger = Color(0xFFFF453A)
+    // semantik — dot / teks status kecil saja (sedikit desaturasi biar gak "vibrate" di hitam)
+    val Live = Color(0xFF3DD68C)
+    val LiveDim = Color(0x263DD68C)    // 15% — halo dot running
+    val Warn = Color(0xFFF5A524)
+    val Danger = Color(0xFFF2555A)
 
     // overlay
-    val Scrim = Color.Black.copy(alpha = 0.6f)
+    val Scrim = Color.Black.copy(alpha = 0.72f)
     val Transparent = Color.Transparent
+
+    /**
+     * Tint monogram per session (avatar inisial): hue diambil dari hash judul,
+     * saturasi rendah supaya tetap di dunia graphite — identitas, bukan dekorasi.
+     */
+    private val MonoTints = listOf(
+        Color(0xFF2B3A55), Color(0xFF3B2F55), Color(0xFF4A2E3F), Color(0xFF4A3A2A),
+        Color(0xFF2E4A3E), Color(0xFF2A4250), Color(0xFF45472B), Color(0xFF3A3A40),
+        Color(0xFF4A2A2A), Color(0xFF1F4446), Color(0xFF2F4228), Color(0xFF452F4A),
+    )
+    private val MonoInk = listOf(
+        Color(0xFFB9CBEA), Color(0xFFCDBDF0), Color(0xFFF0BCD3), Color(0xFFF0D2B0),
+        Color(0xFFB5E6CD), Color(0xFFADD6EA), Color(0xFFE2E3AE), Color(0xFFD2D2D8),
+        Color(0xFFF2B0AC), Color(0xFFA6E6E2), Color(0xFFBDE6A6), Color(0xFFE6B8EE),
+    )
+    fun monoTint(key: String): Pair<Color, Color> {
+        var h = 0x811C9DC5.toInt()
+        for (ch in key) { h = h xor ch.code; h *= 0x01000193 }
+        val i = (h ushr 1) % MonoTints.size
+        return MonoTints[i] to MonoInk[i]
+    }
 }

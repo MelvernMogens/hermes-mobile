@@ -1,6 +1,14 @@
 package id.melvern.hermesmobile.ui.overview
 
 import androidx.compose.foundation.background
+import id.melvern.hermesmobile.ui.theme.hairline
+import id.melvern.hermesmobile.ui.components.StatusPill
+import id.melvern.hermesmobile.ui.components.SectionHeader
+import id.melvern.hermesmobile.ui.components.Pretty
+import id.melvern.hermesmobile.ui.components.GroupSurface
+import id.melvern.hermesmobile.ui.components.GroupDivider
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,7 +94,10 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
     var bots by remember { mutableStateOf<List<BotCard>?>(null) }
     var usage by remember { mutableStateOf<UsageUi?>(null) }
     var usageLoaded by remember { mutableStateOf(false) }
+    var tokens by remember { mutableStateOf<id.melvern.hermesmobile.core.repo.InsightsRepo.Usage?>(null) }
     var refreshing by remember { mutableStateOf(false) }
+    // spinner HANYA untuk tarikan user — auto-refresh 20s diam (dulu spinner nempel di judul)
+    var userPull by remember { mutableStateOf(false) }
     var actionBot by remember { mutableStateOf<BotCard?>(null) }
     val connState by app.client?.state?.collectAsState()
         ?: remember { mutableStateOf(ConnState.CLOSED) }
@@ -98,8 +109,12 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
         scope.launch {
             try { bots = OverviewRepo(c).fetchBots() } catch (_: Throwable) { if (bots == null) bots = emptyList() }
             try { usage = OverviewRepo(c).usage() } catch (_: Throwable) { usage = UsageUi.UNAVAILABLE }
+            app.connection?.let { conn ->
+                id.melvern.hermesmobile.core.repo.InsightsRepo(conn).usage(app.profile.value)?.let { tokens = it }
+            }
             usageLoaded = true
             refreshing = false
+            userPull = false
         }
     }
 
@@ -124,54 +139,49 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
 
     val ptrState = rememberPullToRefreshState()
     PullToRefreshBox(
-        isRefreshing = refreshing,
-        onRefresh = { refresh() },
+        isRefreshing = userPull && refreshing,
+        onRefresh = { userPull = true; refresh() },
         state = ptrState,
         indicator = {
-            PullToRefreshDefaults.Indicator(state = ptrState, isRefreshing = refreshing)
+            PullToRefreshDefaults.Indicator(
+                state = ptrState, isRefreshing = userPull && refreshing,
+                containerColor = Ink.Raised, color = Ink.Text,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+            )
         },
         modifier = Modifier.fillMaxSize().background(Ink.Bg),
     ) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             OverviewHeader()
-            val content: @Composable (Modifier) -> Unit = { m ->
-                Column(m.verticalScroll(rememberScrollState())) {
-                    when (val b = bots) {
-                        null -> Column { repeat(5) { SkeletonSessionRow(shimmerAlpha()) } }
-                        else -> BotsSection(app, b, onOpen = { openBotChat(it) }, onLongPress = { actionBot = it })
+            val sections: @Composable () -> Unit = {
+                when (val b = bots) {
+                    null -> Column { repeat(5) { SkeletonSessionRow(shimmerAlpha()) } }
+                    else -> {
+                        SummaryStrip(b, tokens)
+                        BotsSection(app, b, onOpen = { openBotChat(it) }, onLongPress = { actionBot = it })
                     }
-                    UsageSection(usage, usageLoaded)
-                    Spacer(Modifier.height(72.dp))
                 }
             }
+            val usageBlock: @Composable () -> Unit = { UsageSection(usage, usageLoaded, tokens) }
             val winSize = currentWinSize()
             if (winSize.isExpanded) {
-                // Tablet/landscape lebar: Bots kiri + Usage kanan, max 900dp center.
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH),
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    Box(Modifier.widthIn(max = 470.dp).weight(1f, fill = false)) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            when (val b = bots) {
-                                null -> Column { repeat(5) { SkeletonSessionRow(shimmerAlpha()) } }
-                                else -> BotsSection(app, b, onOpen = { openBotChat(it) }, onLongPress = { actionBot = it })
-                            }
-                            Spacer(Modifier.height(72.dp))
-                        }
+                    Box(Modifier.widthIn(max = 480.dp).weight(1f, fill = false)) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) { sections(); Spacer(Modifier.height(72.dp)) }
                     }
-                    Spacer(Modifier.width(32.dp))
-                    Box(Modifier.widthIn(max = 430.dp).weight(1f, fill = false)) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            UsageSection(usage, usageLoaded)
-                            Spacer(Modifier.height(72.dp))
-                        }
+                    Spacer(Modifier.width(24.dp))
+                    Box(Modifier.widthIn(max = 420.dp).weight(1f, fill = false)) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) { usageBlock(); Spacer(Modifier.height(72.dp)) }
                     }
                 }
             } else {
-                // Compact/Medium: satu kolom scroll, max width 640 center.
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    content(Modifier.weight(1f, fill = false).widthIn(max = 640.dp))
+                    Column(Modifier.weight(1f, fill = false).widthIn(max = 640.dp).verticalScroll(rememberScrollState())) {
+                        sections(); usageBlock(); Spacer(Modifier.height(40.dp))
+                    }
                 }
             }
         }
@@ -188,12 +198,43 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
 
 @Composable
 private fun OverviewHeader() {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 4.dp, bottom = 8.dp)) {
-        Text("Overview", style = Type.Display)
-        Text(
-            SimpleDateFormat("EEEE, d MMMM", Locale.US).format(Date()),
-            style = Type.Meta.copy(color = Ink.Text2),
-        )
+    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 4.dp)) {
+        Text("Agents", style = Type.Display)
+    }
+}
+
+/** 3 angka yang gak diulang di bawah: token hari ini · 30 hari · jumlah agent. */
+@Composable
+private fun SummaryStrip(bots: List<BotCard>, tokens: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage?) {
+    val c = id.melvern.hermesmobile.core.repo.InsightsRepo
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Dim.GroupInset).padding(top = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Stat("Tokens today", tokens?.let { c.compact(it.todayTokens) } ?: "—", modifier = Modifier.weight(1f))
+        Stat("Tokens · 30d", tokens?.let { c.compact(it.totalTokens) } ?: "—", modifier = Modifier.weight(1f))
+        Stat("Agents", bots.size.toString(), modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun Stat(label: String, value: String, modifier: Modifier = Modifier, live: Boolean = false, unit: String? = null) {
+    Column(
+        modifier
+            .clip(Radius.Card)
+            .background(Ink.Surface1)
+            .border(hairline(), Ink.Hairline, Radius.Card)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (live) { PulsingDot(Ink.Live, size = 6.dp); Spacer(Modifier.width(6.dp)) }
+            Text(label, style = Type.Caption.copy(color = if (live) Ink.Live else Ink.Text3))
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(value, style = Type.Figure)
+            if (unit != null) Text(" $unit", style = Type.MonoMeta.copy(color = Ink.Text4), modifier = Modifier.padding(bottom = 4.dp))
+        }
     }
 }
 
@@ -207,26 +248,32 @@ private fun BotsSection(
     onOpen: (BotCard) -> Unit,
     onLongPress: (BotCard) -> Unit,
 ) {
-    Column {
-        SectionLabel("Bots")
-        if (bots.isEmpty()) {
-            Text(
-                "No profiles found",
-                style = androidx.compose.ui.text.TextStyle(color = Ink.Text3),
-                modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
-            )
-        }
-        bots.forEach { bot -> BotCardRow(app, bot, onOpen = { onOpen(bot) }, onLongPress = { onLongPress(bot) }) }
+    if (bots.isEmpty()) {
+        Text(
+            "No agents found",
+            style = Type.Callout.copy(color = Ink.Text3),
+            modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 24.dp),
+        )
+        return
     }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = Type.Meta.copy(color = Ink.Text2),
-        modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 8.dp),
-    )
+    val active = bots.filter { it.status == BotStatus.RUNNING }
+    val rest = bots.filter { it.status != BotStatus.RUNNING }
+    if (active.isNotEmpty()) {
+        SectionHeader("Working now", trailing = active.size.toString())
+        GroupSurface {
+            active.forEachIndexed { i, b ->
+                BotCardRow(app, b, onOpen = { onOpen(b) }, onLongPress = { onLongPress(b) })
+                if (i < active.lastIndex) GroupDivider(Dim.GroupPadH + Dim.AvatarSheet + 12.dp)
+            }
+        }
+    }
+    SectionHeader(if (active.isEmpty()) "All agents" else "Idle", trailing = rest.size.toString())
+    GroupSurface {
+        rest.forEachIndexed { i, b ->
+            BotCardRow(app, b, onOpen = { onOpen(b) }, onLongPress = { onLongPress(b) })
+            if (i < rest.lastIndex) GroupDivider(Dim.GroupPadH + Dim.AvatarSheet + 12.dp)
+        }
+    }
 }
 
 @androidx.compose.foundation.ExperimentalFoundationApi
@@ -237,52 +284,86 @@ private fun BotCardRow(
     onOpen: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
-                .heightIn(min = 64.dp)
-                .padding(horizontal = Dim.ScreenH, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ProfileAvatar(app, bot.name, Dim.AvatarSheet)
-            Spacer(Modifier.width(Dim.RowGap))
-            Column(Modifier.weight(1f)) {
-                OneLine(bot.label, Type.Title)
-                bot.model?.let {
-                    Spacer(Modifier.height(2.dp))
-                    OneLine(it, Type.Meta)
-                }
-            }
-            when (bot.status) {
-                BotStatus.RUNNING -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    PulsingDot(Ink.Live)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Running", style = Type.Meta.copy(color = Ink.Live))
-                }
-                BotStatus.IDLE -> Text("Idle", style = Type.Meta.copy(color = Ink.Text2))
-                BotStatus.OFFLINE -> Text("—", style = Type.Meta.copy(color = Ink.Text3))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
+            .heightIn(min = 64.dp)
+            .padding(horizontal = Dim.GroupPadH, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProfileAvatar(app, bot.name, Dim.AvatarSheet)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            OneLine(Pretty.profile(bot.label), Type.RowTitle)
+            bot.model?.let {
+                Spacer(Modifier.height(2.dp))
+                OneLine(Pretty.model(it), Type.Meta.copy(color = Ink.Text3))
             }
         }
-        Hairline(Modifier.align(Alignment.BottomStart))
+        when (bot.status) {
+            BotStatus.RUNNING -> StatusPill("Running", live = true)
+            BotStatus.IDLE -> StatusPill("Idle", live = false)
+            BotStatus.OFFLINE -> {}
+        }
     }
 }
 
 // ── Section Usage ───────────────────────────────────────────────────
 
 @Composable
-private fun UsageSection(usage: UsageUi?, loaded: Boolean) {
-    Column(Modifier.padding(top = 16.dp)) {
-        SectionLabel("Usage")
+private fun UsageSection(usage: UsageUi?, loaded: Boolean, tokens: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage?) {
+    Column {
         when {
-            !loaded && usage == null -> SkeletonUsageCard(shimmerAlpha())
-            usage?.available == true -> UsageCard(usage)
-            else -> Text(
-                "Usage data unavailable",
-                style = Type.Meta.copy(color = Ink.Text3),
-                modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
-            )
+            usage?.available == true -> {
+                SectionHeader("Billing")
+                UsageCard(usage)
+            }
+            tokens != null && tokens.providers.isNotEmpty() -> {
+                SectionHeader("Usage", trailing = "last ${tokens.days} days")
+                TokenCard(tokens)
+            }
+            !loaded -> { SectionHeader("Usage"); SkeletonUsageCard(shimmerAlpha()) }
+            else -> {}
+        }
+    }
+}
+
+/** Token per provider: angka total besar + bar proporsi (bukan dolar — key-based accounts). */
+@Composable
+private fun TokenCard(u: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage) {
+    val total = u.totalTokens.coerceAtLeast(1)
+    GroupSurface {
+        Column(Modifier.padding(horizontal = Dim.GroupPadH, vertical = 16.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(u.totalTokens), style = Type.Figure)
+                Text(" tokens", style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.padding(bottom = 4.dp))
+                Spacer(Modifier.weight(1f))
+                Text("${u.totalSessions} chats", style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.padding(bottom = 4.dp))
+            }
+            Spacer(Modifier.height(14.dp))
+            // bar tersegmen: tiap provider satu segmen, abu bertingkat (warna = status saja)
+            val shades = listOf(Ink.Text, Ink.Text2, Ink.Text3, Ink.Text4, Ink.HairlineStrong)
+            Row(Modifier.fillMaxWidth().height(8.dp).clip(Radius.Full).background(Ink.Surface3)) {
+                u.providers.forEachIndexed { i, p ->
+                    val f = p.tokens.toFloat() / total
+                    if (f > 0.004f) Box(Modifier.weight(f).fillMaxSize().background(shades[i.coerceAtMost(shades.lastIndex)]))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            u.providers.forEachIndexed { i, p ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(Radius.Full).background(shades[i.coerceAtMost(shades.lastIndex)]))
+                    Spacer(Modifier.width(10.dp))
+                    Text(id.melvern.hermesmobile.core.repo.InsightsRepo.providerName(p.provider), style = Type.Callout, modifier = Modifier.weight(1f))
+                    Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(p.tokens), style = Type.FigureSmall)
+                    Text(
+                        String.format(java.util.Locale.US, "%3d%%", (p.tokens * 100 / total).toInt()),
+                        style = Type.MonoMeta.copy(color = Ink.Text4),
+                        modifier = Modifier.widthIn(min = 44.dp).padding(start = 10.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -291,11 +372,11 @@ private fun UsageSection(usage: UsageUi?, loaded: Boolean) {
 private fun SkeletonUsageCard(alpha: Float) {
     Column(
         Modifier
-            .padding(horizontal = Dim.ScreenH)
+            .padding(horizontal = Dim.GroupInset)
             .fillMaxWidth()
-            .clip(Radius.Card)
+            .clip(Radius.Group)
             .background(Ink.Surface1)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
         SkeletonBar(120.dp, 20.dp, alpha)
         Spacer(Modifier.height(10.dp))
@@ -307,11 +388,12 @@ private fun SkeletonUsageCard(alpha: Float) {
 private fun UsageCard(u: UsageUi) {
     Column(
         Modifier
-            .padding(horizontal = Dim.ScreenH)
+            .padding(horizontal = Dim.GroupInset)
             .fillMaxWidth()
-            .clip(Radius.Card)
+            .clip(Radius.Group)
             .background(Ink.Surface1)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .border(hairline(), Ink.Hairline, Radius.Group)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
         u.plan?.let { bar ->
             UsageBarBlock(bar, big = true)
@@ -393,7 +475,7 @@ private fun BotActionSheet(
         // Uri.encode — konsisten dengan decoder MainActivity (Uri.decode).
         "${bot.botChatStoredId}|t=${Uri.encode("Bot Chat")}"
 
-    QuietSheet(onDismiss = onDismiss, title = bot.label) {
+    QuietSheet(onDismiss = onDismiss, title = Pretty.profile(bot.label)) {
         notice?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
         }

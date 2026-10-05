@@ -77,6 +77,7 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onCreate() {
         super.onCreate()
+        id.melvern.hermesmobile.ui.components.RelTime.use24h = android.text.format.DateFormat.is24HourFormat(this)
         notifier = AppNotifier(this)
         registerActivityLifecycleCallbacks(this)
         appScope.launch {

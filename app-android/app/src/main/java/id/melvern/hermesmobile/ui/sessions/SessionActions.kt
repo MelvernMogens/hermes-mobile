@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.CallSplit
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Text
@@ -52,6 +53,9 @@ fun SessionActionSheet(
     onOpenBranch: (String, String) -> Unit,
     hidden: Boolean = false,
     onDeleted: () -> Unit = onDone,
+    /** null = sembunyikan aksi pin (mis. dari menu chat). */
+    pinned: Boolean? = null,
+    onTogglePin: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -137,6 +141,9 @@ fun SessionActionSheet(
                 }
             }
             else -> {
+                if (pinned != null) SheetActionRow(if (pinned) "Unpin" else "Pin to top", Icons.Rounded.PushPin, enabled = !busy) {
+                    onTogglePin(); onDismiss()
+                }
                 SheetActionRow("Rename", Icons.Rounded.DriveFileRenameOutline, enabled = !busy) { renaming = true }
                 SheetActionRow("New branch", Icons.AutoMirrored.Rounded.CallSplit, enabled = !busy) {
                     run(after = {}) {

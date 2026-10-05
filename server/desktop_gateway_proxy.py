@@ -34,6 +34,9 @@ import aiohttp
 from aiohttp import web
 import yarl
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mobile_insights  # noqa: E402  (sibling module, read-only state.db queries)
+
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
 DESKTOP_HINT_PORT = int(os.environ.get("HERMES_DESKTOP_PORT_HINT", "0") or 0)
@@ -216,6 +219,32 @@ async def handle_mobile_media(request: web.Request) -> web.Response:
     return web.json_response({"data_url": f"data:{mime};base64," + base64.b64encode(data).decode()})
 
 
+async def handle_mobile_last(request: web.Request) -> web.Response:
+    """GET /api/mobile-last?profile=<p>&ids=a,b,c → {"last": {id: {role,text,at}}}.
+    Last human-visible message per session (session.list preview = first prompt)."""
+    session: aiohttp.ClientSession = request.app["client"]
+    if not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    db = mobile_insights.state_db(request.query.get("profile"))
+    if db is None:
+        return web.json_response({"detail": "unknown profile"}, status=404)
+    ids = [i for i in request.query.get("ids", "").split(",") if i]
+    last = await asyncio.get_running_loop().run_in_executor(None, mobile_insights.last_messages, db, ids)
+    return web.json_response({"last": last})
+
+
+async def handle_mobile_usage(request: web.Request) -> web.Response:
+    """GET /api/mobile-usage?profile=<p> → token usage by provider (last 30 days)."""
+    session: aiohttp.ClientSession = request.app["client"]
+    if not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    db = mobile_insights.state_db(request.query.get("profile"))
+    if db is None:
+        return web.json_response({"available": False})
+    data = await asyncio.get_running_loop().run_in_executor(None, mobile_insights.usage_summary, db)
+    return web.json_response(data)
+
+
 async def handle_desktop_port(request: web.Request) -> web.Response:
     port, pid = await asyncio.get_running_loop().run_in_executor(None, _desktop_alive)
     if port == 0 and DESKTOP_HINT_PORT:
@@ -354,6 +383,8 @@ def main() -> None:
     app = web.Application()
     app.router.add_get("/api/desktop-port", handle_desktop_port)
     app.router.add_get("/api/mobile-media", handle_mobile_media)
+    app.router.add_get("/api/mobile-last", handle_mobile_last)
+    app.router.add_get("/api/mobile-usage", handle_mobile_usage)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
     app.on_startup.append(on_startup)

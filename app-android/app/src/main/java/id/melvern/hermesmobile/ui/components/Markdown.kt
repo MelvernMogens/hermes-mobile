@@ -77,7 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
-import id.melvern.hermesmobile.ui.theme.JetBrainsMono
+import id.melvern.hermesmobile.ui.theme.MonoFamily
 import id.melvern.hermesmobile.ui.theme.Radius
 import id.melvern.hermesmobile.ui.theme.Type
 import id.melvern.hermesmobile.ui.theme.hairline
@@ -406,7 +406,7 @@ fun openUrlExternal(context: Context, url: String) {
     }
 }
 
-private val BlockGap = 12.dp
+private val BlockGap = 14.dp
 private val ListIndent = 20.dp
 /** M9 (item 5): indent per level bullet nested — 16dp (brief). */
 private val NestIndent = 16.dp
@@ -445,16 +445,21 @@ fun MarkdownText(
                 )
                 is MdBlock.Heading -> InlineAwareText(
                     buildMd(block.spans, context),
-                    style = Type.Title,
+                    style = when (block.level) { 1 -> Type.Headline; 2 -> Type.Title; else -> Type.RowTitle.copy(fontWeight = FontWeight.SemiBold) },
                     spans = block.spans, actions = actions,
-                    modifier = gap.then(if (idx > 0) Modifier.padding(top = 8.dp) else Modifier),
+                    modifier = Modifier
+                        .padding(bottom = 6.dp)
+                        .then(if (idx > 0) Modifier.padding(top = 10.dp) else Modifier),
                 )
                 is MdBlock.CodeBlock -> CodeBox(block.lang, block.code, modifier = gap)
                 is MdBlock.BulletList -> Column(gap) {
                     block.items.forEachIndexed { n, (raw, level) ->
-                        Row(Modifier.padding(top = if (n == 0) 0.dp else 4.dp)) {
+                        Row(Modifier.padding(top = if (n == 0) 0.dp else 8.dp)) {
                             Box(Modifier.padding(start = NestIndent * level).width(ListIndent).height(with(LocalDensity.current) { style.lineHeight.toDp() }), contentAlignment = Alignment.CenterStart) {
-                                Box(Modifier.padding(start = 6.dp).size(if (level > 0) 4.dp else 5.dp).clip(Radius.Full).background(Ink.Text2))
+                                Box(
+                                    Modifier.padding(start = 4.dp).size(if (level > 0) 4.dp else 5.dp).clip(Radius.Full)
+                                        .then(if (level > 0) Modifier.border(1.dp, Ink.Text3, Radius.Full) else Modifier.background(Ink.Text2))
+                                )
                             }
                             val item = remember(raw) { MarkdownParser.parseInline(raw) }
                             InlineAwareText(buildMd(item, context), style = style, spans = item, actions = actions, modifier = Modifier.weight(1f))
@@ -463,8 +468,8 @@ fun MarkdownText(
                 }
                 is MdBlock.NumberList -> Column(gap) {
                     block.items.forEachIndexed { n, item ->
-                        Row(Modifier.padding(top = if (n == 0) 0.dp else 4.dp)) {
-                            Text("${n + 1}.", style = style.copy(color = Ink.Text2), modifier = Modifier.widthIn(min = ListIndent).padding(end = 4.dp))
+                        Row(Modifier.padding(top = if (n == 0) 0.dp else 8.dp)) {
+                            Text("${n + 1}.", style = style.copy(color = Ink.Text3, fontFamily = MonoFamily, fontSize = Type.InlineMonoSize), modifier = Modifier.widthIn(min = ListIndent + 4.dp).padding(end = 4.dp))
                             InlineAwareText(buildMd(item, context), style = style, spans = item, actions = actions, modifier = Modifier.weight(1f))
                         }
                     }
@@ -519,16 +524,15 @@ fun CodeBox(lang: String, code: String, modifier: Modifier = Modifier) {
     Column(
         modifier
             .fillMaxWidth()
-            .clip(Radius.Chip)
+            .clip(Radius.Card)
             .background(Ink.Surface1)
-            .border(hl, Ink.Hairline, Radius.Chip),
+            .border(hl, Ink.Hairline, Radius.Card),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(Dim.CodeHeader)
-                .background(Ink.Surface3)
-                .padding(start = 12.dp),
+                .padding(start = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(lang.ifBlank { "text" }.lowercase(), style = Type.MonoMeta, modifier = Modifier.weight(1f), maxLines = 1)
@@ -550,6 +554,7 @@ fun CodeBox(lang: String, code: String, modifier: Modifier = Modifier) {
                 )
             }
         }
+        HorizontalDivider(thickness = hl, color = Ink.Hairline)
         SelectionContainer {
             Text(
                 code,
@@ -557,7 +562,7 @@ fun CodeBox(lang: String, code: String, modifier: Modifier = Modifier) {
                 softWrap = false,
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
-                    .padding(12.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
             )
         }
     }
@@ -575,8 +580,8 @@ private fun buildMd(spans: List<MdSpan>, context: Context): AnnotatedString = bu
             is MdSpan.Bold -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(span.text) }
             is MdSpan.Italic -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(span.text) }
             is MdSpan.InlineCode -> withStyle(
-                SpanStyle(fontFamily = JetBrainsMono, fontSize = Type.InlineMonoSize, color = Ink.Text)
-            ) { append(" ${span.text} ") }
+                SpanStyle(fontFamily = MonoFamily, fontSize = Type.InlineMonoSize, color = Ink.Text)
+            ) { append("\u00A0${span.text}\u00A0") }
             is MdSpan.Link -> withLink(
                 LinkAnnotation.Clickable(
                     tag = span.url,
@@ -939,7 +944,7 @@ private fun InlineAwareText(
     // M5 fix: lambda pointerInput(Unit) harus baca versi terbaru (streaming).
     val currentAnnotated by rememberUpdatedState(annotated)
     val currentHits by rememberUpdatedState(hitRanges)
-    val codeBg = Ink.Surface2
+    val codeBg = Ink.Surface3
     Text(
         annotated,
         style = style,
@@ -956,15 +961,21 @@ private fun InlineAwareText(
                     if (endEx <= start) return@forEach
                     val firstLine = l.getLineForOffset(start)
                     val lastLine = l.getLineForOffset(endEx - 1)
+                    val wrapPad = 3.dp.toPx()     // padding di sisi yang ke-wrap
+                    val minSeg = 6.dp.toPx()      // segmen lebih tipis = artefak wrap → skip
                     for (line in firstLine..lastLine) {
-                        val s = if (line == firstLine) l.getHorizontalPosition(start, true) else l.getLineLeft(line)
-                        val e = if (line == lastLine) l.getHorizontalPosition(endEx, true) else l.getLineRight(line)
-                        val top = l.getLineTop(line) + 2.dp.toPx()
-                        val bottom = l.getLineBottom(line) - 2.dp.toPx()
+                        val s0 = if (line == firstLine) l.getHorizontalPosition(start, true) else l.getLineLeft(line) - wrapPad
+                        val e0 = if (line == lastLine) l.getHorizontalPosition(endEx, true) else l.getLineRight(line) + wrapPad
+                        val left = minOf(s0, e0) + (if (line == firstLine) inset else 0f)
+                        val right = maxOf(s0, e0) - (if (line == lastLine) inset else 0f)
+                        if (right - left < minSeg) continue
+                        // tinggi chip = tinggi glyph (bukan line box 24sp) → gak nempel baris atas/bawah
+                        val mid = (l.getLineTop(line) + l.getLineBottom(line)) / 2f
+                        val half = 10.dp.toPx()
                         drawRoundRect(
                             color = codeBg,
-                            topLeft = Offset(minOf(s, e) + inset, top),
-                            size = Size((kotlin.math.abs(e - s) - inset * 2).coerceAtLeast(0f), bottom - top),
+                            topLeft = Offset(left, mid - half),
+                            size = Size(right - left, half * 2),
                             cornerRadius = CornerRadius(r, r),
                         )
                     }

@@ -8,62 +8,66 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** M8: grid 4dp. Semua ukuran komponen di sini — screen tidak pakai angka ajaib. */
+/** Grid 4dp. Semua ukuran komponen di sini — screen tidak pakai angka ajaib. */
 object Dim {
-    val ScreenH = 16.dp          // margin horizontal layar
+    val ScreenH = 20.dp          // margin horizontal layar (lebih lega = lebih mahal)
+    val GroupInset = 12.dp       // margin grouped surface (kartu list) ke tepi layar
+    val GroupPadH = 14.dp        // padding isi di dalam grouped surface
     val Icon = 22.dp             // ikon standar
-    val IconSmall = 16.dp        // ikon di baris tool / model chevron
+    val IconSmall = 16.dp        // ikon di baris tool / chevron
     val IconTiny = 12.dp         // ikon status di bubble (Schedule)
     val Touch = 48.dp            // touch target minimum
     val TopBar = 56.dp
     val Dot = 8.dp               // dot status semantik
 
     val AvatarBar = 32.dp        // avatar di top bar
-    val AvatarRow = 44.dp        // avatar row session
-    val AvatarSheet = 40.dp      // avatar row profile sheet
-    val AvatarEmpty = 56.dp      // avatar empty chat
+    val AvatarRow = 48.dp        // avatar row session
+    val AvatarSheet = 40.dp      // avatar row profile sheet / bot
+    val AvatarEmpty = 72.dp      // avatar empty chat
     val RunningRing = 2.dp
 
-    val RowMin = 72.dp           // row session
-    val RowGap = 12.dp           // avatar ↔ teks
-    val SheetRow = 64.dp
+    val RowMin = 76.dp           // row session
+    val RowGap = 14.dp           // avatar ↔ teks
+    val SheetRow = 60.dp
     val ActionRow = 52.dp
 
-    // M15: adaptive tablet — list-detail two-pane (Expanded width).
-    val PaneListW = 340.dp       // lebar fixed sessions pane
-    val ChatMaxW = 640.dp        // max lebar konten chat (gaya Discord)
-    val BubbleMaxW = 560.dp      // max lebar bubble user
-    val SheetMaxW = 480.dp       // max lebar sheet di expanded (center)
-    val ArtifactSheetW = 380.dp  // side sheet artifacts
+    // adaptive tablet — list-detail two-pane (Expanded width).
+    val PaneListW = 360.dp
+    val ChatMaxW = 680.dp
+    val BubbleMaxW = 560.dp
+    val SheetMaxW = 480.dp
+    val ArtifactSheetW = 380.dp
 
     val ComposerMin = 44.dp
     val SendButton = 36.dp
-    val ScrollFab = 36.dp
-    val CodeHeader = 32.dp
-    val ToolRow = 32.dp
-    val BannerH = 36.dp
+    val ScrollFab = 40.dp
+    val CodeHeader = 34.dp
+    val ToolRow = 30.dp
+    val BannerH = 40.dp
     val FieldH = 56.dp
-    val ButtonH = 50.dp
+    val ButtonH = 52.dp
     val Thumb = 40.dp
     val ConnectMaxW = 420.dp
-    val LogoConnect = 56.dp
+    val LogoConnect = 64.dp
     val EmptyIcon = 48.dp
+    val NavBar = 64.dp
 
     /** Inset divider session = margin + avatar + gap (sejajar teks, gaya iOS/WA). */
     val RowDividerInset: Dp = ScreenH + AvatarRow + RowGap
 }
 
-/** Radius M8: 10 chip/code, 18 bubble/composer, 22 sheet top, full avatar/send. */
+/** Radius: 8 inline/thumb · 12 chip/code · 16 card/group · 20 bubble/composer · 24 sheet. */
 object Radius {
-    val Inline = RoundedCornerShape(6.dp)    // inline code
-    val Thumb = RoundedCornerShape(8.dp)     // thumbnail attachment
-    val Chip = RoundedCornerShape(10.dp)     // chip, code block
-    val Field = RoundedCornerShape(12.dp)    // field Connect, tombol Connect
-    val Card = RoundedCornerShape(14.dp)     // approval / clarify card
-    val Bubble = RoundedCornerShape(18.dp)
+    val Inline = RoundedCornerShape(6.dp)
+    val Thumb = RoundedCornerShape(8.dp)
+    val Chip = RoundedCornerShape(10.dp)
+    val Field = RoundedCornerShape(14.dp)
+    val Card = RoundedCornerShape(16.dp)
+    val Group = RoundedCornerShape(18.dp)
+    val Bubble = RoundedCornerShape(20.dp)
     /** Bubble user: sudut kanan-bawah 6 (ekor). */
-    val BubbleUser = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 6.dp, bottomStart = 18.dp)
-    val Sheet = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+    val BubbleUser = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = 6.dp, bottomStart = 20.dp)
+    val Sheet = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     val Full = CircleShape
 }
 

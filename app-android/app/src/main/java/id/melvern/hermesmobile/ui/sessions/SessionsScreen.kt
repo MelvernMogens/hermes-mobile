@@ -19,7 +19,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.outlined.AddComment
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,6 +48,10 @@ import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.core.rpc.GatewayInbound
 import id.melvern.hermesmobile.core.store.SettingsStore
 import id.melvern.hermesmobile.ui.components.Hairline
+import id.melvern.hermesmobile.ui.components.MonogramAvatar
+import id.melvern.hermesmobile.ui.components.Pretty
+import id.melvern.hermesmobile.ui.components.PulsingDot
+import id.melvern.hermesmobile.ui.components.SectionHeader
 import id.melvern.hermesmobile.ui.components.OneLine
 import id.melvern.hermesmobile.ui.components.ProfileAvatar
 import id.melvern.hermesmobile.ui.components.QuietIconButton
@@ -75,6 +82,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: String? = null) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     // M15: adaptive — two-pane HANYA Expanded width (>=840dp); Compact/Medium
     // perilaku lama (nav ke ChatScreen). Selection di level screen ini, bukan
     // navigasi — rememberSaveable supaya selamat rotate (dan Compact↔Expanded
@@ -106,11 +114,15 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
     var showHiddenLoaded by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    // Pesan terakhir asli per session (proxy /api/mobile-last) — session.list
+    // preview = prompt PERTAMA, jadi tanpa ini home selalu nunjukin chat lama.
+    var lastMsgs by remember { mutableStateOf<Map<String, id.melvern.hermesmobile.core.repo.InsightsRepo.Last>>(emptyMap()) }
+    var pinned by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(Unit) { pinned = SettingsStore.loadPinned(ctx) }
     var creating by remember { mutableStateOf(false) }
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
     val profile by app.profile.collectAsState()
-    val ctx = LocalContext.current
 
     fun refresh() {
         val c = app.client ?: return
@@ -131,6 +143,10 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
             } catch (_: Throwable) {}
             try { active = SessionRepo(c, profile).activeStoredIds() } catch (_: Throwable) {}
             loading = false
+            app.connection?.let { conn ->
+                val ids = sessions.map { it.id }
+                id.melvern.hermesmobile.core.repo.InsightsRepo(conn).lastMessages(profile, ids)?.let { lastMsgs = it }
+            }
         }
     }
 
@@ -218,8 +234,11 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         val q = query.trim()
         if (q.isEmpty()) sessions else sessions.filter { it.displayTitle.contains(q, ignoreCase = true) }
     }
-    val visibleRows = filtered.filterNot { it.id in hiddenIds }
-    val hiddenRows = filtered.filter { it.id in hiddenIds }
+    fun lastAt(r: SessionRow): Double = lastMsgs[r.id]?.at ?: r.updatedAt ?: r.startedAt ?: 0.0
+    val visibleAll = filtered.filterNot { it.id in hiddenIds }
+    val pinnedRows = visibleAll.filter { it.id in pinned }.sortedByDescending { lastAt(it) }
+    val visibleRows = visibleAll.filterNot { it.id in pinned }.sortedByDescending { lastAt(it) }
+    val hiddenRows = filtered.filter { it.id in hiddenIds }.sortedByDescending { lastAt(it) }
 
 
     // M15: isi sessions pane — dipakai Compact (full width + status bar) dan
@@ -238,24 +257,25 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 Row(
                     Modifier
                         .align(Alignment.CenterStart)
-                        .padding(start = 8.dp)
+                        .padding(start = Dim.ScreenH - 8.dp)
                         .clip(Radius.Full)
                         .pressClickable { profileSheet = true }
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AvatarWithStatus(app, profile, connState)
-                    Spacer(Modifier.width(8.dp))
-                    OneLine(profile, Type.MetaMedium)
+                    Spacer(Modifier.width(10.dp))
+                    OneLine(Pretty.profile(profile), Type.MetaMedium.copy(color = Ink.Text))
+                    Icon(Icons.Rounded.UnfoldMore, "Switch profile", tint = Ink.Text3, modifier = Modifier.padding(start = 2.dp).size(16.dp))
                 }
                 Text(
                     "Chats",
                     style = Type.Title,
                     modifier = Modifier.align(Alignment.Center).graphicsLayer { alpha = smallTitleAlpha },
                 )
-                Row(Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)) {
-                    QuietIconButton(Icons.Rounded.Search, "Search chats", onClick = { searching = true })
-                    QuietIconButton(Icons.Rounded.Edit, "New chat", onClick = { newChat() }, enabled = !creating)
+                Row(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
+                    QuietIconButton(Icons.Outlined.Search, "Search chats", onClick = { searching = true })
+                    QuietIconButton(Icons.Outlined.AddComment, "New chat", onClick = { newChat() }, enabled = !creating)
                 }
             }
         }
@@ -315,31 +335,32 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 contentPadding = WindowInsets.navigationBars.asPaddingValues(),
             ) {
                 if (!searching) item(key = "title") { LargeTitle(problem, onRetry = { app.client?.start() }) }
-                items(visibleRows, key = { it.id }) { s ->
-                    SessionRowView(
-                        app, s,
-                        running = s.id in active || s.running == true,
-                        onClick = { openChat("${s.id}|t=${Uri.encode(s.displayTitle)}") },
-                        onLongPress = { actionTarget = s },
-                    )
-                }
-                if (hiddenRows.isNotEmpty()) {
-                    item(key = "hidden-header") {
-                        Text(
-                            "Hidden",
-                            style = Type.MetaMedium,
-                            modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 20.dp, bottom = 6.dp),
-                        )
-                    }
-                    items(hiddenRows, key = { "h-" + it.id }) { s ->
+                fun rowItem(s: SessionRow, keyPrefix: String, last: Boolean) {
+                    item(key = keyPrefix + s.id) {
                         SessionRowView(
                             app, s,
                             running = s.id in active || s.running == true,
+                            pinned = s.id in pinned,
+                            last = lastMsgs[s.id],
+                            stamp = lastAt(s),
+                            divider = !last,
                             onClick = { openChat("${s.id}|t=${Uri.encode(s.displayTitle)}") },
                             onLongPress = { actionTarget = s },
                         )
                     }
                 }
+                if (pinnedRows.isNotEmpty() && !searching) {
+                    item(key = "pinned-header") { SectionHeader("Pinned") }
+                    pinnedRows.forEachIndexed { i, s -> rowItem(s, "p-", i == pinnedRows.lastIndex) }
+                    if (visibleRows.isNotEmpty()) item(key = "all-header") { SectionHeader("All chats") }
+                }
+                visibleRows.forEachIndexed { i, s -> rowItem(s, "", i == visibleRows.lastIndex) }
+                if (searching) pinnedRows.forEachIndexed { i, s -> rowItem(s, "ps-", i == pinnedRows.lastIndex) }
+                if (hiddenRows.isNotEmpty()) {
+                    item(key = "hidden-header") { SectionHeader("Hidden", trailing = hiddenRows.size.toString()) }
+                    hiddenRows.forEachIndexed { i, s -> rowItem(s, "h-", i == hiddenRows.lastIndex) }
+                }
+                item(key = "end-space") { Spacer(Modifier.height(24.dp)) }
                 if (searching && filtered.isEmpty()) item(key = "no-results") {
                     Text(
                         "No chats match \"${query.trim()}\"",
@@ -402,6 +423,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
             app = app,
             row = target,
             hidden = target.id in hiddenIds,
+            pinned = target.id in pinned,
+            onTogglePin = { scope.launch { pinned = SettingsStore.togglePinned(ctx, target.id) } },
             onDone = {
                 actionTarget = null
                 // Review M15 M4: chat yang sedang terpilih dihapus dari list →
@@ -443,7 +466,7 @@ private fun SelectAChatPane() {
 /** Large title "Chats" (display 28) + subtitle kecil HANYA kalau ada masalah koneksi. */
 @Composable
 private fun LargeTitle(problem: String?, onRetry: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 4.dp, bottom = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 6.dp)) {
         Text("Chats", style = Type.Display)
         if (problem != null) {
             Row(
@@ -465,13 +488,13 @@ private fun LargeTitle(problem: String?, onRetry: () -> Unit) {
 @Composable
 private fun AvatarWithStatus(app: HermesApp, profile: String, state: ConnState) {
     val dot = when (state) {
-        ConnState.OPEN -> Ink.Live
+        ConnState.OPEN -> null   // online = default diam; dot hanya untuk masalah
         ConnState.CLOSED -> Ink.Danger
         else -> Ink.Warn
     }
     Box {
         ProfileAvatar(app, profile, Dim.AvatarBar)
-        Box(
+        if (dot != null) Box(
             Modifier
                 .align(Alignment.BottomEnd)
                 .offset(x = 2.dp, y = 2.dp)
@@ -479,7 +502,7 @@ private fun AvatarWithStatus(app: HermesApp, profile: String, state: ConnState) 
                 .clip(Radius.Full)
                 .background(Ink.Bg),
             contentAlignment = Alignment.Center,
-        ) { StatusDot(dot) }
+        ) { StatusDot(dot!!) }
     }
 }
 
@@ -533,16 +556,23 @@ private fun EmptyChats(modifier: Modifier) {
         Spacer(Modifier.height(16.dp))
         Text("No chats yet", style = Type.Title)
         Spacer(Modifier.height(4.dp))
-        Text("Start one from the pencil icon", style = Type.Callout.copy(color = Ink.Text2), textAlign = TextAlign.Center)
+        Text("Tap the new-chat icon to start one", style = Type.Callout.copy(color = Ink.Text2), textAlign = TextAlign.Center)
         Spacer(Modifier.height(64.dp)) // optik: sedikit di atas tengah
     }
 }
 
-/** Baris ke-2: preview pesan terakhir; kalau kosong/sama dengan judul → "Desktop · 509 messages". */
-internal fun secondLine(s: SessionRow): String {
-    val preview = s.preview?.replace('\n', ' ')?.trim().orEmpty()
+/**
+ * Baris ke-2: pesan TERAKHIR (proxy) dengan prefix "You: " kalau dari user;
+ * fallback ke preview RPC (prompt pertama) → "Desktop · 509 messages".
+ */
+internal fun secondLine(s: SessionRow, last: id.melvern.hermesmobile.core.repo.InsightsRepo.Last? = null): String {
+    if (last != null && last.text.isNotBlank()) {
+        val t = Pretty.preview(last.text)
+        return if (last.role == "user") "You: $t" else t
+    }
+    val preview = Pretty.preview(s.preview)
     val title = s.displayTitle.removeSuffix("…").trim()
-    val usable = preview.isNotEmpty() && !preview.startsWith(title)
+    val usable = preview.isNotEmpty() && !preview.startsWith(title) && preview.lowercase() != "new project"
     if (usable) return preview
     val n = s.messageCount
     return "${s.sourceLabel} · $n ${if (n == 1) "message" else "messages"}"
@@ -554,6 +584,10 @@ private fun SessionRowView(
     app: HermesApp,
     s: SessionRow,
     running: Boolean,
+    pinned: Boolean,
+    last: id.melvern.hermesmobile.core.repo.InsightsRepo.Last?,
+    stamp: Double,
+    divider: Boolean,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -566,36 +600,44 @@ private fun SessionRowView(
                 .padding(horizontal = Dim.ScreenH, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // avatar 44 — ring 2dp live kalau running
-            Box(
-                Modifier
-                    .size(Dim.AvatarRow)
-                    .then(if (running) Modifier.border(Dim.RunningRing, Ink.Live, Radius.Full) else Modifier),
-                contentAlignment = Alignment.Center,
-            ) {
-                ProfileAvatar(
-                    app, s.profile?.takeIf { it.isNotBlank() } ?: app.profile.value,
-                    if (running) Dim.AvatarRow - 8.dp else Dim.AvatarRow,
-                )
+            // monogram per chat (identitas), bot avatar kecil di pojok kalau bukan profile aktif
+            Box(Modifier.size(Dim.AvatarRow)) {
+                MonogramAvatar(s.id, s.displayTitle, Dim.AvatarRow)
+                if (running) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 2.dp, y = 2.dp)
+                            .size(16.dp)
+                            .clip(Radius.Full)
+                            .background(Ink.Bg),
+                        contentAlignment = Alignment.Center,
+                    ) { PulsingDot(Ink.Live, size = 10.dp) }
+                }
             }
             Spacer(Modifier.width(Dim.RowGap))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OneLine(s.displayTitle, Type.Title, Modifier.weight(1f))
-                    Spacer(Modifier.width(8.dp))
-                    Text(RelTime.listStamp(s.updatedAt ?: s.startedAt), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1)
-                }
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OneLine(secondLine(s), Type.Callout.copy(color = Ink.Text2), Modifier.weight(1f))
-                    if (running) {
-                        Spacer(Modifier.width(8.dp))
-                        Text("Running", style = Type.Meta.copy(color = Ink.Live), maxLines = 1)
+                    OneLine(s.displayTitle, Type.RowTitle, Modifier.weight(1f))
+                    Spacer(Modifier.width(10.dp))
+                    if (pinned) {
+                        Icon(Icons.Rounded.PushPin, "Pinned", tint = Ink.Text4, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(6.dp))
                     }
+                    Text(
+                        if (running) "now" else RelTime.listStamp(stamp.takeIf { it > 0 }),
+                        style = Type.Caption,
+                        maxLines = 1,
+                    )
                 }
+                Spacer(Modifier.height(3.dp))
+                OneLine(
+                    if (running) "Working…" else secondLine(s, last),
+                    Type.Preview.copy(color = if (running) Ink.Text2 else Ink.Text3),
+                )
             }
         }
-        Hairline(Modifier.align(Alignment.BottomStart).padding(start = Dim.RowDividerInset))
+        if (divider) Hairline(Modifier.align(Alignment.BottomStart).padding(start = Dim.RowDividerInset, end = Dim.ScreenH))
     }
 }
 

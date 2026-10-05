@@ -46,4 +46,20 @@ object SettingsStore {
     suspend fun saveShowHidden(context: Context, value: Boolean) {
         context.dataStore.edit { it[KEY_SHOW_HIDDEN] = value }
     }
+
+    // Pinned chats — lokal per HP (server tidak punya konsep pin di session.list).
+    private val KEY_PINNED = androidx.datastore.preferences.core.stringSetPreferencesKey("pinned_sessions")
+
+    suspend fun loadPinned(context: Context): Set<String> =
+        context.dataStore.data.first()[KEY_PINNED] ?: emptySet()
+
+    suspend fun togglePinned(context: Context, id: String): Set<String> {
+        var out: Set<String> = emptySet()
+        context.dataStore.edit {
+            val cur = it[KEY_PINNED] ?: emptySet()
+            out = if (id in cur) cur - id else cur + id
+            it[KEY_PINNED] = out
+        }
+        return out
+    }
 }

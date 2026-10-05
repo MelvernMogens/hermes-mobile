@@ -1,54 +1,83 @@
 package id.melvern.hermesmobile.ui.theme
 
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.R
 
 /**
- * M8: Inter (rsms/inter v4.1, OFL — docs/licenses/Inter-OFL.txt) untuk semua UI;
- * JetBrains Mono HANYA untuk code / inline code / path.
- * Semua ukuran sp → ikut font scale sistem. Nol uppercase + tracking lebar.
+ * Geist (Vercel, OFL — docs/licenses/Geist-OFL.txt) untuk UI; Geist Mono HANYA
+ * untuk code / inline code / path / angka data. Satu keluarga → mono & sans
+ * punya x-height & baseline sama (inline code gak "turun" di tengah kalimat).
+ * Semua ukuran sp → ikut font scale sistem.
  */
-val Inter: FontFamily = FontFamily(
-    Font(R.font.inter_regular, FontWeight.Normal),
-    Font(R.font.inter_medium, FontWeight.Medium),
-    Font(R.font.inter_semibold, FontWeight.SemiBold),
-    Font(R.font.inter_bold, FontWeight.Bold),
+val Sans: FontFamily = FontFamily(
+    Font(R.font.geist_regular, FontWeight.Normal),
+    Font(R.font.geist_medium, FontWeight.Medium),
+    Font(R.font.geist_semibold, FontWeight.SemiBold),
+    Font(R.font.geist_bold, FontWeight.Bold),
 )
 
-val JetBrainsMono: FontFamily = FontFamily(
-    Font(R.font.jetbrainsmono_regular, FontWeight.Normal),
-    Font(R.font.jetbrainsmono_italic, FontWeight.Normal, FontStyle.Italic),
-    Font(R.font.jetbrainsmono_bold, FontWeight.Bold),
-    Font(R.font.jetbrainsmono_bold_italic, FontWeight.Bold, FontStyle.Italic),
+val MonoFamily: FontFamily = FontFamily(
+    Font(R.font.geistmono_regular, FontWeight.Normal),
+    Font(R.font.geistmono_medium, FontWeight.Medium),
+    Font(R.font.geistmono_bold, FontWeight.Bold),
 )
 
-/** Type scale M8 — pakai ini langsung (`Type.Title`), bukan angka sp di screen. */
+/** Trim padding font bawaan Android — teks duduk tepat di grid (baseline rapi). */
+private val Tight = PlatformTextStyle(includeFontPadding = false)
+private val Centered = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
+
+private fun s(
+    size: Int, line: Int, weight: FontWeight = FontWeight.Normal,
+    tracking: Double = 0.0, color: androidx.compose.ui.graphics.Color = Ink.Text,
+    family: FontFamily = Sans,
+) = TextStyle(
+    fontFamily = family, fontWeight = weight, fontSize = size.sp, lineHeight = line.sp,
+    letterSpacing = tracking.sp, color = color, platformStyle = Tight, lineHeightStyle = Centered,
+)
+
+/** Type scale — pakai ini langsung (`Type.Title`), bukan angka sp di screen. */
 object Type {
-    /** 28/34 SemiBold −0.4 — large title "Chats", judul Connect. */
-    val Display = TextStyle(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-0.4).sp, color = Ink.Text)
-    /** 17/22 SemiBold −0.2 — header chat, nama session, judul sheet. */
-    val Title = TextStyle(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, lineHeight = 22.sp, letterSpacing = (-0.2).sp, color = Ink.Text)
-    /** 16/24 Regular — prosa assistant + bubble user + input composer. */
-    val Body = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, color = Ink.Text)
+    /** 30/36 SemiBold −0.9 — large title layar (Chats, Overview). */
+    val Display = s(30, 36, FontWeight.SemiBold, -0.9)
+    /** 22/28 SemiBold −0.5 — heading markdown H1, judul empty state. */
+    val Headline = s(22, 28, FontWeight.SemiBold, -0.5)
+    /** 17/22 SemiBold −0.3 — header chat, judul sheet, heading markdown H2+. */
+    val Title = s(17, 22, FontWeight.SemiBold, -0.3)
+    /** 16/22 Medium −0.2 — nama row list (session, bot). */
+    val RowTitle = s(16, 22, FontWeight.Medium, -0.2)
+    /** 15.5/24 Regular — prosa assistant + bubble user + input composer. */
+    val Body = TextStyle(
+        fontFamily = Sans, fontWeight = FontWeight.Normal, fontSize = 15.5.sp, lineHeight = 24.sp,
+        letterSpacing = (-0.1).sp, color = Ink.Text, platformStyle = Tight, lineHeightStyle = Centered,
+    )
     /** 16 SemiBold — label tombol solid (Connect). */
-    val Button = TextStyle(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 20.sp, color = Ink.OnAccent)
-    /** 15/20 Regular — preview baris 2, isi sheet, banner. */
-    val Callout = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 20.sp, color = Ink.Text)
-    /** 13/18 Regular — model line, timestamp list, label kecil. */
-    val Meta = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 18.sp, color = Ink.Text2)
+    val Button = s(16, 20, FontWeight.SemiBold, -0.2, Ink.OnAccent)
+    /** 15/20 Regular — isi sheet, preview, banner. */
+    val Callout = s(15, 20, FontWeight.Normal, -0.1)
+    /** 14/19 Regular text2 — preview baris 2 di list. */
+    val Preview = s(14, 19, FontWeight.Normal, -0.05, Ink.Text2)
+    /** 13/18 Regular — model line, label kecil. */
+    val Meta = s(13, 18, FontWeight.Normal, 0.0, Ink.Text2)
     val MetaMedium = Meta.copy(fontWeight = FontWeight.Medium)
-    /** 12/16 Medium — timestamp bubble, badge, day chip. */
-    val Caption = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, color = Ink.Text3)
+    /** 12/16 Medium — timestamp, badge, day label. */
+    val Caption = s(12, 16, FontWeight.Medium, 0.0, Ink.Text3)
+    /** 12/16 Medium tracking +0.2 — label section (BOTS, PINNED) dalam huruf biasa, redup. */
+    val Section = s(13, 18, FontWeight.Medium, 0.0, Ink.Text3)
 
-    /** Code block body 13/19. */
-    val Mono = TextStyle(fontFamily = JetBrainsMono, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 19.sp, color = Ink.Text)
-    /** Nama bahasa di header code block — meta, lowercase, mono. */
-    val MonoMeta = TextStyle(fontFamily = JetBrainsMono, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp, color = Ink.Text2)
-    /** Inline code di prosa. */
+    /** Angka besar dashboard — Mono tabular, tracking rapat. */
+    val Figure = s(28, 32, FontWeight.Medium, -1.0, Ink.Text, MonoFamily)
+    val FigureSmall = s(15, 20, FontWeight.Medium, -0.3, Ink.Text, MonoFamily)
+
+    /** Code block body 13/20. */
+    val Mono = s(13, 20, FontWeight.Normal, 0.0, Ink.Text, MonoFamily)
+    /** Nama bahasa di header code block / slug model. */
+    val MonoMeta = s(12, 16, FontWeight.Normal, 0.0, Ink.Text3, MonoFamily)
+    /** Inline code di prosa — 0.9em biar optis sama dengan sans. */
     val InlineMonoSize = 14.sp
 }

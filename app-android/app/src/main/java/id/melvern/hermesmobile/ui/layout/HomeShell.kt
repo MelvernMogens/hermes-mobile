@@ -3,25 +3,32 @@ package id.melvern.hermesmobile.ui.layout
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
-import androidx.compose.material.icons.rounded.SpaceDashboard
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.repo.BotFleet
 import id.melvern.hermesmobile.core.repo.BotStatus
 import id.melvern.hermesmobile.ui.components.Hairline
+import id.melvern.hermesmobile.ui.theme.Dim
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Motion
 import id.melvern.hermesmobile.ui.theme.Radius
@@ -56,7 +63,7 @@ fun HomeShell(
         Row(Modifier.fillMaxSize()) {
             Rail(
                 tab = tab, onTab = onTab, running = running,
-                modifier = Modifier.width(72.dp).fillMaxHeight(),
+                modifier = Modifier.width(80.dp).fillMaxHeight(),
             )
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 if (tab == HomeTabs.CHATS) chats() else overview()
@@ -73,6 +80,9 @@ fun HomeShell(
                     .consumeWindowInsets(WindowInsets.navigationBars),
             ) {
                 if (tab == HomeTabs.CHATS) chats() else overview()
+                // konten melebur ke nav (gak ada seam / baris kepotong keras)
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg.copy(alpha = 0f), Ink.Bg))))
             }
             BottomBar(tab = tab, onTab = onTab, running = running)
         }
@@ -81,27 +91,30 @@ fun HomeShell(
 
 @Composable
 private fun BottomBar(tab: Int, onTab: (Int) -> Unit, running: Int) {
+    // Surface terangkat (bukan hitam + garis) — konten scroll di belakangnya
+    // kebaca sebagai lapisan, bukan dipotong.
     Column(Modifier.fillMaxWidth().background(Ink.Bg).navigationBarsPadding()) {
-        Hairline()
-        Row(Modifier.fillMaxWidth().height(56.dp)) {
-            TabItem(Icons.Rounded.ChatBubbleOutline, "Chats", selected = tab == HomeTabs.CHATS, badge = null,
-                modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.CHATS) }
-            TabItem(Icons.Rounded.SpaceDashboard, "Overview", selected = tab == HomeTabs.OVERVIEW, badge = running,
-                modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.OVERVIEW) }
+        Row(Modifier.fillMaxWidth().height(Dim.NavBar).padding(horizontal = 48.dp)) {
+            TabItem(Icons.Rounded.ChatBubble, Icons.Outlined.ChatBubbleOutline, "Chats", selected = tab == HomeTabs.CHATS,
+                badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.CHATS) }
+            // badge cuma muncul kalau kita TIDAK di tab Overview (di sana angkanya sudah kelihatan)
+            TabItem(Icons.Rounded.Hub, Icons.Outlined.Hub, "Agents", selected = tab == HomeTabs.OVERVIEW,
+                badge = running.takeIf { tab != HomeTabs.OVERVIEW }, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.OVERVIEW) }
         }
     }
 }
 
 @Composable
 private fun Rail(tab: Int, onTab: (Int) -> Unit, running: Int, modifier: Modifier = Modifier) {
-    Row(modifier.background(Ink.Bg)) {
-        Column(Modifier.fillMaxHeight().width(72.dp).statusBarsPadding()) {
-            Spacer(Modifier.height(12.dp))
-            RailItem(Icons.Rounded.ChatBubbleOutline, "Chats", selected = tab == HomeTabs.CHATS, badge = null) {
+    Row(modifier.background(Ink.Surface1)) {
+        Column(Modifier.fillMaxHeight().width(80.dp).statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.height(16.dp))
+            RailItem(Icons.Rounded.ChatBubble, Icons.Outlined.ChatBubbleOutline, "Chats", selected = tab == HomeTabs.CHATS, badge = null) {
                 onTab(HomeTabs.CHATS)
             }
-            Spacer(Modifier.height(8.dp))
-            RailItem(Icons.Rounded.SpaceDashboard, "Overview", selected = tab == HomeTabs.OVERVIEW, badge = running) {
+            Spacer(Modifier.height(4.dp))
+            RailItem(Icons.Rounded.Hub, Icons.Outlined.Hub, "Agents", selected = tab == HomeTabs.OVERVIEW,
+                badge = running.takeIf { tab != HomeTabs.OVERVIEW }) {
                 onTab(HomeTabs.OVERVIEW)
             }
         }
@@ -111,7 +124,8 @@ private fun Rail(tab: Int, onTab: (Int) -> Unit, running: Int, modifier: Modifie
 
 @Composable
 private fun TabItem(
-    icon: ImageVector,
+    iconOn: ImageVector,
+    iconOff: ImageVector,
     label: String,
     selected: Boolean,
     badge: Int?,
@@ -119,56 +133,72 @@ private fun TabItem(
     onClick: () -> Unit,
 ) {
     val tint by animateColorAsState(if (selected) Ink.Text else Ink.Text3, tween(Motion.NavMs), label = "tabTint")
+    val pill by animateColorAsState(if (selected) Ink.Surface3 else Ink.Transparent, tween(Motion.NavMs), label = "tabPill")
     Column(
-        modifier.clickable(onClick = onClick),
+        modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick,
+        ),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Box {
-            Icon(icon, label, tint = tint, modifier = Modifier.size(24.dp))
-            if (badge != null && badge > 0) RunningBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp))
-        }
-        Spacer(Modifier.height(3.dp))
-        Text(label, style = Type.Caption.copy(color = tint))
-    }
-}
-
-@Composable
-private fun RailItem(
-    icon: ImageVector,
-    label: String,
-    selected: Boolean,
-    badge: Int?,
-    onClick: () -> Unit,
-) {
-    val tint by animateColorAsState(if (selected) Ink.Text else Ink.Text3, tween(Motion.NavMs), label = "railTint")
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box {
-            Icon(icon, label, tint = tint, modifier = Modifier.size(24.dp))
-            if (badge != null && badge > 0) RunningBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp))
+        Box(
+            Modifier.size(width = 56.dp, height = 30.dp).clip(Radius.Full).background(pill),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (selected) iconOn else iconOff, label, tint = tint, modifier = Modifier.size(20.dp))
+            if (badge != null && badge > 0) CountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-8).dp, y = 1.dp))
         }
         Spacer(Modifier.height(4.dp))
         Text(label, style = Type.Caption.copy(color = tint))
     }
 }
 
-/** Badge merah angka jumlah bot running (clamp 9+ — kotak 16dp muat 1 digit). */
 @Composable
-private fun RunningBadge(count: Int, modifier: Modifier = Modifier) {
+private fun RailItem(
+    iconOn: ImageVector,
+    iconOff: ImageVector,
+    label: String,
+    selected: Boolean,
+    badge: Int?,
+    onClick: () -> Unit,
+) {
+    val tint by animateColorAsState(if (selected) Ink.Text else Ink.Text3, tween(Motion.NavMs), label = "railTint")
+    val pill by animateColorAsState(if (selected) Ink.Surface3 else Ink.Transparent, tween(Motion.NavMs), label = "railPill")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(width = 56.dp, height = 32.dp).clip(Radius.Full).background(pill),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (selected) iconOn else iconOff, label, tint = tint, modifier = Modifier.size(20.dp))
+            if (badge != null && badge > 0) CountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-8).dp, y = 1.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = Type.Caption.copy(color = tint))
+    }
+}
+
+/** Badge jumlah agent running — hijau (status), bukan merah (alarm). */
+@Composable
+private fun CountBadge(count: Int, modifier: Modifier = Modifier) {
     Box(
-        modifier.size(16.dp).clip(Radius.Full).background(Ink.Danger),
+        modifier
+            .heightIn(min = 15.dp)
+            .widthIn(min = 15.dp)
+            .clip(Radius.Full)
+            .background(Ink.Live)
+            .border(1.5.dp, Ink.Bg, Radius.Full)
+            .padding(horizontal = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             if (count > 9) "9+" else count.toString(),
-            // teks di atas fill Danger — Ink.Text satu-satunya token terang yang pas
-            style = Type.Caption.copy(color = Ink.Text),
+            style = Type.Caption.copy(color = Ink.OnAccent, fontSize = 10.sp, lineHeight = 12.sp),
             maxLines = 1,
         )
     }

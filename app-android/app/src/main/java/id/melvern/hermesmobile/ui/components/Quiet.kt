@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -76,7 +77,7 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier, size: Dp = Dim.Dot) {
 
 /** Dot live yang pulse pelan (alpha 0.4↔1, 1.2s). Diam kalau reduce motion. */
 @Composable
-fun PulsingDot(color: Color = Ink.Live, modifier: Modifier = Modifier) {
+fun PulsingDot(color: Color = Ink.Live, modifier: Modifier = Modifier, size: Dp = Dim.Dot) {
     val reduce = rememberReduceMotion()
     val alpha = if (reduce) 1f else {
         val a by rememberInfiniteTransition(label = "pulse").animateFloat(
@@ -86,7 +87,7 @@ fun PulsingDot(color: Color = Ink.Live, modifier: Modifier = Modifier) {
         )
         a
     }
-    StatusDot(color, modifier.graphicsLayer { this.alpha = alpha })
+    StatusDot(color, modifier.graphicsLayer { this.alpha = alpha }, size = size)
 }
 
 /** Alpha shimmer halus untuk skeleton (0.5↔1). */
@@ -109,7 +110,7 @@ fun SkeletonBar(width: Dp?, height: Dp, alpha: Float, modifier: Modifier = Modif
             .height(height)
             .graphicsLayer { this.alpha = alpha }
             .clip(RoundedCornerShape(height / 2))
-            .background(Ink.Surface1)
+            .background(Ink.Surface2)
     )
 }
 
@@ -120,7 +121,7 @@ fun SkeletonSessionRow(alpha: Float) {
         Modifier.fillMaxWidth().heightIn(min = Dim.RowMin).padding(horizontal = Dim.ScreenH, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(Dim.AvatarRow).graphicsLayer { this.alpha = alpha }.clip(Radius.Full).background(Ink.Surface1))
+        Box(Modifier.size(Dim.AvatarRow).graphicsLayer { this.alpha = alpha }.clip(Radius.Full).background(Ink.Surface2))
         Spacer(Modifier.width(Dim.RowGap))
         Column(Modifier.weight(1f)) {
             SkeletonBar(160.dp, 14.dp, alpha)
@@ -172,16 +173,17 @@ fun QuietSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded),
         containerColor = Ink.Surface1,
         contentColor = Ink.Text,
+        modifier = Modifier.border(hairline(), Ink.Hairline, Radius.Sheet),
         scrimColor = Ink.Scrim,
         shape = Radius.Sheet,
         tonalElevation = 0.dp,
         dragHandle = {
             Box(
                 Modifier
-                    .padding(top = 8.dp, bottom = 8.dp)
-                    .size(width = 32.dp, height = 4.dp)
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .size(width = 36.dp, height = 4.dp)
                     .clip(Radius.Full)
-                    .background(Ink.Text3)
+                    .background(Ink.HairlineStrong)
             )
         },
     ) {
@@ -190,7 +192,7 @@ fun QuietSheet(
                 Text(
                     title, style = Type.Title,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+                    modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 4.dp, bottom = 12.dp),
                 )
             }
             content()
@@ -222,8 +224,13 @@ fun SheetActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(Dim.Icon))
-            Spacer(Modifier.width(16.dp))
+            Box(
+                Modifier.size(34.dp).clip(Radius.Chip).background(if (danger) Ink.Danger.copy(alpha = 0.12f) else Ink.Surface3),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(14.dp))
         }
         Text(label, style = Type.Callout.copy(color = color), modifier = Modifier.weight(1f))
         trailing?.invoke()
@@ -245,4 +252,61 @@ fun OneLine(text: String, style: TextStyle, modifier: Modifier = Modifier) {
 @Composable
 fun Centered(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     Box(modifier, contentAlignment = Alignment.Center, content = content)
+}
+
+
+/**
+ * Grouped surface (gaya Settings iOS / Linear): kartu Surface1 radius 18 dengan
+ * hairline luar tipis, isi dipisah garis inset — menggantikan list full-bleed
+ * bergaris di kanvas hitam (yang bikin layar terasa "spreadsheet").
+ */
+@Composable
+fun GroupSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier
+            .padding(horizontal = Dim.GroupInset)
+            .fillMaxWidth()
+            .clip(Radius.Group)
+            .background(Ink.Surface1)
+            .border(hairline(), Ink.Hairline, Radius.Group),
+        content = content,
+    )
+}
+
+/** Garis pemisah di dalam GroupSurface, inset dari kiri (sejajar teks). */
+@Composable
+fun GroupDivider(start: Dp) {
+    HorizontalDivider(Modifier.padding(start = start), thickness = hairline(), color = Ink.Hairline)
+}
+
+/** Label section: kecil, redup, huruf biasa — dengan trailing opsional (count / aksi). */
+@Composable
+fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
+    Row(
+        modifier.fillMaxWidth().padding(start = Dim.ScreenH + 4.dp, end = Dim.ScreenH + 4.dp, top = 22.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = Type.Section, modifier = Modifier.weight(1f))
+        if (trailing != null) Text(trailing, style = Type.Caption.copy(color = Ink.Text4))
+    }
+}
+
+/**
+ * Status pill kecil: dot + label. Running = hijau dengan halo pulse; idle =
+ * tanpa pill (teks redup). Lebar konsisten → kolom kanan rata.
+ */
+@Composable
+fun StatusPill(label: String, live: Boolean, modifier: Modifier = Modifier) {
+    if (live) {
+        Row(
+            modifier.clip(Radius.Full).background(Ink.LiveDim).padding(start = 8.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PulsingDot(Ink.Live, size = 6.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(label, style = Type.Caption.copy(color = Ink.Live))
+        }
+    } else {
+        Text(label, style = Type.Caption.copy(color = Ink.Text4), modifier = modifier)
+    }
 }

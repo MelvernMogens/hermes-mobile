@@ -27,6 +27,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +46,7 @@ import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.repo.SessionRepo
 import id.melvern.hermesmobile.ui.components.Hairline
 import id.melvern.hermesmobile.ui.components.OneLine
+import id.melvern.hermesmobile.ui.components.Pretty
 import id.melvern.hermesmobile.ui.components.QuietSheet
 import id.melvern.hermesmobile.ui.components.SheetActionRow
 import id.melvern.hermesmobile.ui.components.SkeletonSessionRow
@@ -85,7 +87,6 @@ fun Composer(
     val showStop = running && value.isBlank() && attachment == null && !readOnly
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier).fillMaxWidth().background(Ink.Bg)) {
-        Hairline()
         attachError?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp))
         }
@@ -122,20 +123,22 @@ fun Composer(
             AttachmentChip(attachment, attachThumb, attaching, onRemoveAttachment)
         }
         Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
             Box(
                 Modifier
-                    .size(Dim.Touch - 4.dp) // target 44
+                    .size(Dim.ComposerMin)
                     .clip(Radius.Full)
+                    .background(Ink.Surface1)
+                    .border(hairline(), Ink.Hairline, Radius.Full)
                     .pressClickable(enabled = !attaching && !readOnly, onClick = onAttach)
                     .semantics { contentDescription = "Attach photo or file" },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.Add, null, tint = if (readOnly) Ink.Text3 else Ink.Text2, modifier = Modifier.size(Dim.Icon))
+                Icon(Icons.Rounded.Add, null, tint = if (readOnly) Ink.Text4 else Ink.Text2, modifier = Modifier.size(20.dp))
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -167,16 +170,17 @@ fun Composer(
                             .heightIn(min = Dim.ComposerMin)
                             .clip(Radius.Bubble)
                             .background(Ink.Surface1)
-                            .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                            .border(hairline(), Ink.Hairline, Radius.Bubble)
+                            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
                         contentAlignment = Alignment.CenterStart,
                     ) {
                         if (value.isEmpty()) Text(
                             when {
                                 readOnly -> "View only"
-                                running -> "Reply or queue a message"
+                                running -> "Queue a follow-up…"
                                 else -> "Message"
                             },
-                            style = Type.Body.copy(color = Ink.Text3),
+                            style = Type.Body.copy(color = Ink.Text4),
                             maxLines = 1,
                         )
                         inner()
@@ -184,10 +188,10 @@ fun Composer(
                 },
             )
             Spacer(Modifier.width(8.dp))
-            // tombol kanan 36 dalam target 44, rata bawah dengan field 1-baris
+            // tombol kanan = tinggi field (44) — satu baris kontrol yang rata
             Box(Modifier.size(Dim.ComposerMin), contentAlignment = Alignment.Center) {
                 when {
-                    showStop -> RoundAction(Icons.Rounded.Stop, "Stop", filled = true, enabled = connected, onClick = onStop)
+                    showStop -> StopAction(enabled = connected, onClick = onStop)
                     else -> RoundAction(Icons.Rounded.ArrowUpward, "Send", filled = canSend, enabled = canSend, onClick = { if (canSend) onSend() })
                 }
             }
@@ -204,16 +208,36 @@ private fun RoundAction(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val bg by androidx.compose.animation.animateColorAsState(if (filled) Ink.Accent else Ink.Surface1, label = "sendBg")
+    val fg by androidx.compose.animation.animateColorAsState(if (filled) Ink.OnAccent else Ink.Text4, label = "sendFg")
     Box(
         Modifier
-            .size(Dim.SendButton)
+            .size(Dim.ComposerMin)
             .clip(Radius.Full)
-            .then(if (filled) Modifier.background(Ink.Accent) else Modifier.border(hairline() * 2, Ink.HairlineStrong, Radius.Full))
+            .background(bg)
+            .then(if (filled) Modifier else Modifier.border(hairline(), Ink.Hairline, Radius.Full))
             .pressClickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = if (filled) Ink.OnAccent else Ink.Text3, modifier = Modifier.size(Dim.Icon))
+        Icon(icon, null, tint = fg, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Stop: kontrol interrupt — gelap terangkat + kotak putih + ring hidup pelan. */
+@Composable
+private fun StopAction(enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(Dim.ComposerMin)
+            .clip(Radius.Full)
+            .background(Ink.Raised)
+            .border(1.dp, Ink.Live.copy(alpha = 0.55f), Radius.Full)
+            .pressClickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = "Stop" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(Ink.Text))
     }
 }
 
@@ -265,9 +289,34 @@ private fun AttachmentChip(att: Attachment?, thumb: ImageBitmap?, attaching: Boo
 /** Sheet attach: Photo / File. */
 @Composable
 fun AttachSheet(onDismiss: () -> Unit, onPhoto: () -> Unit, onFile: () -> Unit) {
-    QuietSheet(onDismiss = onDismiss, title = "Attach") {
-        SheetActionRow("Photo", Icons.Rounded.Image) { onDismiss(); onPhoto() }
-        SheetActionRow("File", Icons.Rounded.Description) { onDismiss(); onFile() }
+    QuietSheet(onDismiss = onDismiss) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AttachTile("Photo", "From gallery", Icons.Rounded.Image, Modifier.weight(1f)) { onDismiss(); onPhoto() }
+            AttachTile("File", "Docs, logs, zips", Icons.Rounded.Description, Modifier.weight(1f)) { onDismiss(); onFile() }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun AttachTile(title: String, sub: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier
+            .clip(Radius.Card)
+            .background(Ink.Surface2)
+            .border(hairline(), Ink.Hairline, Radius.Card)
+            .pressClickable(onClick = onClick)
+            .padding(16.dp),
+    ) {
+        Box(Modifier.size(40.dp).clip(Radius.Chip).background(Ink.Surface3), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Ink.Text, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(title, style = Type.RowTitle)
+        Text(sub, style = Type.Meta.copy(color = Ink.Text3))
     }
 }
 
@@ -404,8 +453,8 @@ fun ModelSheet(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(Modifier.weight(1f)) {
-                                        OneLine(m, Type.Callout)
-                                        OneLine(providerName, Type.Meta)
+                                        OneLine(Pretty.model(m).ifBlank { m }, Type.RowTitle.copy(color = if (active) Ink.Text else Ink.Text))
+                                        OneLine("$providerName · $m", Type.MonoMeta)
                                     }
                                     when {
                                         busy == key -> CircularProgressIndicator(Modifier.size(18.dp), color = Ink.Text2, strokeWidth = 2.dp)

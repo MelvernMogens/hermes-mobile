@@ -4,8 +4,11 @@ import android.graphics.BitmapFactory
 import androidx.collection.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -18,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -28,6 +32,7 @@ import id.melvern.hermesmobile.core.repo.MetaRepo
 import id.melvern.hermesmobile.core.rpc.ConnState
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Type
+import id.melvern.hermesmobile.ui.theme.hairline
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -51,6 +56,12 @@ object AvatarCache {
         override fun sizeOf(key: String, value: ImageBitmap) = 1
     }
     private val locks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+
+    /** profile → warna latar sprite (sudut kiri atas) untuk avatar pixel-art. */
+    private val pixel = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    fun markPixel(name: String, bg: Int) { pixel[name] = bg }
+    fun isPixel(name: String): Boolean = pixel.containsKey(name)
+    fun pixelBg(name: String): Int? = pixel[name]
 
     fun lockFor(name: String): Mutex = locks.computeIfAbsent(name) { Mutex() }
     fun get(name: String): ImageBitmap? = cache.get(name)
@@ -104,7 +115,7 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                     var sample = 1
                     var w = bounds.outWidth; var h = bounds.outHeight
-                    while (w / 2 >= 256 && h / 2 >= 256) { sample *= 2; w /= 2; h /= 2 }
+                    while (w / 2 >= 700 && h / 2 >= 700) { sample *= 2; w /= 2; h /= 2 }
                     BitmapFactory.decodeByteArray(
                         bytes, 0, bytes.size,
                         BitmapFactory.Options().apply { inSampleSize = sample },
@@ -114,9 +125,17 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
                 // M8: semua avatar = lingkaran penuh. Avatar dengan margin transparan
                 // (mis. squircle app-icon) di-trim ke bbox piksel opak dulu, supaya
                 // clip lingkaran terisi penuh — bukan squircle kecil di dalam lingkaran.
-                val img = withContext(Dispatchers.Default) { trimTransparent(decoded) }.asImageBitmap()
-                AvatarCache.put(profile, img)
-                bmp = img
+                // Pixel art (blok seragam) → rebuild di resolusi grid aslinya, lalu
+                // di-upscale nearest saat render: blok tajam & rata di ukuran apa pun.
+                val (img, pixel) = withContext(Dispatchers.Default) {
+                    val trimmed = trimTransparent(decoded)
+                    val grid = pixelGridSize(trimmed)
+                    if (grid != null) pixelReduce(trimmed, grid) to true else trimmed to false
+                }
+                if (pixel) AvatarCache.markPixel(profile, img.getPixel(0, 0))
+                val ib = img.asImageBitmap()
+                AvatarCache.put(profile, ib)
+                bmp = ib
             }
         } catch (e: CancellationException) {
             throw e // effect dibatalkan (recompose/leave) — bukan kegagalan load
@@ -125,8 +144,13 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
         }
     }
 
+    // Bot = squircle (gaya app icon): pixel-art full-bleed gak kepotong lingkaran
+    // (topi/props di tepi), dan beda bentuk dari avatar chat (lingkaran).
+    val shape = BotShape
+    val spriteBg = if (bmp != null) AvatarCache.pixelBg(profile) else null
     Box(
-        modifier.size(size).clip(CircleShape).background(Ink.Surface2),
+        modifier.size(size).clip(shape)
+            .background(spriteBg?.let { androidx.compose.ui.graphics.Color(it) } ?: Ink.Surface3),
         contentAlignment = Alignment.Center,
     ) {
         val current = bmp
@@ -134,20 +158,49 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
             Image(
                 bitmap = current,
                 contentDescription = "avatar $profile",
-                modifier = Modifier.fillMaxSize(),
+                // pixel art: inset 9% di atas warna latarnya sendiri → topi/props gak kepotong sudut
+                modifier = if (spriteBg != null) Modifier.fillMaxSize().padding(size * 0.09f) else Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                // pixel art: nearest-neighbour dari grid asli → tajam; foto biasa: halus
+                filterQuality = if (AvatarCache.isPixel(profile)) FilterQuality.None else FilterQuality.Medium,
             )
         } else {
-            // M7 fix: loading & failed & svg-skip semua → inisial dim.
-            // (Sebelumnya loading tampil kotak Surface2 polos — "ungu" abadi
-            // kalau bytes null karena bug parse di MetaRepo.)
             Text(
-                profile.trim().take(1).uppercase(),
-                // inisial skala ikut ukuran avatar (40% diameter), Inter SemiBold
-                style = Type.Title.copy(fontSize = (size.value * 0.4f).sp, lineHeight = (size.value * 0.4f).sp),
+                Pretty.profile(profile).take(1),
+                style = Type.Title.copy(fontSize = (size.value * 0.42f).sp, lineHeight = (size.value * 0.42f).sp),
                 color = if (failed) Ink.Text2 else Ink.Text3,
             )
         }
+        // garis dalam 0.5dp — memisahkan avatar gelap dari kanvas hitam (efek "kaca")
+        Box(Modifier.matchParentSize().border(hairline(), Ink.Text.copy(alpha = 0.08f), shape))
+    }
+}
+
+/** Squircle avatar bot — 30% radius (mendekati superellipse app icon). */
+val BotShape = RoundedCornerShape(percent = 30)
+
+/**
+ * Avatar chat: monogram huruf pertama judul di atas tint deterministik (hash
+ * judul) — tiap chat punya identitas sendiri, tanpa aset. Lingkaran.
+ */
+@Composable
+fun MonogramAvatar(key: String, label: String, size: Dp, modifier: Modifier = Modifier) {
+    val (bg, ink) = remember(key) { Ink.monoTint(key) }
+    val letter = remember(label) {
+        label.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "·"
+    }
+    Box(
+        modifier.size(size).clip(CircleShape).background(bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            letter,
+            style = Type.Title.copy(
+                fontSize = (size.value * 0.40f).sp, lineHeight = (size.value * 0.40f).sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            ),
+            color = ink,
+        )
     }
 }
 
@@ -173,4 +226,47 @@ internal fun trimTransparent(src: android.graphics.Bitmap): android.graphics.Bit
     val left = (cx - side / 2).coerceIn(0, (w - side).coerceAtLeast(0))
     val top = (cy - side / 2).coerceIn(0, (h - side).coerceAtLeast(0))
     return android.graphics.Bitmap.createBitmap(src, left, top, minOf(side, w - left), minOf(side, h - top))
+}
+
+
+/**
+ * Ukuran blok pixel-art (px) kalau bitmap tersusun dari blok persegi seragam;
+ * null untuk gambar biasa. GCD panjang run warna identik di 5 baris + 5 kolom.
+ */
+internal fun pixelGridSize(src: android.graphics.Bitmap): Int? {
+    val w = src.width; val h = src.height
+    if (w < 64 || h < 64) return null
+    fun gcd(a: Int, b: Int): Int { var x = a; var y = b; while (y != 0) { val t = x % y; x = y; y = t }; return x }
+    var g = 0
+    val rows = IntArray(w)
+    for (k in 1..5) {
+        val y = h * k / 6
+        src.getPixels(rows, 0, w, 0, y, w, 1)
+        var run = 1
+        for (x in 1 until w) {
+            if (rows[x] == rows[x - 1]) run++ else { g = gcd(g, run); run = 1 }
+        }
+        g = gcd(g, run)
+    }
+    val cols = IntArray(h)
+    for (k in 1..5) {
+        val x = w * k / 6
+        src.getPixels(cols, 0, 1, x, 0, 1, h)
+        var run = 1
+        for (y in 1 until h) {
+            if (cols[y] == cols[y - 1]) run++ else { g = gcd(g, run); run = 1 }
+        }
+        g = gcd(g, run)
+    }
+    return if (g >= 4 && w % g == 0 && h % g == 0) g else null
+}
+
+/** Ambil piksel tengah tiap blok → bitmap grid asli (mis. 672/16 = 42×42). */
+internal fun pixelReduce(src: android.graphics.Bitmap, block: Int): android.graphics.Bitmap {
+    val gw = src.width / block; val gh = src.height / block
+    val out = IntArray(gw * gh)
+    for (gy in 0 until gh) for (gx in 0 until gw) {
+        out[gy * gw + gx] = src.getPixel(gx * block + block / 2, gy * block + block / 2)
+    }
+    return android.graphics.Bitmap.createBitmap(out, gw, gh, android.graphics.Bitmap.Config.ARGB_8888)
 }

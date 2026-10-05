@@ -23,6 +23,13 @@ import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Reply
 import androidx.compose.material.icons.rounded.MoreVert
+import id.melvern.hermesmobile.ui.components.Pretty
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.shadow
+import androidx.compose.material.icons.rounded.ArrowOutward
+import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -326,7 +333,7 @@ fun ChatScreen(
         when {
             m.isUser -> listOf(ChatItem.User(m.text ?: "", m.rowId, time = RelTime.clock(m.timestamp), at = m.timestamp))
             m.role == "tool" -> listOf(
-                ChatItem.Tool(m.name ?: "tool", "done", (m.args ?: m.context ?: "").take(2000))
+                ChatItem.Tool(m.name ?: "tool", "done", (m.argsText ?: m.context ?: "").take(2000))
             )
             else -> {
                 val text = m.text ?: ""
@@ -615,6 +622,19 @@ fun ChatScreen(
     val profileName by app.profile.collectAsState()
     val reduceMotion = rememberReduceMotion()
     val rows = remember(items) { buildRows(items, { RelTime.dayKey(it) }, { RelTime.dayLabel(it) }) }
+    // Index assistant yang PENUTUP turn (berikutnya user / akhir) — cuma itu yang dapat baris aksi.
+    val turnEnds = remember(items) {
+        val out = HashSet<Int>()
+        var pending = -1
+        items.forEachIndexed { i, it ->
+            when {
+                it is ChatItem.Assistant && !it.isThoughtOnly() -> pending = i
+                it is ChatItem.User -> { if (pending >= 0) out += pending; pending = -1 }
+            }
+        }
+        if (pending >= 0) out += pending
+        out
+    }
     // M8: animasi masuk hanya untuk baris yang muncul SETELAH load awal.
     val seenKeys = remember { mutableSetOf<String>() }
     var seeded by remember { mutableStateOf(false) }
@@ -668,8 +688,8 @@ fun ChatScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             QuietIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = onBack)
-            ProfileAvatar(app, profileName, Dim.AvatarBar)
-            Spacer(Modifier.width(10.dp))
+            ProfileAvatar(app, profileName, 34.dp)
+            Spacer(Modifier.width(12.dp))
             Column(
                 Modifier
                     .weight(1f)
@@ -686,13 +706,14 @@ fun ChatScreen(
                             Text(if (connState == ConnState.CLOSED) "Offline" else "Reconnecting…", style = Type.Meta, maxLines = 1)
                         }
                         running -> {
-                            PulsingDot(Ink.Live)
+                            PulsingDot(Ink.Live, size = 6.dp)
                             Spacer(Modifier.width(6.dp))
-                            Text("Working…", style = Type.Meta, maxLines = 1)
+                            Text("Working", style = Type.Meta.copy(color = Ink.Text2), maxLines = 1)
+                            Text(" · " + Pretty.model(headerModel), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1)
                         }
                         else -> {
-                            OneLine(headerModel.ifBlank { "Model" }, Type.Meta, Modifier.weight(1f, fill = false))
-                            Icon(Icons.Rounded.ExpandMore, "Change model", tint = Ink.Text2, modifier = Modifier.size(Dim.IconSmall))
+                            OneLine(Pretty.model(headerModel).ifBlank { "Choose model" }, Type.Meta, Modifier.weight(1f, fill = false))
+                            Icon(Icons.Rounded.UnfoldMore, "Change model", tint = Ink.Text3, modifier = Modifier.padding(start = 2.dp).size(14.dp))
                         }
                     }
                 }
@@ -700,30 +721,27 @@ fun ChatScreen(
             // M13: artifacts — semua link/foto/video/file dari chat ini.
             // M15: expanded → side sheet 380dp di dalam pane (BUKAN route full screen).
             Box {
-                QuietIconButton(Icons.Rounded.Inventory2, "Artifacts", onClick = {
+                QuietIconButton(Icons.Outlined.Folder, "Artifacts", tint = Ink.Text2, onClick = {
                     if (wide) artifactsOpen = true else onOpenArtifacts(title)
                 })
                 if (artifactCount > 0) {
                     Text(
                         if (artifactCount > 99) "99+" else "$artifactCount",
-                        style = Type.Caption.copy(color = Ink.OnAccent),
+                        style = Type.Caption.copy(color = Ink.Text, fontSize = 10.sp, lineHeight = 14.sp),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = (-4).dp, y = 4.dp)
+                            .offset(x = (-5).dp, y = 7.dp)
                             .clip(Radius.Full)
-                            .background(Ink.Accent)
-                            .padding(horizontal = 5.dp),
+                            .background(Ink.Raised)
+                            .padding(horizontal = 4.dp),
                     )
                 }
             }
-            QuietIconButton(Icons.Rounded.MoreVert, "Chat options", onClick = { menuSheet = true })
+            QuietIconButton(Icons.Rounded.MoreHoriz, "Chat options", tint = Ink.Text2, onClick = { menuSheet = true })
         }
         }
         // M15: hairline juga ikut max width center di expanded.
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-            if (scrolledContent) Hairline(Modifier.widthIn(max = if (wide) Dim.ChatMaxW else Dp.Unspecified).fillMaxWidth())
-            else Spacer(Modifier.height(hairline()))
-        }
+        // (dulu hairline yang memotong teks saat scroll — sekarang fade di atas list)
 
         // ── Read-only banner (M7 derived) ──────────────────────────────
         if (readOnly) {
@@ -747,7 +765,7 @@ fun ChatScreen(
         Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
             when {
                 loading -> ChatSkeleton()
-                items.isEmpty() && approval == null && clarify == null -> EmptyChat(app, profileName, headerModel)
+                items.isEmpty() && approval == null && clarify == null -> EmptyChat(app, profileName, headerModel, onPrompt = { input = it })
             }
             // M15: Medium+ → list max 640 center (Discord style). Wrapper Box
             // fillMaxWidth + TopCenter menempatkan LazyColumn widthIn di tengah;
@@ -757,8 +775,8 @@ fun ChatScreen(
                 state = listState,
                 modifier = (if (wide) Modifier.widthIn(max = Dim.ChatMaxW).fillMaxHeight()
                             else Modifier.fillMaxSize()),
-                contentPadding = PaddingValues(vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(rows, key = { it.key }) { row ->
                     val animate = seeded && row.key !in seenKeys && !reduceMotion
@@ -770,7 +788,7 @@ fun ChatScreen(
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
                             is ChatRow.Item -> when (val item = row.item) {
                                 is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch)
-                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) })
+                                is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) }, showMeta = row.index in turnEnds)
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,
                                     onRetry = if (loadFailed) ({ loading = true; items = emptyList(); reloadKey++ }) else null,
@@ -837,6 +855,11 @@ fun ChatScreen(
                 }
             }
             }
+            // Fade tepi atas & bawah list — teks masuk/keluar lembut, gak keiris garis.
+            Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(20.dp)
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg, Ink.Bg.copy(alpha = 0f)))))
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(16.dp)
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg.copy(alpha = 0f), Ink.Bg))))
             // scroll-to-bottom: 36dp surface2 bulat kanan bawah + badge jumlah pesan baru
             if (farFromBottom) {
                 Box(
@@ -847,8 +870,9 @@ fun ChatScreen(
                     Box(
                         Modifier
                             .size(Dim.ScrollFab)
+                            .shadow(8.dp, Radius.Full, ambientColor = Ink.Bg, spotColor = Ink.Bg)
                             .clip(Radius.Full)
-                            .background(Ink.Surface2)
+                            .background(Ink.Raised)
                             .border(hairline(), Ink.HairlineStrong, Radius.Full)
                             .pressClickable {
                                 hasNew = false
@@ -1089,22 +1113,48 @@ private fun Modifier.enterOnce(animate: Boolean): Modifier = composed {
     }
 }
 
-/** Empty chat: avatar 56 + "Chat with {profile}" + model line, tengah vertikal. */
+/** Empty chat: avatar bot besar + sapaan + model pill + 3 starter prompt. */
 @Composable
-private fun EmptyChat(app: HermesApp, profile: String, model: String) {
+private fun EmptyChat(app: HermesApp, profile: String, model: String, onPrompt: (String) -> Unit = {}) {
+    val starters = remember(profile) {
+        when (profile) {
+            "coder" -> listOf("Review my latest commit", "Fix the failing build", "Explain this repo's structure")
+            "research" -> listOf("Summarize today's AI news", "Compare two tools for me", "Find sources on…")
+            "content" -> listOf("Draft a 55s TikTok script", "Give me 5 hook ideas", "Rewrite this caption")
+            else -> listOf("What's running right now?", "Summarize my last session", "Plan my next task")
+        }
+    }
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        Modifier.fillMaxSize().padding(horizontal = 28.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ProfileAvatar(app, profile, Dim.AvatarEmpty)
-        Spacer(Modifier.height(16.dp))
-        Text("Chat with $profile", style = Type.Title)
+        Spacer(Modifier.height(18.dp))
+        Text(Pretty.profile(profile), style = Type.Headline)
         if (model.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(model, style = Type.Meta)
+            Spacer(Modifier.height(6.dp))
+            Text(Pretty.model(model), style = Type.MonoMeta.copy(color = Ink.Text3))
         }
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(28.dp))
+        starters.forEach { p ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 420.dp)
+                    .padding(vertical = 4.dp)
+                    .clip(Radius.Field)
+                    .background(Ink.Surface1)
+                    .border(hairline(), Ink.Hairline, Radius.Field)
+                    .pressClickable { onPrompt(p) }
+                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(p, style = Type.Callout.copy(color = Ink.Text2), modifier = Modifier.weight(1f))
+                Icon(Icons.Rounded.ArrowOutward, null, tint = Ink.Text4, modifier = Modifier.size(16.dp))
+            }
+        }
+        Spacer(Modifier.height(56.dp))
     }
 }
 

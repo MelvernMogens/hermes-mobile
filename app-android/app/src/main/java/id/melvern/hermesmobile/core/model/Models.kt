@@ -62,10 +62,25 @@ data class TranscriptMessage(
     val reasoning: String? = null,
     val name: String? = null,
     val context: String? = null,
-    val args: String? = null,
+    /** Server kirim object (dict args tool) — dulu dideklarasi String → decode gagal
+     *  dan SEMUA baris tool di transcript lama hilang diam-diam. */
+    val args: kotlinx.serialization.json.JsonElement? = null,
     val id: String? = null,
 ) {
+    /** Args tool sebagai teks tampilan (pretty JSON / string mentah). */
+    val argsText: String?
+        get() = when (val a = args) {
+            null, is kotlinx.serialization.json.JsonNull -> null
+            is kotlinx.serialization.json.JsonPrimitive -> a.content
+            else -> TranscriptJson.pretty.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), a)
+        }
+
     val isUser: Boolean get() = role == "user"
+}
+
+/** Formatter args tool — top-level (companion di @Serializable class bentrok dgn serializer()). */
+internal object TranscriptJson {
+    val pretty = kotlinx.serialization.json.Json { prettyPrint = true }
 }
 
 /** Item chat UI: user / assistant / tool-activity / thinking. */

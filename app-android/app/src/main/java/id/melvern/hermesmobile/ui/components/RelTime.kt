@@ -14,7 +14,11 @@ import java.util.Locale
  *  - pemisah hari: "Today" · "Yesterday" · "Monday" · "15 September" · "15 September 2025"
  */
 object RelTime {
-    private val CLOCK = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
+    /** Diset dari setelan sistem saat app start (DateFormat.is24HourFormat). */
+    @Volatile var use24h: Boolean = true
+    private val CLOCK24 = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
+    private val CLOCK12 = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
+    private val CLOCK: DateTimeFormatter get() = if (use24h) CLOCK24 else CLOCK12
     private val DAY_SHORT = DateTimeFormatter.ofPattern("EEE", Locale.US)
     private val DAY_LONG = DateTimeFormatter.ofPattern("EEEE", Locale.US)
     private val DATE_SHORT = DateTimeFormatter.ofPattern("d MMM", Locale.US)
