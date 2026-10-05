@@ -1,5 +1,8 @@
 package id.melvern.hermesmobile.ui.overview
 
+import androidx.compose.material.icons.outlined.AddComment
+import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.foundation.background
 import id.melvern.hermesmobile.ui.theme.hairline
 import id.melvern.hermesmobile.ui.components.StatusPill
@@ -212,8 +215,8 @@ private fun SummaryStrip(bots: List<BotCard>, tokens: id.melvern.hermesmobile.co
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Stat("Tokens today", tokens?.let { c.compact(it.todayTokens) } ?: "—", modifier = Modifier.weight(1f))
-        Stat("Tokens · 30d", tokens?.let { c.compact(it.totalTokens) } ?: "—", modifier = Modifier.weight(1f))
-        Stat("Agents", bots.size.toString(), modifier = Modifier.weight(1f))
+        Stat("Tokens 30d", tokens?.let { c.compact(it.totalTokens) } ?: "—", modifier = Modifier.weight(1f))
+        Stat("Chats 30d", tokens?.totalSessions?.toString() ?: "—", modifier = Modifier.weight(1f))
     }
 }
 
@@ -224,7 +227,7 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier, li
             .clip(Radius.Card)
             .background(Ink.Surface1)
             .border(hairline(), Ink.Hairline, Radius.Card)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = Dim.GroupPadH + 4.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (live) { PulsingDot(Ink.Live, size = 6.dp); Spacer(Modifier.width(6.dp)) }
@@ -479,7 +482,7 @@ private fun BotActionSheet(
         notice?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
         }
-        SheetActionRow("New chat", Icons.Rounded.AddComment, enabled = !busy) {
+        SheetActionRow("New chat", Icons.Outlined.AddComment, enabled = !busy) {
             run {
                 val c = app.client ?: return@run
                 // chat baru DI profile bot itu (params.profile — pola SessionRepo M4)
@@ -492,13 +495,13 @@ private fun BotActionSheet(
         }
         SheetActionRow(
             "Open Bot Chat",
-            Icons.AutoMirrored.Rounded.CallSplit,
+            Icons.AutoMirrored.Outlined.Chat,
             enabled = !busy && bot.botChatStoredId != null,
         ) {
             onDismiss()
             onOpenChat(botChatArg())
         }
-        SheetActionRow("Switch to this profile", Icons.Rounded.SwapHoriz, enabled = !busy && bot.name != current) {
+        SheetActionRow("Switch to this profile", Icons.Outlined.SwapHoriz, enabled = !busy && bot.name != current) {
             run {
                 app.setProfile(bot.name)
                 // Main.immediate: setProfile selesai SEBELUM dismiss — dismiss

@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
 object Dim {
     val ScreenH = 20.dp          // margin horizontal layar (lebih lega = lebih mahal)
     val GroupInset = 12.dp       // margin grouped surface (kartu list) ke tepi layar
-    val GroupPadH = 14.dp        // padding isi di dalam grouped surface
+    val GroupPadH = 8.dp         // isi grouped surface → tepat di keyline 20dp (12 + 8)
     val Icon = 22.dp             // ikon standar
     val IconSmall = 16.dp        // ikon di baris tool / chevron
     val IconTiny = 12.dp         // ikon status di bubble (Schedule)

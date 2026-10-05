@@ -58,7 +58,16 @@ object Ink {
         Color(0xFFB5E6CD), Color(0xFFADD6EA), Color(0xFFE2E3AE), Color(0xFFD2D2D8),
         Color(0xFFF2B0AC), Color(0xFFA6E6E2), Color(0xFFBDE6A6), Color(0xFFE6B8EE),
     )
+    /** Monogram = tonal abu (variasi terang saja) — warna hanya untuk status. */
+    private val MonoGray = listOf(Color(0xFF1C1C20), Color(0xFF232328), Color(0xFF2A2A30), Color(0xFF202024))
     fun monoTint(key: String): Pair<Color, Color> {
+        var g = 0x811C9DC5.toInt()
+        for (ch in key) { g = g xor ch.code; g *= 0x01000193 }
+        return MonoGray[(g ushr 1) % MonoGray.size] to Text2
+    }
+
+    @Suppress("unused")
+    private fun monoTintColored(key: String): Pair<Color, Color> {
         var h = 0x811C9DC5.toInt()
         for (ch in key) { h = h xor ch.code; h *= 0x01000193 }
         val i = (h ushr 1) % MonoTints.size

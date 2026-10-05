@@ -171,9 +171,8 @@ fun QuietSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded),
-        containerColor = Ink.Surface1,
+        containerColor = Ink.Surface2,
         contentColor = Ink.Text,
-        modifier = Modifier.border(hairline(), Ink.Hairline, Radius.Sheet),
         scrimColor = Ink.Scrim,
         shape = Radius.Sheet,
         tonalElevation = 0.dp,
@@ -224,13 +223,8 @@ fun SheetActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Box(
-                Modifier.size(34.dp).clip(Radius.Chip).background(if (danger) Ink.Danger.copy(alpha = 0.12f) else Ink.Surface3),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(14.dp))
+            Icon(icon, null, tint = if (danger || !enabled) color else Ink.Text2, modifier = Modifier.size(Dim.Icon))
+            Spacer(Modifier.width(18.dp))
         }
         Text(label, style = Type.Callout.copy(color = color), modifier = Modifier.weight(1f))
         trailing?.invoke()
@@ -276,14 +270,14 @@ fun GroupSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope
 /** Garis pemisah di dalam GroupSurface, inset dari kiri (sejajar teks). */
 @Composable
 fun GroupDivider(start: Dp) {
-    HorizontalDivider(Modifier.padding(start = start), thickness = hairline(), color = Ink.Hairline)
+    HorizontalDivider(Modifier.padding(start = start, end = Dim.GroupPadH), thickness = hairline(), color = Ink.HairlineStrong.copy(alpha = 0.5f))
 }
 
 /** Label section: kecil, redup, huruf biasa — dengan trailing opsional (count / aksi). */
 @Composable
 fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
     Row(
-        modifier.fillMaxWidth().padding(start = Dim.ScreenH + 4.dp, end = Dim.ScreenH + 4.dp, top = 22.dp, bottom = 8.dp),
+        modifier.fillMaxWidth().padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 22.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, style = Type.Section, modifier = Modifier.weight(1f))

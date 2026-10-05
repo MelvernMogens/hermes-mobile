@@ -577,7 +577,13 @@ private fun buildMd(spans: List<MdSpan>, context: Context): AnnotatedString = bu
     spans.forEach { span ->
         when (span) {
             is MdSpan.Text -> append(span.text)
-            is MdSpan.Bold -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(span.text) }
+            is MdSpan.Bold -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                // `code` di dalam **bold** — jangan bocor backtick literal
+                span.text.split('`').forEachIndexed { i, part ->
+                    if (i % 2 == 1 && part.isNotEmpty()) withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = Type.InlineMonoSize)) { append(part) }
+                    else append(part)
+                }
+            }
             is MdSpan.Italic -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(span.text) }
             is MdSpan.InlineCode -> withStyle(
                 SpanStyle(fontFamily = MonoFamily, fontSize = Type.InlineMonoSize, color = Ink.Text)
@@ -929,7 +935,11 @@ private fun InlineAwareText(
         val out = mutableListOf<Triple<IntRange, String, String>>() // range, kind, value
         var cursor = 0
         spans.forEach { span ->
-            val len = (if (span is MdSpan.InlineCode) span.text.length + 2 else span.text.length)
+            val len = when (span) {
+                is MdSpan.InlineCode -> span.text.length + 2
+                is MdSpan.Bold -> span.text.count { it != '`' } // backtick dibuang saat render
+                else -> span.text.length
+            }
             when (span) {
                 is MdSpan.InlineCode -> out += Triple(cursor until cursor + len, "code", span.text)
                 is MdSpan.Link -> out += Triple(cursor until cursor + len, "link", span.url)

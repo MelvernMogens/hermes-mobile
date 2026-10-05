@@ -1,5 +1,11 @@
 package id.melvern.hermesmobile.ui.sessions
 
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.automirrored.outlined.CallSplit
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
@@ -141,11 +147,11 @@ fun SessionActionSheet(
                 }
             }
             else -> {
-                if (pinned != null) SheetActionRow(if (pinned) "Unpin" else "Pin to top", Icons.Rounded.PushPin, enabled = !busy) {
+                if (pinned != null) SheetActionRow(if (pinned) "Unpin" else "Pin to top", Icons.Outlined.PushPin, enabled = !busy) {
                     onTogglePin(); onDismiss()
                 }
-                SheetActionRow("Rename", Icons.Rounded.DriveFileRenameOutline, enabled = !busy) { renaming = true }
-                SheetActionRow("New branch", Icons.AutoMirrored.Rounded.CallSplit, enabled = !busy) {
+                SheetActionRow("Rename", Icons.Outlined.DriveFileRenameOutline, enabled = !busy) { renaming = true }
+                SheetActionRow("New branch", Icons.AutoMirrored.Outlined.CallSplit, enabled = !busy) {
                     run(after = {}) {
                         // branch butuh session live — attach lazy dulu (session.resume lazy)
                         val c = app.client!!
@@ -154,15 +160,15 @@ fun SessionActionSheet(
                         onOpenBranch(out.runtimeId, out.storedId)
                     }
                 }
-                if (!hidden) SheetActionRow("Hide", Icons.Rounded.VisibilityOff, enabled = !busy) {
+                if (!hidden) SheetActionRow("Hide", Icons.Outlined.VisibilityOff, enabled = !busy) {
                     run { MetaRepo(app.client!!).hideSession(row.id, profile) }
                 }
-                SheetActionRow("Copy session ID", Icons.Rounded.ContentCopy, enabled = !busy) {
+                SheetActionRow("Copy session ID", Icons.Outlined.ContentCopy, enabled = !busy) {
                     clipboard.setText(AnnotatedString(row.id))
                     onDismiss()
                 }
                 Hairline(Modifier.padding(vertical = 4.dp))
-                SheetActionRow("Delete", Icons.Rounded.DeleteOutline, danger = true, enabled = !busy) { confirmingDelete = true }
+                SheetActionRow("Delete", Icons.Outlined.Delete, danger = true, enabled = !busy) { confirmingDelete = true }
             }
         }
     }

@@ -25,6 +25,8 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -71,6 +73,11 @@ sealed interface ChatRow {
     data class Tools(val tools: List<ChatItem.Tool>, val firstIndex: Int, override val key: String) : ChatRow
     /** Langkah assistant tanpa teks (reasoning saja) yang berurutan — satu baris "Thought". */
     data class Thoughts(val texts: List<String>, override val key: String) : ChatRow
+    /**
+     * Run campuran tool + reasoning tanpa prosa di antaranya → SATU baris
+     * "Worked · N steps" (dulu belasan pill bertumpuk kayak log debug).
+     */
+    data class Activity(val tools: List<ChatItem.Tool>, val thoughts: List<String>, override val key: String) : ChatRow
 }
 
 /** Assistant tanpa teks jawaban (transcript turn tool-only → text "…"). */
@@ -126,6 +133,25 @@ fun buildRows(items: List<ChatItem>, dayOf: (Double?) -> java.time.LocalDate?, l
         out += ChatRow.Item(it, i, "i$i")
     }
     flushTools(); flushThoughts()
+    return mergeActivity(out)
+}
+
+/** Gabung Tools/Thoughts yang bersebelahan jadi Activity bila run-nya > 1 baris. */
+internal fun mergeActivity(rows: List<ChatRow>): List<ChatRow> {
+    val out = mutableListOf<ChatRow>()
+    var run = mutableListOf<ChatRow>()
+    fun flush() {
+        if (run.size >= 2) {
+            val tools = run.filterIsInstance<ChatRow.Tools>().flatMap { it.tools }
+            val thoughts = run.filterIsInstance<ChatRow.Thoughts>().flatMap { it.texts }
+            out += ChatRow.Activity(tools, thoughts, "a" + run.first().key)
+        } else out += run
+        run = mutableListOf()
+    }
+    rows.forEach { r ->
+        if (r is ChatRow.Tools || r is ChatRow.Thoughts) run += r else { flush(); out += r }
+    }
+    flush()
     return out
 }
 
@@ -381,7 +407,7 @@ private fun toolLook(name: String): ToolLook {
 fun ToolGroup(tools: List<ChatItem.Tool>) {
     val anyRunning = tools.any { it.status == "run" }
     if (tools.size == 1) {
-        Box(Modifier.padding(horizontal = Dim.ScreenH)) { ToolLine(tools.first()) }
+        Box(Modifier.padding(horizontal = Dim.ScreenH)) { StepPill(tools, emptyList(), single = tools.first()) }
         return
     }
     var open by remember { mutableStateOf(false) }
@@ -425,10 +451,17 @@ private fun ToolLine(tool: ChatItem.Tool) {
                 .padding(end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (running) PulsingDot(Ink.Live, Modifier.padding(horizontal = 4.dp), size = 6.dp)
-            else Icon(look.icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            val failed = tool.status == "error"
+            when {
+                running -> PulsingDot(Ink.Live, Modifier.padding(horizontal = 4.dp), size = 6.dp)
+                failed -> Icon(Icons.Rounded.ErrorOutline, "Failed", tint = Ink.Danger, modifier = Modifier.size(14.dp))
+                else -> Icon(look.icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            }
             Spacer(Modifier.width(8.dp))
-            Text(if (running) look.running + "…" else look.done, style = Type.Caption.copy(color = Ink.Text2))
+            Text(
+                when { running -> look.running + "…"; failed -> look.done + " · failed"; else -> look.done },
+                style = Type.Caption.copy(color = if (failed) Ink.Danger else Ink.Text2),
+            )
             if (detail != null) {
                 Spacer(Modifier.width(2.dp))
                 Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconSmall))
@@ -554,6 +587,67 @@ fun ClarifyCard(cq: AskClarify, onSubmit: (String) -> Unit) {
                 TextButton(onClick = { if (answer.isNotBlank()) onSubmit(answer.trim()) }, enabled = answer.isNotBlank()) {
                     Text("Send", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold, color = if (answer.isNotBlank()) Ink.Text else Ink.Text3))
                 }
+            }
+        }
+    }
+}
+
+
+/** Baris aktivitas gabungan (tool + reasoning) — satu pill, expand → daftar langkah. */
+@Composable
+fun ActivityRow(tools: List<ChatItem.Tool>, thoughts: List<String>) {
+    Box(Modifier.padding(horizontal = Dim.ScreenH)) { StepPill(tools, thoughts) }
+}
+
+/**
+ * Pill langkah: satu bahasa visual untuk tool / reasoning / campuran.
+ * Ringkasan: "Worked · 7 steps" (running: dot + "Working · 3 steps"; ada yang
+ * gagal: ikon merah + "1 failed"). Expand → reasoning (kutipan) + baris tool.
+ */
+@Composable
+private fun StepPill(tools: List<ChatItem.Tool>, thoughts: List<String>, single: ChatItem.Tool? = null) {
+    var open by remember { mutableStateOf(false) }
+    val running = tools.any { it.status == "run" }
+    val failed = tools.count { it.status == "error" }
+    val steps = tools.size + thoughts.count { it.isNotBlank() }.coerceAtLeast(if (thoughts.isNotEmpty()) 1 else 0)
+    val label = when {
+        single != null -> toolLook(single.name).let { l ->
+            when (single.status) { "run" -> l.running + "…"; "error" -> l.done + " · failed"; else -> l.done }
+        }
+        running -> "Working · $steps steps"
+        else -> "Worked · $steps steps"
+    }
+    Column(Modifier.fillMaxWidth().animateContentSize()) {
+        Row(
+            Modifier
+                .heightIn(min = Dim.ToolRow)
+                .clip(Radius.Full)
+                .background(Ink.Surface1)
+                .pressClickable { open = !open }
+                .padding(start = 10.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                running -> PulsingDot(Ink.Live, size = 6.dp)
+                failed > 0 || single?.status == "error" -> Icon(Icons.Rounded.ErrorOutline, null, tint = Ink.Danger, modifier = Modifier.size(14.dp))
+                single != null -> Icon(toolLook(single.name).icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+                else -> Icon(Icons.Rounded.Bolt, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(label, style = Type.Caption.copy(color = Ink.Text2))
+            if (failed > 0 && single == null) {
+                Text(" · $failed failed", style = Type.Caption.copy(color = Ink.Danger))
+            }
+            Spacer(Modifier.width(2.dp))
+            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+        }
+        if (open) Column(Modifier.padding(start = 12.dp, top = 6.dp)) {
+            if (single != null) {
+                single.detail?.takeIf { it.isNotBlank() }?.let { CodeBox(single.name, it, Modifier.padding(top = 2.dp, bottom = 4.dp)) }
+            } else {
+                val joined = thoughts.filter { it.isNotBlank() }.joinToString("\n\n")
+                if (joined.isNotBlank()) QuoteText(joined.take(4000))
+                tools.forEach { ToolLine(it) }
             }
         }
     }

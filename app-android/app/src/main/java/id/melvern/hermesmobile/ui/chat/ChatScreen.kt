@@ -569,7 +569,7 @@ fun ChatScreen(
                         if (idx >= 0) items = items.toMutableList().also { l ->
                             val t = l[idx] as ChatItem.Tool
                             val detail = listOfNotNull(t.detail, out).joinToString("\n\n").ifBlank { null }
-                            l[idx] = t.copy(status = "done", detail = detail?.take(4000))
+                            l[idx] = t.copy(status = if (toolFailed(p?.get("result"))) "error" else "done", detail = detail?.take(4000))
                         }
                         cacheSnapshot()
                     }
@@ -786,6 +786,7 @@ fun ChatScreen(
                             is ChatRow.Day -> DayChip(row.label)
                             is ChatRow.Tools -> ToolGroup(row.tools)
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
+                            is ChatRow.Activity -> ActivityRow(row.tools, row.thoughts)
                             is ChatRow.Item -> when (val item = row.item) {
                                 is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch)
                                 is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) }, showMeta = row.index in turnEnds)
@@ -1232,4 +1233,16 @@ private fun readUriMeta(context: android.content.Context, uri: android.net.Uri):
         }
     }
     return name to mime
+}
+
+
+/** Hasil tool gagal: objek dengan `error` non-kosong, `success:false`, atau exit_code ≠ 0. */
+internal fun toolFailed(result: kotlinx.serialization.json.JsonElement?): Boolean {
+    val o = result as? kotlinx.serialization.json.JsonObject ?: return false
+    val err = o["error"]
+    if (err != null && err !is kotlinx.serialization.json.JsonNull &&
+        !(err is kotlinx.serialization.json.JsonPrimitive && (err.content.isBlank() || err.content == "false"))) return true
+    (o["success"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { if (it == "false") return true }
+    val code = (o["exit_code"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
+    return code != null && code != 0
 }

@@ -633,7 +633,7 @@ private fun SessionRowView(
                 Spacer(Modifier.height(3.dp))
                 OneLine(
                     if (running) "Working…" else secondLine(s, last),
-                    Type.Preview.copy(color = if (running) Ink.Text2 else Ink.Text3),
+                    Type.Preview.copy(color = if (running) Ink.Text else Ink.Text3),
                 )
             }
         }
@@ -665,13 +665,14 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                 style = Type.Callout.copy(color = Ink.Danger),
                 modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 12.dp),
             )
-            else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+            else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
                 items(rows!!, key = { it.name }) { p ->
                     val selected = p.name == current
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .heightIn(min = Dim.SheetRow)
+                            .then(if (selected) Modifier.background(Ink.Surface3) else Modifier)
                             .pressClickable {
                                 app.setProfile(p.name)
                                 onDismiss()
@@ -682,8 +683,8 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                         ProfileAvatar(app, p.name, Dim.AvatarSheet)
                         Spacer(Modifier.width(Dim.RowGap))
                         Column(Modifier.weight(1f)) {
-                            OneLine(p.displayName.ifBlank { p.name }, Type.Title)
-                            p.model?.takeIf { it.isNotBlank() }?.let { OneLine(it, Type.Meta) }
+                            OneLine(Pretty.profile(p.displayName.ifBlank { p.name }), Type.RowTitle)
+                            p.model?.takeIf { it.isNotBlank() }?.let { OneLine(Pretty.model(it), Type.Meta.copy(color = Ink.Text3)) }
                         }
                         if (selected) Icon(Icons.Rounded.Check, "Active profile", tint = Ink.Text, modifier = Modifier.size(Dim.Icon))
                     }
@@ -704,8 +705,8 @@ private fun ProfileSheet(app: HermesApp, showHidden: Boolean, onToggleHidden: (B
                 checked = showHidden,
                 onCheckedChange = { onToggleHidden(it) },
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Ink.Text,
-                    checkedTrackColor = Ink.Text.copy(alpha = 0.3f),
+                    checkedThumbColor = Ink.Bg,
+                    checkedTrackColor = Ink.Text,
                     checkedBorderColor = Ink.Transparent,
                     uncheckedThumbColor = Ink.Text2,
                     uncheckedTrackColor = Ink.Surface2,
