@@ -530,8 +530,9 @@ fun ChatScreen(
                 // v26: prompt "Send after" sudah jalan (ada row di DB) → bubble normal, lepas dari store
                 id.melvern.hermesmobile.core.repo.PromptStore.settleServerQueued(app, sid, tail.map { it.text to it.at })
                 val tailTexts = tail.map { id.melvern.hermesmobile.core.model.SteerText.unwrap(it.text).first.trim() }
-                if (items.any { it is ChatItem.User && it.queued && it.text.trim() in tailTexts }) {
-                    items = items.map { if (it is ChatItem.User && it.queued && it.text.trim() in tailTexts) it.copy(queued = false) else it }
+                fun ran(u: ChatItem.User) = u.queued && tailTexts.any { t -> id.melvern.hermesmobile.core.model.UserMatch.same(u.text, t) }
+                if (items.any { it is ChatItem.User && ran(it) }) {
+                    items = items.map { if (it is ChatItem.User && ran(it)) it.copy(queued = false) else it }
                 }
                 val merged = id.melvern.hermesmobile.core.repo.InsightsRepo.mergeUserTail(items, tail) { RelTime.clock(it) }
                 if (merged !== items) {

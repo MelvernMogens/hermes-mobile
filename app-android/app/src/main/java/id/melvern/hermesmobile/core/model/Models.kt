@@ -141,3 +141,23 @@ object SteerText {
     fun unwrap(text: String): Pair<String, Boolean> =
         rx.find(text)?.let { it.groupValues[1].trim() to true } ?: (text to false)
 }
+
+/**
+ * v26.2: kunci pencocokan pesan user lokal (bubble optimistis) vs row DB.
+ * Server menambah baris `@file:` / `@image:` dan blok "--- Attached Context ---" ke prompt
+ * berlampiran — tanpa normalisasi, bubble lokal tidak dikenali dan tampil dobel.
+ */
+object UserMatch {
+    private val CTX = Regex("""\n*-{3}\s*Attached Context\s*-{3}""")
+    fun key(raw: String): String {
+        val cut = CTX.find(raw)?.let { raw.substring(0, it.range.first) } ?: raw
+        return cut.lineSequence().map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("@file:") && !it.startsWith("@image:") }
+            .joinToString("\n")
+    }
+    /** [local] (tanpa quote) cocok dengan [server] (bisa diawali "> quote"). */
+    fun same(local: String, server: String): Boolean {
+        val a = key(local); val b = key(server)
+        return a == b || (a.isNotEmpty() && b.endsWith(a))
+    }
+}

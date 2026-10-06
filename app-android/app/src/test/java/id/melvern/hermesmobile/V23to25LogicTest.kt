@@ -156,4 +156,14 @@ class V23to25LogicTest {
         assertEquals("1 h 02 min", id.melvern.hermesmobile.core.repo.FleetLogic.duration(3727))
         assertEquals("4 min", id.melvern.hermesmobile.core.repo.FleetLogic.duration(250))
     }
+
+    @Test fun fileMessageNotDuplicatedAgainstServerRow() {
+        val local = ChatItem.User("ini derrick kirim ini\nMEDIA:/Users/m/.hermes/attachments/a.md", at = 100.0)
+        val server = id.melvern.hermesmobile.core.repo.InsightsRepo.UserMsg(65831,
+            "ini derrick kirim ini\n@file:.hermes/attachments/a.md\nMEDIA:/Users/m/.hermes/attachments/a.md\n\n--- Attached Context ---\n\nisi file", 101.0)
+        val merged = id.melvern.hermesmobile.core.repo.InsightsRepo.mergeUserTail(listOf(local), listOf(server)) { "" }
+        assertEquals(1, merged.size)
+        val back = id.melvern.hermesmobile.core.repo.InsightsRepo.backfillRowIds(listOf(local), listOf(server))
+        assertEquals(65831, (back[0] as ChatItem.User).rowId)
+    }
 }

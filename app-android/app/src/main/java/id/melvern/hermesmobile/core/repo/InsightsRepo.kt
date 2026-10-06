@@ -100,9 +100,9 @@ class InsightsRepo(private val settings: ConnectionSettings) {
             val recentTexts = users.takeLast(12).map { it.text.trim() }.toMutableList()
             val missing = tail.filter { m ->
                 if (m.rowId != null && m.rowId in haveIds) return@filter false
-                // pesan dari HP: teks yang dikirim bisa diawali "> quote" — cocokkan ekor teks
+                // pesan dari HP: teks yang dikirim bisa diawali "> quote" / berisi ref lampiran — cocokkan kunci
                 val t = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text).first.trim()
-                val hit = recentTexts.indexOfFirst { it == t || t.endsWith(it) && it.isNotEmpty() }
+                val hit = recentTexts.indexOfFirst { id.melvern.hermesmobile.core.model.UserMatch.same(it, t) }
                 if (hit >= 0) { recentTexts.removeAt(hit); false } else true
             }
             if (missing.isEmpty()) return items
@@ -125,7 +125,7 @@ class InsightsRepo(private val settings: ConnectionSettings) {
                 val want = u.text.trim()
                 val k = pool.indexOfLast { m ->
                     val t = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text).first.trim()
-                    t == want || (want.isNotEmpty() && t.endsWith(want))
+                    id.melvern.hermesmobile.core.model.UserMatch.same(want, t)
                 }
                 if (k >= 0) { out[i] = u.copy(rowId = pool[k].rowId); pool.removeAt(k) }
             }

@@ -184,7 +184,7 @@ object PromptStore {
         val all = serverQueuedAll(c)
         val keep = all.filter { q ->
             q.storedId != storedId || userMsgs.none { (t, at) ->
-                (t.trim() == q.text || t.trim().endsWith(q.text)) && (at == null || at * 1000 >= q.at - 120_000)
+                id.melvern.hermesmobile.core.model.UserMatch.same(q.text, t) && (at == null || at * 1000 >= q.at - 120_000)
             }
         }
         if (keep.size != all.size) sp(c).edit().putString("server_queue", json.encodeToString(QList, keep)).apply()
