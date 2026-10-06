@@ -499,8 +499,10 @@ async def preview_http(request: web.Request) -> web.StreamResponse:
         # copy the app's login cookie(s) onto the preview origin + remember the target port
         for part in cookie.split(";"):
             name, _, val = part.strip().partition("=")
-            if name.startswith("hermes_session"):
-                resp.set_cookie(name, val, httponly=True, samesite="Lax", secure=https, path="/")
+            # https (tailnet) memakai prefix __Host- (wajib Secure, Path=/, tanpa Domain)
+            if name.startswith("hermes_session") or name.startswith("__Host-hermes_session"):
+                resp.set_cookie(name, val, httponly=True, samesite="Lax",
+                                secure=https or name.startswith("__Host-"), path="/")
         resp.set_cookie("hm_preview_port", port, httponly=True, samesite="Lax", secure=https, path="/")
         raise resp
     if not await _cookie_authed(request, request.app["client"]):
