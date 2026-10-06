@@ -98,6 +98,10 @@ sealed interface ChatItem {
         val quote: String? = null,
         /** v23: dikirim sebagai steer (masuk ke turn yang sedang jalan). */
         val steered: Boolean = false,
+        /** v26.3: gagal terkirim — tap untuk kirim ulang (pesan tersimpan di Outbox). */
+        val failed: Boolean = false,
+        /** v26.3: id entri Outbox (pesan yang dikirim dari HP ini, belum terkonfirmasi server). */
+        val outboxId: String? = null,
     ) : ChatItem
     data class Assistant(
         val text: String,

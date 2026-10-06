@@ -166,4 +166,18 @@ class V23to25LogicTest {
         val back = id.melvern.hermesmobile.core.repo.InsightsRepo.backfillRowIds(listOf(local), listOf(server))
         assertEquals(65831, (back[0] as ChatItem.User).rowId)
     }
+
+    @Test fun outboxBubbleSurvivesReopenAndShowsFailed() {
+        val o = id.melvern.hermesmobile.core.repo.Outbox.Out("o1", "s1", "after that QX", "after that QX", 1_000_000L, queued = true)
+        val base = listOf<ChatItem>(ChatItem.User("hi", rowId = 1))
+        val out = id.melvern.hermesmobile.core.repo.Outbox.reconcile(base, listOf(o), { false }) { "" }
+        val u = out.last() as ChatItem.User
+        assertEquals("after that QX", u.text); assertTrue(u.failed); assertEquals("o1", u.outboxId)
+        // sedang dikirim → pending, bukan failed
+        val sending = id.melvern.hermesmobile.core.repo.Outbox.reconcile(base, listOf(o), { true }) { "" }.last() as ChatItem.User
+        assertTrue(sending.pending); assertFalse(sending.failed)
+        // terkirim (keluar outbox) → bubble normal
+        val done = id.melvern.hermesmobile.core.repo.Outbox.reconcile(out, emptyList(), { false }) { "" }.last() as ChatItem.User
+        assertFalse(done.failed); assertFalse(done.pending)
+    }
 }

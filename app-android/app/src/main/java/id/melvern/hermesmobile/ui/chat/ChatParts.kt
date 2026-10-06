@@ -189,6 +189,8 @@ fun UserBubble(
     onLongPress: (String) -> Unit,
     mediaFetch: (suspend (String) -> androidx.compose.ui.graphics.ImageBitmap?)? = null,
     videoFetch: (suspend (String) -> java.io.File?)? = null,
+    /** v26.3: bubble gagal kirim → tap = kirim ulang. */
+    onRetry: (() -> Unit)? = null,
 ) {
     // M11: quote block (reply) di atas isi — kaya WhatsApp.
     // M12: pesan user yang mengandung MEDIA:/path → render via MarkdownText (foto/video/player),
@@ -205,8 +207,11 @@ fun UserBubble(
                 .widthIn(max = maxW)
                 .clip(Radius.BubbleUser)
                 .background(Ink.Surface2)
-                .pointerInput(item.text) {
-                    detectTapGestures(onLongPress = { onLongPress(item.text) })
+                .pointerInput(item.text, item.failed) {
+                    detectTapGestures(
+                        onLongPress = { onLongPress(item.text) },
+                        onTap = { if (item.failed) onRetry?.invoke() },
+                    )
                 }
                 .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
             horizontalAlignment = Alignment.End,
@@ -231,6 +236,12 @@ fun UserBubble(
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
+                    item.failed -> {
+                        Icon(Icons.Rounded.ErrorOutline, null, tint = Ink.Danger, modifier = Modifier.size(Dim.IconTiny))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Not sent · Tap to retry", style = Type.Caption.copy(color = Ink.Danger))
+                        if (item.time.isNotEmpty()) Spacer(Modifier.width(6.dp))
+                    }
                     item.steered -> {
                         Icon(Icons.Rounded.CallSplit, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconTiny))
                         Spacer(Modifier.width(4.dp))

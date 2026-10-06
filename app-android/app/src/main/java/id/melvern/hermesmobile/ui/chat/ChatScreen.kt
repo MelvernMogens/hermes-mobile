@@ -410,6 +410,11 @@ fun ChatScreen(
         } catch (_: Throwable) { emptyList() }
     }
 
+    // v26.3: status outbox berubah (kirim selesai/gagal) → sinkron bubble
+    val outboxVersion by id.melvern.hermesmobile.core.repo.Outbox.version.collectAsState()
+    LaunchedEffect(outboxVersion, effectiveStoredId) {
+        if (!loading) items = id.melvern.hermesmobile.core.repo.Outbox.reconcile(items, id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId), id.melvern.hermesmobile.core.repo.Outbox::isSending) { RelTime.clock(it) }
+    }
     // Share to Hermes: chat ini dipilih sebagai tujuan → teks ke draft, file pertama di-attach.
     val shareTarget by id.melvern.hermesmobile.core.share.ShareInbox.target.collectAsState()
     val sharePending by id.melvern.hermesmobile.core.share.ShareInbox.pending.collectAsState()
@@ -546,6 +551,68 @@ fun ChatScreen(
     }
 
 
+    /**
+     * v26.3: kirim lewat Outbox di scope APLIKASI — keluar chat tidak membatalkan kirim,
+     * gagal tidak menghilangkan pesan (bubble "Not sent · Tap to retry").
+     */
+    fun deliver(o: id.melvern.hermesmobile.core.repo.Outbox.Out) {
+        id.melvern.hermesmobile.core.repo.Outbox.markSending(o.id)
+        // retry: pindahkan bubble ke bawah (urutan = urutan server menerima)
+        val idx = items.indexOfFirst { it is ChatItem.User && it.outboxId == o.id }
+        if (idx >= 0) {
+            val u = (items[idx] as ChatItem.User).copy(pending = true, failed = false)
+            items = liveAppend(items.filterIndexed { i, _ -> i != idx }, u)
+        }
+        val turnStartSnapshot = turnStartCount
+        app.appScope.launch {
+            try {
+                val c = app.client ?: throw IllegalStateException("not connected")
+                // socket bisa sedang reconnect (balik dari background) — tunggu OPEN sebentar
+                val deadline = System.currentTimeMillis() + 15_000
+                while (c.state.value != ConnState.OPEN && System.currentTimeMillis() < deadline) delay(300)
+                val repo = SessionRepo(c, app.profile.value)
+                var rt = runtimeId
+                val status = if (o.queued) {
+                    repo.submitQueued(rt, o.text); SessionRepo.SubmitStatus.QUEUED
+                } else {
+                    val (newRt, st) = repo.sendPromptResilient(o.storedId, rt, o.text); rt = newRt; st
+                }
+                id.melvern.hermesmobile.core.repo.Outbox.remove(app, o.id)
+                if (o.queued) id.melvern.hermesmobile.core.repo.PromptStore.addServerQueued(app, o.storedId, o.display)
+                withContext(Dispatchers.Main) {
+                    sessionNotOwned = false
+                    if (rt != runtimeId) runtimeId = rt
+                    items = items.map {
+                        if (it is ChatItem.User && it.outboxId == o.id)
+                            it.copy(pending = false, failed = false, outboxId = null, queued = status == SessionRepo.SubmitStatus.QUEUED)
+                        else it
+                    }
+                    if (status == SessionRepo.SubmitStatus.QUEUED) running = true
+                    cacheSnapshot()
+                }
+                if (!o.queued) {
+                    val watchdogRuntime = rt
+                    withTimeoutOrNull(20_000) { while (turnStartCount == turnStartSnapshot && running) delay(500) }
+                    if (turnStartCount == turnStartSnapshot) app.client?.replaySince(watchdogRuntime)
+                }
+            } catch (e: Throwable) {
+                withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
+                    if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException) sessionNotOwned = true
+                    items = items.map { if (it is ChatItem.User && it.outboxId == o.id) it.copy(pending = false, failed = true) else it }
+                    cacheSnapshot()
+                }
+            } finally {
+                id.melvern.hermesmobile.core.repo.Outbox.markDone(o.id)
+            }
+        }
+    }
+
+    /** v26.3: tambahkan bubble outbox yang belum tampil (setelah keluar-masuk / app di-kill). */
+    fun withOutbox(list: List<ChatItem>): List<ChatItem> {
+        id.melvern.hermesmobile.core.repo.Outbox.settle(app, effectiveStoredId, list.filterIsInstance<ChatItem.User>().filter { it.outboxId == null }.map { it.text to it.at })
+        return id.melvern.hermesmobile.core.repo.Outbox.reconcile(list, id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId), id.melvern.hermesmobile.core.repo.Outbox::isSending) { RelTime.clock(it) }
+    }
+
     /** v26: bubble "Send after" yang belum jalan — buang yang sudah masuk transcript, sisanya tampil Queued. */
     fun withQueued(list: List<ChatItem>): List<ChatItem> {
         val sid = effectiveStoredId
@@ -553,7 +620,7 @@ fun ChatScreen(
         val pending = id.melvern.hermesmobile.core.repo.PromptStore.serverQueued(app, sid)
         // bubble queued lama (cache) yang sudah tidak antre → dibuang; sisanya ditambah ulang dari store
         val base = list.filterNot { it is ChatItem.User && it.queued && it.rowId == null && pending.none { q -> q.text == it.text.trim() } }
-        return id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(base, pending) { RelTime.clock(it) }
+        return withOutbox(id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(base, pending) { RelTime.clock(it) })
     }
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
@@ -1025,7 +1092,8 @@ fun ChatScreen(
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
                             is ChatRow.Activity -> ActivityRow(row.tools, row.thoughts)
                             is ChatRow.Item -> when (val item = row.item) {
-                                is ChatItem.User -> UserBubble(item, onLongPress = { userActionTarget = item }, mediaFetch = mediaFetch, videoFetch = videoFetch)
+                                is ChatItem.User -> UserBubble(item, onLongPress = { userActionTarget = item }, mediaFetch = mediaFetch, videoFetch = videoFetch,
+                                    onRetry = item.outboxId?.let { oid -> { id.melvern.hermesmobile.core.repo.Outbox.get(context, oid)?.let { deliver(it) } } })
                                 is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) }, showMeta = row.index in turnEnds)
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,
@@ -1182,18 +1250,11 @@ fun ChatScreen(
                     },
                     onQueue = {
                         val t = input.trim(); input = ""
-                        items = items + ChatItem.User(t, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch())
+                        val o = id.melvern.hermesmobile.core.repo.Outbox.Out(java.util.UUID.randomUUID().toString(), effectiveStoredId, t, t, System.currentTimeMillis(), queued = true)
+                        id.melvern.hermesmobile.core.repo.Outbox.add(context, o)
+                        items = liveAppend(items, ChatItem.User(t, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(), outboxId = o.id))
                         forceScroll = true
-                        scope.launch {
-                            try {
-                                SessionRepo(app.client ?: return@launch, app.profile.value).submitQueued(runtimeId, t)
-                                id.melvern.hermesmobile.core.repo.PromptStore.addServerQueued(context, effectiveStoredId, t)
-                                items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = true) else it }
-                                cacheSnapshot()
-                            } catch (e: Throwable) {
-                                items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it } + ChatItem.NoticeLine(e.message ?: "Send failed")
-                            }
-                        }
+                        deliver(o)
                     },
                 )
             }
@@ -1331,67 +1392,15 @@ fun ChatScreen(
                 attachments = emptyList()
                 attachThumbs = emptyMap()
                 forceScroll = true
+                val display = listOfNotNull(typed.takeIf { it.isNotEmpty() }, mediaLine).joinToString("\n")
+                    .ifEmpty { "Sent ${atts.joinToString { it.name }}" }
+                val o = id.melvern.hermesmobile.core.repo.Outbox.Out(java.util.UUID.randomUUID().toString(), effectiveStoredId, display, text, System.currentTimeMillis(), quote = quote)
+                id.melvern.hermesmobile.core.repo.Outbox.add(context, o)
                 items = items + ChatItem.User(
-                    listOfNotNull(typed.takeIf { it.isNotEmpty() }, mediaLine).joinToString("\n")
-                        .ifEmpty { "Sent ${atts.joinToString { it.name }}" },
-                    pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
-                    quote = quote,
+                    display, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
+                    quote = quote, outboxId = o.id,
                 )
-                scope.launch {
-                    try {
-                        val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
-                        // M7: snapshot counter SEBELUM submit — kalau server kirim
-                        // message.start sebelum response RPC submit balik, event itu
-                        // sudah terhitung (tidak dimakan reset).
-                        val turnStartSnapshot = turnStartCount
-                        val (newRuntime, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, text)
-                        // M7 fix: kondisi normal terbukti lewat submit sukses —
-                        // reset fakta 4090 lama (readOnly di-derive → false).
-                        sessionNotOwned = false
-                        if (newRuntime != runtimeId) runtimeId = newRuntime
-                        // M5: status "queued" → server bilang pesan diantrekan/steered —
-                        // bubble user tampil "QUEUED" (bukan pending forever).
-                        items = items.map {
-                            if (it is ChatItem.User && it.pending)
-                                it.copy(pending = false, queued = status == SessionRepo.SubmitStatus.QUEUED)
-                            else it
-                        }
-                        if (status == SessionRepo.SubmitStatus.QUEUED) running = true // turn lanjut/drain queued
-                        cacheSnapshot()
-                        // M7 watchdog: submit sukses tapi event streaming belum pasti
-                        // sampai. Kalau message.start (counter naik) gak datang dalam
-                        // 20s, refresh transcript via session.events.since (replay
-                        // RPC) — bukan spinner "running" tak berujung. Loop juga
-                        // berhenti kalau turn tamat (message.complete → running=false)
-                        // tanpa start (mis. jawaban kosong/turn direject) — tidak
-                        // menunggu penuh 20s sia-sia. (Review M7: versi boolean +
-                        // kondisi `running` exit instan saat submit turn baru.)
-                        val watchdogRuntime = runtimeId
-                        withTimeoutOrNull(20_000) {
-                            while (turnStartCount == turnStartSnapshot && running) delay(500)
-                        }
-                        if (turnStartCount == turnStartSnapshot && runtimeId == watchdogRuntime) {
-                            app.client?.replaySince(watchdogRuntime)
-                        }
-                        cacheSnapshot()
-                    } catch (e: Throwable) {
-                        items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
-                        if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException) {
-                            // M6: read-only yang bener — transcript tetap, banner + composer mati.
-                            // M7: simpan FAKTA error; readOnly (banner) di-derive dari
-                            // gateway mode — 4090 saat gateway mobile = session benar2
-                            // dipegang surface lain, tapi saat desktop-linked itu lease
-                            // stale yang sembuh sendiri lewat retry.
-                            sessionNotOwned = true
-                        } else {
-                            val msg = "Couldn't send: ${e.message}"
-                            items = items + ChatItem.NoticeLine(msg)
-                        }
-                        // M5 fix (review): gak nimpa draft baru yang user lagi ketik —
-                        // restore cuma kalau input masih kosong.
-                        if (input.isBlank()) input = text
-                    }
-                }
+                deliver(o)
             },
             onStop = { scope.launch { app.client?.let { SessionRepo(it, app.profile.value).interrupt(runtimeId) } } },
         )
