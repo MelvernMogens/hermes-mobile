@@ -68,3 +68,9 @@ def test_diff_never_runs_repo_controlled_commands(tmp_path, monkeypatch):
     out = mm.diff(str(repo))
     assert not flag.exists()
     assert "+y" in out["patch"]
+
+
+def test_hermes_internal_servers_not_listed():
+    assert mm._is_hermes_internal("/x/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --profile default serve --port 0")
+    assert mm._is_hermes_internal("/x/venv/bin/python /Users/m/Code/hermes-webui/server.py")
+    assert not mm._is_hermes_internal("node /Users/m/Code/reel-studio/node_modules/.bin/vite --port 4545")

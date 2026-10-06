@@ -159,4 +159,61 @@ object PromptStore {
     fun requeueFront(c: android.content.Context, q: Queued) = saveQueue(c, listOf(q) + queue(c).filterNot { it == q })
     private fun saveQueue(c: android.content.Context, l: List<Queued>) =
         sp(c).edit().putString("queue", json.encodeToString(kotlinx.serialization.builtins.ListSerializer(Queued.serializer()), l.takeLast(50))).apply()
+
+    // ── v26: "Send after" (prompt.submit queued=true) — server menahan prompt sampai turn
+    // berjalan, belum ada row di DB. Disimpan di HP supaya bubble "Queued" tetap ada
+    // setelah keluar-masuk chat / app di-kill; dibuang begitu transcript memuatnya.
+    private val QList = kotlinx.serialization.builtins.ListSerializer(Queued.serializer())
+    private const val SERVER_TTL_MS = 6 * 3600_000L
+
+    fun serverQueued(c: android.content.Context, storedId: String): List<Queued> =
+        serverQueuedAll(c).filter { it.storedId == storedId }
+
+    private fun serverQueuedAll(c: android.content.Context): List<Queued> {
+        val now = System.currentTimeMillis()
+        return runCatching { json.decodeFromString(QList, sp(c).getString("server_queue", "[]")!!) }
+            .getOrDefault(emptyList()).filter { now - it.at < SERVER_TTL_MS }
+    }
+
+    fun addServerQueued(c: android.content.Context, storedId: String, text: String) =
+        sp(c).edit().putString("server_queue", json.encodeToString(QList,
+            (serverQueuedAll(c) + Queued(storedId, text.trim(), System.currentTimeMillis())).takeLast(50))).apply()
+
+    /** Buang entri yang sudah muncul sebagai pesan user di transcript (cocok teks, setelah waktu antre). */
+    fun settleServerQueued(c: android.content.Context, storedId: String, userMsgs: List<Pair<String, Double?>>) {
+        val all = serverQueuedAll(c)
+        val keep = all.filter { q ->
+            q.storedId != storedId || userMsgs.none { (t, at) ->
+                (t.trim() == q.text || t.trim().endsWith(q.text)) && (at == null || at * 1000 >= q.at - 120_000)
+            }
+        }
+        if (keep.size != all.size) sp(c).edit().putString("server_queue", json.encodeToString(QList, keep)).apply()
+    }
+
+    /** Pure: tambahkan bubble "Queued" untuk antrean yang belum ada di [items]. */
+    fun withServerQueued(items: List<id.melvern.hermesmobile.core.model.ChatItem>, pending: List<Queued>,
+                         clock: (Double) -> String): List<id.melvern.hermesmobile.core.model.ChatItem> {
+        if (pending.isEmpty()) return items
+        val have = items.filterIsInstance<id.melvern.hermesmobile.core.model.ChatItem.User>().takeLast(20).map { it.text.trim() }.toMutableList()
+        val add = pending.filter { q ->
+            val hit = have.indexOfFirst { it == q.text || it.endsWith(q.text) }
+            if (hit >= 0) { have.removeAt(hit); false } else true
+        }.map { q ->
+            val at = q.at / 1000.0
+            id.melvern.hermesmobile.core.model.ChatItem.User(q.text, queued = true, time = clock(at), at = at)
+        }
+        return if (add.isEmpty()) items else items + add
+    }
+}
+
+/** v26: draft kolom ketik per chat — selamat dari keluar-masuk chat & app di-kill. */
+object DraftStore {
+    private const val PREF = "chat_drafts"
+    private fun sp(c: android.content.Context) = c.getSharedPreferences(PREF, android.content.Context.MODE_PRIVATE)
+    fun get(c: android.content.Context, storedId: String): String =
+        if (storedId.isBlank()) "" else sp(c).getString(storedId, "") ?: ""
+    fun put(c: android.content.Context, storedId: String, text: String) {
+        if (storedId.isBlank()) return
+        if (text.isBlank()) sp(c).edit().remove(storedId).apply() else sp(c).edit().putString(storedId, text).apply()
+    }
 }

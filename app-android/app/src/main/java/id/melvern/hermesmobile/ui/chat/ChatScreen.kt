@@ -109,6 +109,22 @@ import kotlinx.serialization.json.put
  * Logika M3–M7 (resume, event stream, approval/clarify, queue, watchdog,
  * read-only derived) dipertahankan apa adanya — pass ini visual.
  */
+
+/** v26: bubble "Send after" yang belum jalan selalu paling bawah — output turn yang sedang
+ *  berjalan disisipkan DI ATAS-nya, bukan di bawahnya. */
+internal fun splitQueuedTail(items: List<ChatItem>): Pair<List<ChatItem>, List<ChatItem>> {
+    var i = items.size
+    while (i > 0 && (items[i - 1] as? ChatItem.User)?.let { it.queued && it.rowId == null } == true) i--
+    return items.subList(0, i) to items.subList(i, items.size)
+}
+internal fun liveAppend(items: List<ChatItem>, item: ChatItem): List<ChatItem> {
+    val (head, tail) = splitQueuedTail(items)
+    return head + item + tail
+}
+
+/** v26: batas lampiran per pesan (share / picker). */
+private const val MAX_ATTACH = 10
+
 @Composable
 fun ChatScreen(
     app: HermesApp,
@@ -139,7 +155,7 @@ fun ChatScreen(
     var running by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(preattachedRuntime == null) }
     // M9 (item 6): draft input selamat dari rotate (transcript via TranscriptCache).
-    var input by rememberSaveable { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf(id.melvern.hermesmobile.core.repo.DraftStore.get(app, actualStoredId)) }
     // M3.3: thinking indicator — event thinking.delta / reasoning.delta
     var thinking by remember { mutableStateOf(false) }
     var thinkingText by remember { mutableStateOf("") }
@@ -206,6 +222,17 @@ fun ChatScreen(
     // v25: prompt favorit + antrean offline
     var favorites by remember { mutableStateOf(id.melvern.hermesmobile.core.repo.PromptStore.favorites(app)) }
     var offlineQueued by remember { mutableStateOf(id.melvern.hermesmobile.core.repo.PromptStore.queue(app).filter { it.storedId == actualStoredId }) }
+    // v26: draft per chat — disimpan (debounce) + saat keluar chat; mode edit tidak menimpa draft.
+    val latestInput by rememberUpdatedState(input)
+    val latestEditing by rememberUpdatedState(editTarget != null)
+    LaunchedEffect(input, effectiveStoredId) {
+        if (editTarget != null) return@LaunchedEffect
+        delay(400)
+        id.melvern.hermesmobile.core.repo.DraftStore.put(app, effectiveStoredId, input)
+    }
+    DisposableEffect(effectiveStoredId) {
+        onDispose { if (!latestEditing) id.melvern.hermesmobile.core.repo.DraftStore.put(app, effectiveStoredId, latestInput) }
+    }
     // M11: reply — teks pesan yang di-quote, tampil sebagai chip di atas composer.
     var replyQuote by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
@@ -230,10 +257,13 @@ fun ChatScreen(
 
     // M5: attach — picker Android, hasil jadi chip di atas composer.
     val context = androidx.compose.ui.platform.LocalContext.current
-    var attachment by remember { mutableStateOf<Attachment?>(null) }
-    var attaching by remember { mutableStateOf(false) }
+    // v26: banyak lampiran sekaligus (share multi-file / pilih beberapa dari galeri)
+    var attachments by remember { mutableStateOf<List<Attachment>>(emptyList()) }
+    var attachThumbs by remember { mutableStateOf<Map<Attachment, androidx.compose.ui.graphics.ImageBitmap>>(emptyMap()) }
+    var attachingCount by remember { mutableStateOf(0) }
+    val attaching = attachingCount > 0
+    val attachUploadLock = remember { kotlinx.coroutines.sync.Mutex() }
     var attachError by remember { mutableStateOf<String?>(null) }
-    var attachThumb by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var attachSheet by remember { mutableStateOf(false) }
     // Voice input (mic di composer saat field kosong)
     val voice = rememberVoiceInput()
@@ -243,8 +273,10 @@ fun ChatScreen(
     /** Upload satu URI (foto / video / file) ke session → chip di composer. */
     fun attachUri(uri: android.net.Uri) {
         val c = app.client ?: return
-        attaching = true; attachError = null
+        attachingCount++; attachError = null
         scope.launch {
+            // upload satu-satu (urutan stabil, server image counter tidak balapan)
+            attachUploadLock.lock()
             try {
                 // balik dari picker → activity sempat background → WS bisa reconnect. Tunggu OPEN.
                 val deadline = System.currentTimeMillis() + 20_000
@@ -285,8 +317,7 @@ fun ChatScreen(
                     )
                     Attachment(refText = out.refText, name = out.name, isImage = false, path = out.path, isVideo = isVideo)
                 }
-                attachment = att
-                attachThumb = withContext(Dispatchers.Default) {
+                val thumb = withContext(Dispatchers.Default) {
                     when {
                         isImage -> {
                             val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -308,9 +339,11 @@ fun ChatScreen(
                         else -> null
                     }
                 }
+                attachments = attachments + att
+                if (thumb != null) attachThumbs = attachThumbs + (att to thumb)
             } catch (e: Throwable) {
                 attachError = "Couldn't attach: ${e.message}"
-            } finally { attaching = false }
+            } finally { attachingCount--; attachUploadLock.unlock() }
         }
     }
     // v23: subagent monitor — poll saat turn jalan (atau ada event subagent), berhenti saat idle & semua selesai.
@@ -374,16 +407,16 @@ fun ChatScreen(
         if (runtimeId.isBlank()) return@LaunchedEffect
         val sh = id.melvern.hermesmobile.core.share.ShareInbox.take(effectiveStoredId) ?: return@LaunchedEffect
         sh.text?.let { t -> input = listOf(input.trim(), t).filter { it.isNotEmpty() }.joinToString("\n") }
-        sh.uris.firstOrNull()?.let { attachUri(it) }
-        if (sh.uris.size > 1) attachError = "Attached the first file — send it, then share the rest"
+        sh.uris.take(MAX_ATTACH).forEach { attachUri(it) }
+        if (sh.uris.size > MAX_ATTACH) attachError = "Attached the first $MAX_ATTACH files"
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri -> if (uri != null) attachUri(uri) }
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris -> uris.take(MAX_ATTACH - attachments.size).forEach { attachUri(it) } }
     // Galeri: foto + video (photo picker sistem, tanpa izin storage)
     val pickMedia = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
-    ) { uri -> if (uri != null) attachUri(uri) }
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACH)
+    ) { uris -> uris.take(MAX_ATTACH - attachments.size).forEach { attachUri(it) } }
     // Kamera: hasil ditulis ke cache via FileProvider
     var cameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val takePhoto = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -484,6 +517,12 @@ fun ChatScreen(
                 if (attempt > 0) delay(1500L * attempt)
                 val tail = id.melvern.hermesmobile.core.repo.InsightsRepo(conn)
                     .userTail(app.profile.value, sid, after) ?: continue
+                // v26: prompt "Send after" sudah jalan (ada row di DB) → bubble normal, lepas dari store
+                id.melvern.hermesmobile.core.repo.PromptStore.settleServerQueued(app, sid, tail.map { it.text to it.at })
+                val tailTexts = tail.map { id.melvern.hermesmobile.core.model.SteerText.unwrap(it.text).first.trim() }
+                if (items.any { it is ChatItem.User && it.queued && it.text.trim() in tailTexts }) {
+                    items = items.map { if (it is ChatItem.User && it.queued && it.text.trim() in tailTexts) it.copy(queued = false) else it }
+                }
                 val merged = id.melvern.hermesmobile.core.repo.InsightsRepo.mergeUserTail(items, tail) { RelTime.clock(it) }
                 if (merged !== items) {
                     items = merged
@@ -495,6 +534,16 @@ fun ChatScreen(
         }
     }
 
+
+    /** v26: bubble "Send after" yang belum jalan — buang yang sudah masuk transcript, sisanya tampil Queued. */
+    fun withQueued(list: List<ChatItem>): List<ChatItem> {
+        val sid = effectiveStoredId
+        id.melvern.hermesmobile.core.repo.PromptStore.settleServerQueued(app, sid, list.filterIsInstance<ChatItem.User>().filter { !it.queued }.map { it.text to it.at })
+        val pending = id.melvern.hermesmobile.core.repo.PromptStore.serverQueued(app, sid)
+        // bubble queued lama (cache) yang sudah tidak antre → dibuang; sisanya ditambah ulang dari store
+        val base = list.filterNot { it is ChatItem.User && it.queued && it.rowId == null && pending.none { q -> q.text == it.text.trim() } }
+        return id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(base, pending) { RelTime.clock(it) }
+    }
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
         when {
@@ -535,7 +584,7 @@ fun ChatScreen(
         // M9 (item 6): cache dulu — back→reopen / rotate render instan.
         if (!cacheHydrated) {
             TranscriptCache.get(actualStoredId)?.let { e ->
-                items = e.items
+                items = withQueued(e.items)
                 runtimeId = e.runtimeId
                 running = e.running
                 loading = false
@@ -584,7 +633,7 @@ fun ChatScreen(
                         val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
                         runtimeId = out.runtimeId
                         running = out.running
-                        items = mapTranscript(out.messages)
+                        items = withQueued(mapTranscript(out.messages))
                         cacheSnapshot()
                     }
                     loading = false
@@ -593,7 +642,7 @@ fun ChatScreen(
                 val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
                 runtimeId = out.runtimeId
                 running = out.running
-                items = mapTranscript(out.messages)
+                items = withQueued(mapTranscript(out.messages))
                 cacheSnapshot()
                 // M4 asli (review M9): open_requests SELALU direstore dari resume
                 // penuh — approval pending server-side membuat running=true dan
@@ -665,13 +714,14 @@ fun ChatScreen(
                         endThinking()
                         val delta = ev.payload?.get("delta")?.jsonStr() ?: ev.payload?.get("text")?.jsonStr() ?: ""
                         if (delta.isNotEmpty()) {
-                            val last = items.lastOrNull()
+                            val (head, tailQ) = splitQueuedTail(items)
+                            val last = head.lastOrNull()
                             items = if (last is ChatItem.Assistant && !last.done) {
-                                items.dropLast(1) + last.copy(text = last.text + delta)
-                            } else items + ChatItem.Assistant(
+                                head.dropLast(1) + last.copy(text = last.text + delta) + tailQ
+                            } else head + ChatItem.Assistant(
                                 delta, done = false, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
                                 reasoning = pendingThought?.first?.takeIf { it.isNotBlank() }, thoughtSecs = pendingThought?.second,
-                            )
+                            ) + tailQ
                             if (!atBottom) hasNew = true
                         }
                     }
@@ -679,10 +729,10 @@ fun ChatScreen(
                         endThinking()
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
                         items = items.filterNot { it is ChatItem.Assistant && !it.done }
-                        if (text.isNotEmpty()) items = items + ChatItem.Assistant(
+                        if (text.isNotEmpty()) items = liveAppend(items, ChatItem.Assistant(
                             text, done = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
                             reasoning = pendingThought?.first?.takeIf { it.isNotBlank() }, thoughtSecs = pendingThought?.second,
-                        )
+                        ))
                         pendingThought = null; thoughtBuf = ""
                         running = false
                         cacheSnapshot()
@@ -700,7 +750,7 @@ fun ChatScreen(
                         val text = ev.payload?.get("text")?.jsonStr() ?: ""
                         if (text.isNotEmpty()) {
                             items = items.filterNot { it is ChatItem.Assistant && !it.done }
-                            items = items + ChatItem.Assistant(text, done = false, time = RelTime.clock(nowEpoch()), at = nowEpoch())
+                            items = liveAppend(items, ChatItem.Assistant(text, done = false, time = RelTime.clock(nowEpoch()), at = nowEpoch()))
                         }
                     }
                     "tool.start" -> {
@@ -709,7 +759,7 @@ fun ChatScreen(
                         val name = p?.get("tool")?.jsonStr()?.ifEmpty { null } ?: p?.get("name")?.jsonStr()?.ifEmpty { null } ?: "tool"
                         // M8: args (ToolStartPayload.args_text/preview/context) → isi code block saat row di-expand
                         val args = listOf("args_text", "preview", "context").firstNotNullOfOrNull { k -> p?.get(k)?.jsonStr()?.takeIf { it.isNotBlank() } }
-                        items = items + ChatItem.Tool(name, "run", detail = args?.take(2000), toolId = p?.get("tool_id")?.jsonStr()?.ifEmpty { null })
+                        items = liveAppend(items, ChatItem.Tool(name, "run", detail = args?.take(2000), toolId = p?.get("tool_id")?.jsonStr()?.ifEmpty { null }))
                     }
                     "tool.complete" -> {
                         val p = ev.payload
@@ -1101,7 +1151,7 @@ fun ChatScreen(
                     }
                 }
             }
-            if (running && input.isNotBlank() && attachment == null && !readOnly && !input.trimStart().startsWith("/")) {
+            if (running && input.isNotBlank() && attachments.isEmpty() && !readOnly && !input.trimStart().startsWith("/")) {
                 BusySendBar(
                     wide = wide,
                     onSteer = {
@@ -1120,7 +1170,9 @@ fun ChatScreen(
                         scope.launch {
                             try {
                                 SessionRepo(app.client ?: return@launch, app.profile.value).submitQueued(runtimeId, t)
+                                id.melvern.hermesmobile.core.repo.PromptStore.addServerQueued(context, effectiveStoredId, t)
                                 items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = true) else it }
+                                cacheSnapshot()
                             } catch (e: Throwable) {
                                 items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it } + ChatItem.NoticeLine(e.message ?: "Send failed")
                             }
@@ -1132,14 +1184,14 @@ fun ChatScreen(
                 value = input, onValueChange = { input = it },
                 running = running, connected = connState == ConnState.OPEN,
                 readOnly = readOnly,
-                attachment = attachment,
-                attachThumb = attachThumb,
+                attachments = attachments,
+                attachThumbs = attachThumbs,
                 attaching = attaching,
                 attachError = attachError,
                 quote = replyQuote,
                 onCancelQuote = { replyQuote = null },
                 onAttach = { attachSheet = true },
-                onRemoveAttachment = { attachment = null; attachThumb = null },
+                onRemoveAttachment = { a -> attachments = attachments - a; attachThumbs = attachThumbs - a },
                 wide = wide,
                 voice = voice.takeIf { it.available },
                 slashSuggestions = slashSuggestions,
@@ -1157,13 +1209,16 @@ fun ChatScreen(
                 val quote = replyQuote
                 replyQuote = null
                 // file non-gambar WAJIB bawa ref; gambar auto-queued server
-                val att = attachment
+                val atts = attachments
+                val att = atts.firstOrNull()
                 // Lampiran: @file ref (agent baca isinya) + baris MEDIA:<path Mac> supaya
                 // bubble (live & setelah reload) render foto/video/kartu file, bukan teks path.
-                val mediaLine = att?.path?.takeIf { it.isNotBlank() }?.let { "MEDIA:$it" }
+                val mediaLine = atts.mapNotNull { a -> a.path.takeIf { it.isNotBlank() }?.let { "MEDIA:$it" } }
+                    .joinToString("\n").takeIf { it.isNotEmpty() }
                 val parts = listOfNotNull(
                     typed.takeIf { it.isNotEmpty() },
-                    att?.takeIf { !it.isImage }?.refText?.takeIf { it.isNotBlank() },
+                    atts.filter { !it.isImage }.mapNotNull { it.refText.takeIf { r -> r.isNotBlank() } }
+                        .joinToString("\n").takeIf { it.isNotEmpty() },
                     mediaLine,
                 )
                 if (typed.isEmpty() && att == null) return@Composer
@@ -1230,7 +1285,9 @@ fun ChatScreen(
                                     val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
                                     if (res.queued) {
                                         repo.submitQueued(runtimeId, res.message)
+                                        id.melvern.hermesmobile.core.repo.PromptStore.addServerQueued(context, effectiveStoredId, typed)
                                         items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = true) else it }
+                                        cacheSnapshot()
                                         return@launch
                                     }
                                     val (newRuntime, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, res.message)
@@ -1251,15 +1308,15 @@ fun ChatScreen(
                 }
                 val text = listOfNotNull(
                     sentQuote,
-                    (if (typed.isEmpty() && att?.isImage == true && mediaLine == null) "Sent a photo: ${att.name}" else parts.joinToString("\n")).takeIf { it.isNotEmpty() },
+                    (if (typed.isEmpty() && atts.isNotEmpty() && atts.all { it.isImage } && mediaLine == null) "Sent ${atts.size} photo(s)" else parts.joinToString("\n")).takeIf { it.isNotEmpty() },
                 ).joinToString("\n\n")
                 input = ""
-                attachment = null
-                attachThumb = null
+                attachments = emptyList()
+                attachThumbs = emptyMap()
                 forceScroll = true
                 items = items + ChatItem.User(
                     listOfNotNull(typed.takeIf { it.isNotEmpty() }, mediaLine).joinToString("\n")
-                        .ifEmpty { "Sent ${att?.name.orEmpty()}" },
+                        .ifEmpty { "Sent ${atts.joinToString { it.name }}" },
                     pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch(),
                     quote = quote,
                 )
@@ -1420,7 +1477,7 @@ fun ChatScreen(
                 runtimeId = runtime
                 effectiveStoredId = stored.takeIf { it.isNotBlank() } ?: actualStoredId
                 items = emptyList(); title = ""; activeModel = ""
-                input = ""; attachment = null; attachThumb = null; running = false
+                input = ""; attachments = emptyList(); attachThumbs = emptyMap(); running = false
                 cacheSnapshot()
             },
         )

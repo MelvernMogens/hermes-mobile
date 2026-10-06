@@ -3,6 +3,7 @@ package id.melvern.hermesmobile.ui.sessions
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.automirrored.outlined.CallSplit
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.PushPin
@@ -76,6 +77,7 @@ fun SessionActionSheet(
     var renaming by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf(row.displayTitle) }
     var confirmingDelete by remember { mutableStateOf(false) }
+    var confirmingHide by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     val profile = app.profile.value
@@ -118,6 +120,19 @@ fun SessionActionSheet(
                         onClick = { if (newName.isNotBlank() && !busy) run { rename(app, row, newName.trim(), profile) } },
                         enabled = newName.isNotBlank() && !busy,
                     ) { Text("Save", style = Type.Callout.copy(color = if (newName.isNotBlank() && !busy) Ink.Text else Ink.Text3)) }
+                }
+            }
+            confirmingHide -> {
+                Text(
+                    "Hide this chat? It moves to the Hidden section — you can unhide it any time.",
+                    style = Type.Callout.copy(color = Ink.Text2),
+                    modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+                )
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { confirmingHide = false }) { Text("Cancel", style = Type.Callout.copy(color = Ink.Text2)) }
+                    TextButton(enabled = !busy, onClick = { run { MetaRepo(app.client!!).hideSession(row.id, profile) } }) {
+                        Text("Hide", style = Type.Callout.copy(color = Ink.Text))
+                    }
                 }
             }
             confirmingDelete -> {
@@ -176,8 +191,9 @@ fun SessionActionSheet(
                         onOpenBranch(out.runtimeId, out.storedId)
                     }
                 }
-                if (!hidden) SheetActionRow("Hide", Icons.Outlined.VisibilityOff, enabled = !busy) {
-                    run { MetaRepo(app.client!!).hideSession(row.id, profile) }
+                if (!hidden) SheetActionRow("Hide", Icons.Outlined.VisibilityOff, enabled = !busy) { confirmingHide = true }
+                else SheetActionRow("Unhide", Icons.Outlined.Visibility, enabled = !busy) {
+                    run { MetaRepo(app.client!!).hideSession(row.id, profile, hidden = false) }
                 }
                 SheetActionRow("Copy session ID", Icons.Outlined.ContentCopy, enabled = !busy) {
                     clipboard.setText(AnnotatedString(row.id))

@@ -287,9 +287,9 @@ class MetaRepo(private val client: GatewayClient) {
     }
 
     /** `session.set_hidden` — hidden=true keluar dari list default (tetap resumable). */
-    suspend fun hideSession(sessionId: String, profile: String? = null) {
+    suspend fun hideSession(sessionId: String, profile: String? = null, hidden: Boolean = true) {
         client.call("session.set_hidden", buildJsonObject {
-            put("session_id", sessionId); put("hidden", true)
+            put("session_id", sessionId); put("hidden", hidden)
             if (profile != null && profile != "default") put("profile", profile)
         })
     }

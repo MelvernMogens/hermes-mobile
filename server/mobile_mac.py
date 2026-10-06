@@ -244,6 +244,12 @@ def diff(path: str, since: float | None = None) -> dict:
 
 # ── Web preview ──────────────────────────────────────────────────────────────
 
+def _is_hermes_internal(cmd: str) -> bool:
+    c = cmd or ""
+    return ("hermes_cli.main" in c or "hermes-webui" in c or "/.hermes/hermes-agent/" in c and " serve" in c
+            or "tui_gateway" in c)
+
+
 def listening_ports() -> list[dict]:
     """Local dev servers (127.0.0.1 / * listeners on 1024–65535), excluding Hermes' own ports."""
     out = _run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"], timeout=8)
@@ -266,7 +272,12 @@ def listening_ports() -> list[dict]:
         proc = cols[0].replace("\\x20", " ")
         if not any(proc.lower().startswith(d) for d in dev_procs):
             continue  # ControlCenter, Figma, MCP helpers, etc. — bukan web dev server
-        seen[port] = {"port": port, "process": proc}
+        seen[port] = {"port": port, "process": proc, "pid": cols[1]}
+    # v26: buang server milik Hermes sendiri (webui, `hermes serve` internal) — bukan web dev.
+    for port, r in list(seen.items()):
+        cmd = _run(["ps", "-o", "command=", "-p", r.pop("pid", "")], timeout=3)
+        if _is_hermes_internal(cmd):
+            seen.pop(port)
     rows = sorted(seen.values(), key=lambda r: r["port"])
     # Probe cepat: hanya yang menjawab HTTP (buang port RPC/socket mentah).
     import urllib.request

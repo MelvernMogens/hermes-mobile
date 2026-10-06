@@ -161,14 +161,18 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
             try {
                 val repo = SessionRepo(c, profile)
                 val visible = repo.listSessions(includeHidden = false)
+                val all = repo.listSessions(includeHidden = true)
+                // v26: "Bot Chat" disembunyikan otomatis oleh plugin bots di desktop —
+                // di HP tetap tampil sebagai chat biasa.
+                val forced = all.filter { isBotChat(it) && visible.none { v -> v.id == it.id } }
+                val shown = visible + forced
                 if (showHidden) {
-                    val all = repo.listSessions(includeHidden = true)
-                    val visibleIds = visible.map { it.id }.toSet()
-                    hiddenIds = all.map { it.id }.filterNot { it in visibleIds }.toSet()
+                    val shownIds = shown.map { it.id }.toSet()
+                    hiddenIds = all.map { it.id }.filterNot { it in shownIds }.toSet()
                     sessions = all
                 } else {
                     hiddenIds = emptySet()
-                    sessions = visible
+                    sessions = shown
                 }
             } catch (_: Throwable) {}
             try { active = SessionRepo(c, profile).activeStoredIds() } catch (_: Throwable) {}
@@ -860,3 +864,6 @@ private fun ContentHitRow(h: id.melvern.hermesmobile.core.repo.ScheduleRepo.Hit,
         Text(snippet, style = Type.Preview.copy(color = Ink.Text3), maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
+
+/** v26: chat permanen bot ("Bot Chat") — desktop selalu men-hide, HP tetap menampilkan. */
+internal fun isBotChat(r: SessionRow): Boolean = r.displayTitle.trim() == "Bot Chat" || r.title?.trim() == "Bot Chat"

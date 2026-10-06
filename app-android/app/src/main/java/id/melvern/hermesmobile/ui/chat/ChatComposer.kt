@@ -83,14 +83,14 @@ fun Composer(
     value: String, onValueChange: (String) -> Unit,
     running: Boolean, connected: Boolean,
     readOnly: Boolean,
-    attachment: Attachment?,
-    attachThumb: ImageBitmap?,
+    attachments: List<Attachment>,
+    attachThumbs: Map<Attachment, ImageBitmap>,
     attaching: Boolean,
     attachError: String?,
     quote: String? = null,
     onCancelQuote: () -> Unit = {},
     onAttach: () -> Unit,
-    onRemoveAttachment: () -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
     onSend: () -> Unit, onStop: () -> Unit,
     /** M15: expanded → composer max 640 center (Discord style). */
     wide: Boolean = false,
@@ -106,9 +106,9 @@ fun Composer(
     val focus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
     androidx.compose.runtime.LaunchedEffect(focusKey) { if (focusKey > 0) runCatching { focus.requestFocus() } }
     // v25: offline tetap bisa "kirim" teks — masuk antrean lokal, terkirim saat Mac terjangkau.
-    val canSend = !readOnly && ((connected && (value.isNotBlank() || attachment?.isImage == true)) ||
-        (!connected && value.isNotBlank() && attachment == null))
-    val showStop = running && value.isBlank() && attachment == null && !readOnly
+    val canSend = !readOnly && !attaching && ((connected && (value.isNotBlank() || attachments.isNotEmpty())) ||
+        (!connected && value.isNotBlank() && attachments.isEmpty()))
+    val showStop = running && value.isBlank() && attachments.isEmpty() && !readOnly
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier).fillMaxWidth().background(Ink.Bg)) {
         if (slashSuggestions.isNotEmpty()) SlashSuggestionList(slashSuggestions, onPickSlash)
@@ -154,8 +154,17 @@ fun Composer(
                 }
             }
         }
-        if (attachment != null || attaching) {
-            AttachmentChip(attachment, attachThumb, attaching, onRemoveAttachment)
+        if (attachments.isNotEmpty() || attaching) {
+            androidx.compose.foundation.lazy.LazyRow(
+                contentPadding = PaddingValues(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(attachments.size) { i ->
+                    val a = attachments[i]
+                    AttachmentChip(a, attachThumbs[a], false) { onRemoveAttachment(a) }
+                }
+                if (attaching) item { AttachmentChip(null, null, true) {} }
+            }
         }
         Row(
             Modifier
@@ -231,7 +240,7 @@ fun Composer(
                 listening -> MicAction(listening = true, level = voice?.level ?: 0f, onClick = { voice?.stop() })
                 showStop -> StopAction(enabled = connected, onClick = onStop)
                 // field kosong → mic (gaya WhatsApp); ada teks → kirim
-                voice != null && value.isBlank() && attachment == null && !readOnly ->
+                voice != null && value.isBlank() && attachments.isEmpty() && !readOnly ->
                     MicAction(listening = false, level = 0f, onClick = onMic)
                 else -> RoundAction(Icons.Rounded.ArrowUpward, "Send", filled = canSend, enabled = canSend, onClick = { if (canSend) onSend() })
             }
@@ -284,8 +293,7 @@ private fun StopAction(enabled: Boolean, onClick: () -> Unit) {
 private fun AttachmentChip(att: Attachment?, thumb: ImageBitmap?, attaching: Boolean, onRemove: () -> Unit) {
     Row(
         Modifier
-            .padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 8.dp)
-            .widthIn(max = 320.dp)
+            .widthIn(max = 240.dp)
             .clip(Radius.Chip)
             .background(Ink.Surface1)
             .padding(start = 6.dp, top = 6.dp, bottom = 6.dp),

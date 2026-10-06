@@ -118,4 +118,34 @@ class V23to25LogicTest {
         assertEquals("s1", h.single().sessionId)
         assertTrue(h.single().snippet.contains(">>>tailscale<<<"))
     }
+
+    // ── v26 ──
+    @Test fun sendAfterBubbleRestoredWhenNotInTranscript() {
+        val now = System.currentTimeMillis()
+        val q = id.melvern.hermesmobile.core.repo.PromptStore.Queued("s1", "after this, say HI", now)
+        val items = listOf<id.melvern.hermesmobile.core.model.ChatItem>(
+            id.melvern.hermesmobile.core.model.ChatItem.User("first", rowId = 1, at = now / 1000.0 - 60))
+        val out = id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(items, listOf(q)) { "" }
+        assertEquals(2, out.size)
+        val u = out.last() as id.melvern.hermesmobile.core.model.ChatItem.User
+        assertEquals("after this, say HI", u.text); assertTrue(u.queued)
+    }
+
+    @Test fun sendAfterBubbleNotDuplicatedWhenAlreadyShown() {
+        val q = id.melvern.hermesmobile.core.repo.PromptStore.Queued("s1", "say HI", System.currentTimeMillis())
+        val items = listOf<id.melvern.hermesmobile.core.model.ChatItem>(
+            id.melvern.hermesmobile.core.model.ChatItem.User("say HI", queued = true))
+        assertEquals(1, id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(items, listOf(q)) { "" }.size)
+    }
+
+    @Test fun botChatAlwaysVisible() {
+        assertTrue(id.melvern.hermesmobile.ui.sessions.isBotChat(id.melvern.hermesmobile.core.model.SessionRow(id = "x", title = "Bot Chat")))
+        assertFalse(id.melvern.hermesmobile.ui.sessions.isBotChat(id.melvern.hermesmobile.core.model.SessionRow(id = "y", title = "Lid Open")))
+    }
+
+    @Test fun liveOutputGoesAboveQueuedBubble() {
+        val items = listOf<ChatItem>(ChatItem.User("run sleep", rowId = 5), ChatItem.User("after that QAFTER2", queued = true))
+        val out = id.melvern.hermesmobile.ui.chat.liveAppend(items, ChatItem.Assistant("DONE2", done = true))
+        assertEquals(listOf("run sleep", "DONE2", "after that QAFTER2"), out.map { (it as? ChatItem.User)?.text ?: (it as ChatItem.Assistant).text })
+    }
 }
