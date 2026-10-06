@@ -244,8 +244,12 @@ fun ChatScreen(
         delay(400)
         id.melvern.hermesmobile.core.repo.DraftStore.put(app, effectiveStoredId, input)
     }
+    var screenDisposed by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) { onDispose { screenDisposed = true } }
     DisposableEffect(effectiveStoredId) {
-        onDispose { if (!latestEditing) id.melvern.hermesmobile.core.repo.DraftStore.put(app, effectiveStoredId, latestInput) }
+        // review P2-4: id ditangkap saat effect dibuat (saat dispose state sudah id baru)
+        val sid = effectiveStoredId
+        onDispose { if (!latestEditing) id.melvern.hermesmobile.core.repo.DraftStore.put(app, sid, latestInput) }
     }
     // M11: reply — teks pesan yang di-quote, tampil sebagai chip di atas composer.
     var replyQuote by remember { mutableStateOf<String?>(null) }
@@ -417,7 +421,7 @@ fun ChatScreen(
     // v26.3: status outbox berubah (kirim selesai/gagal) → sinkron bubble
     val outboxVersion by id.melvern.hermesmobile.core.repo.Outbox.version.collectAsState()
     LaunchedEffect(outboxVersion, effectiveStoredId) {
-        if (!loading) items = id.melvern.hermesmobile.core.repo.Outbox.reconcile(items, id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId), id.melvern.hermesmobile.core.repo.Outbox::isSending) { RelTime.clock(it) }
+        if (!loading) items = id.melvern.hermesmobile.core.repo.Outbox.reconcile(items, id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId), id.melvern.hermesmobile.core.repo.Outbox::isSending, { RelTime.clock(it) }, id.melvern.hermesmobile.core.repo.Outbox::isFailed)
     }
     // Share to Hermes: chat ini dipilih sebagai tujuan → teks ke draft, file pertama di-attach.
     val shareTarget by id.melvern.hermesmobile.core.share.ShareInbox.target.collectAsState()
@@ -427,7 +431,7 @@ fun ChatScreen(
         val sh = id.melvern.hermesmobile.core.share.ShareInbox.take(effectiveStoredId) ?: return@LaunchedEffect
         sh.text?.let { t -> input = listOf(input.trim(), t).filter { it.isNotEmpty() }.joinToString("\n") }
         sh.uris.take(MAX_ATTACH).forEach { attachUri(it) }
-        if (sh.uris.size > MAX_ATTACH) attachError = "Attached the first $MAX_ATTACH files"
+        if (sh.uris.size > MAX_ATTACH) attachError = "Only $MAX_ATTACH files per message — attached the first $MAX_ATTACH"
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
@@ -561,6 +565,9 @@ fun ChatScreen(
      * gagal tidak menghilangkan pesan (bubble "Not sent · Tap to retry").
      */
     fun deliver(o: id.melvern.hermesmobile.core.repo.Outbox.Out) {
+        // review P1-1: satu kiriman per entri — double-tap / race reconcile tidak boleh submit dua kali
+        if (id.melvern.hermesmobile.core.repo.Outbox.isSending(o.id)) return
+        id.melvern.hermesmobile.core.repo.Outbox.markRetried(o.id)
         id.melvern.hermesmobile.core.repo.Outbox.markSending(o.id)
         // retry: pindahkan bubble ke bawah (urutan = urutan server menerima)
         val idx = items.indexOfFirst { it is ChatItem.User && it.outboxId == o.id }
@@ -585,6 +592,8 @@ fun ChatScreen(
                 id.melvern.hermesmobile.core.repo.Outbox.remove(app, o.id)
                 if (o.queued) id.melvern.hermesmobile.core.repo.PromptStore.addServerQueued(app, o.storedId, o.display)
                 withContext(Dispatchers.Main) {
+                    // review P1-3: layar sudah ditutup → jangan tulis state/cache basi (layar baru rekonsiliasi via Outbox.version)
+                    if (screenDisposed) return@withContext
                     sessionNotOwned = false
                     if (rt != runtimeId) runtimeId = rt
                     items = items.map {
@@ -595,13 +604,14 @@ fun ChatScreen(
                     if (status == SessionRepo.SubmitStatus.QUEUED) running = true
                     cacheSnapshot()
                 }
-                if (!o.queued) {
+                if (!o.queued && !screenDisposed) {
                     val watchdogRuntime = rt
                     withTimeoutOrNull(20_000) { while (turnStartCount == turnStartSnapshot && running) delay(500) }
                     if (turnStartCount == turnStartSnapshot) app.client?.replaySince(watchdogRuntime)
                 }
             } catch (e: Throwable) {
                 withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
+                    if (screenDisposed) return@withContext
                     if (e is id.melvern.hermesmobile.core.rpc.SessionNotOwnedException) sessionNotOwned = true
                     items = items.map { if (it is ChatItem.User && it.outboxId == o.id) it.copy(pending = false, failed = true) else it }
                     cacheSnapshot()
@@ -613,19 +623,22 @@ fun ChatScreen(
     }
 
     /** v26.3: tambahkan bubble outbox yang belum tampil (setelah keluar-masuk / app di-kill). */
-    fun withOutbox(list: List<ChatItem>): List<ChatItem> {
-        id.melvern.hermesmobile.core.repo.Outbox.settle(app, effectiveStoredId, list.filterIsInstance<ChatItem.User>().filter { it.outboxId == null }.map { it.text to it.at })
-        return id.melvern.hermesmobile.core.repo.Outbox.reconcile(list, id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId), id.melvern.hermesmobile.core.repo.Outbox::isSending) { RelTime.clock(it) }
+    fun withOutbox(list: List<ChatItem>, serverFresh: Boolean = false): List<ChatItem> {
+        // review P2-5: hanya row yang benar-benar dari server (rowId) — bukan bubble "Queued" sintetis
+        id.melvern.hermesmobile.core.repo.Outbox.settle(app, effectiveStoredId,
+            list.filterIsInstance<ChatItem.User>().filter { it.outboxId == null && it.rowId != null && !it.queued }.map { it.text to it.at })
+        if (serverFresh) id.melvern.hermesmobile.core.repo.Outbox.markCheckedMissing(id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId).filterNot { id.melvern.hermesmobile.core.repo.Outbox.isSending(it.id) }.map { it.id })
+        return id.melvern.hermesmobile.core.repo.Outbox.reconcile(list, id.melvern.hermesmobile.core.repo.Outbox.forChat(app, effectiveStoredId), id.melvern.hermesmobile.core.repo.Outbox::isSending, { RelTime.clock(it) }, id.melvern.hermesmobile.core.repo.Outbox::isFailed)
     }
 
     /** v26: bubble "Send after" yang belum jalan — buang yang sudah masuk transcript, sisanya tampil Queued. */
-    fun withQueued(list: List<ChatItem>): List<ChatItem> {
+    fun withQueued(list: List<ChatItem>, serverFresh: Boolean = false): List<ChatItem> {
         val sid = effectiveStoredId
         id.melvern.hermesmobile.core.repo.PromptStore.settleServerQueued(app, sid, list.filterIsInstance<ChatItem.User>().filter { !it.queued }.map { it.text to it.at })
         val pending = id.melvern.hermesmobile.core.repo.PromptStore.serverQueued(app, sid)
         // bubble queued lama (cache) yang sudah tidak antre → dibuang; sisanya ditambah ulang dari store
         val base = list.filterNot { it is ChatItem.User && it.queued && it.rowId == null && pending.none { q -> q.text == it.text.trim() } }
-        return withOutbox(id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(base, pending) { RelTime.clock(it) })
+        return withOutbox(id.melvern.hermesmobile.core.repo.PromptStore.withServerQueued(base, pending) { RelTime.clock(it) }, serverFresh)
     }
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
@@ -734,7 +747,7 @@ fun ChatScreen(
                         val out = SessionRepo(c, chatProfile).resume(actualStoredId)
                         runtimeId = out.runtimeId
                         running = out.running
-                        items = withQueued(mapTranscript(out.messages))
+                        items = withQueued(mapTranscript(out.messages), serverFresh = !out.running)
                         cacheSnapshot()
                     }
                     loading = false
@@ -743,7 +756,7 @@ fun ChatScreen(
                 val out = SessionRepo(c, chatProfile).resume(actualStoredId)
                 runtimeId = out.runtimeId
                 running = out.running
-                items = withQueued(mapTranscript(out.messages))
+                items = withQueued(mapTranscript(out.messages), serverFresh = !out.running)
                 cacheSnapshot()
                 // M4 asli (review M9): open_requests SELALU direstore dari resume
                 // penuh — approval pending server-side membuat running=true dan
@@ -1532,6 +1545,7 @@ fun ChatScreen(
             },
             // M5 fix (review HIGH#3): stored id session baru WAJIB ikut — draft/attachment direset.
             onNewChat = { runtime, stored ->
+                id.melvern.hermesmobile.core.repo.DraftStore.put(context, effectiveStoredId, input)
                 runtimeId = runtime
                 effectiveStoredId = stored.takeIf { it.isNotBlank() } ?: actualStoredId
                 items = emptyList(); title = ""; activeModel = ""

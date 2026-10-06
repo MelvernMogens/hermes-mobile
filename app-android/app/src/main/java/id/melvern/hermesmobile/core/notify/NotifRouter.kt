@@ -58,7 +58,13 @@ fun GatewayClient.startNotifPoller(app: HermesApp, scope: CoroutineScope): Job =
     // Poll pertama setelah koneksi OPEN; lanjut tiap 20s selalu (WS cuma keepalive).
     while (isActive) {
         // v26.1: worker CLI (bot-run) tidak ada di active_list — tarik dari Mac, ringan.
-        app.connection?.let { conn -> try { id.melvern.hermesmobile.core.repo.MacRepo(conn).botWork() } catch (_: Throwable) {} }
+        // review P2-1: maks 4s — Mac tak terjangkau tidak boleh menunda poll notifikasi
+        app.connection?.let { conn ->
+            val ok = kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                try { id.melvern.hermesmobile.core.repo.MacRepo(conn).botWork() } catch (_: Throwable) { null }
+            }
+            if (ok == null) id.melvern.hermesmobile.core.repo.BotFleet.publishWork(emptyList())
+        }
         val c = app.client ?: break
         if (c.state.value == ConnState.OPEN) {
             prev = router.pollOnce(prev)

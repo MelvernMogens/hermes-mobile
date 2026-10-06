@@ -475,6 +475,21 @@ _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
 
 
 _preview_tickets: dict[str, tuple[str, float]] = {}
+# v27: sesi preview terpisah — origin preview TIDAK pernah menerima cookie login Hermes.
+# Tiket sekali-pakai ditukar dengan token acak berumur 12 jam yang hanya berlaku di listener preview.
+_preview_sessions: dict[str, float] = {}
+_PREVIEW_SESSION_TTL = 12 * 3600
+
+
+def _preview_session_ok(request: web.Request) -> bool:
+    tok = request.cookies.get("hm_preview_auth", "")
+    exp = _preview_sessions.get(tok)
+    if not tok or exp is None:
+        return False
+    if time.monotonic() > exp:
+        _preview_sessions.pop(tok, None)
+        return False
+    return True
 
 
 async def handle_preview_ticket(request: web.Request) -> web.Response:
@@ -503,17 +518,19 @@ async def preview_http(request: web.Request) -> web.StreamResponse:
             return web.Response(status=400, text="bad port")
         https = request.headers.get("X-Forwarded-Proto", "").lower() == "https" or request.secure
         resp = web.HTTPFound(_safe_local_path(request.query.get("path", "/")))
-        # copy the app's login cookie(s) onto the preview origin + remember the target port
-        for part in cookie.split(";"):
-            name, _, val = part.strip().partition("=")
-            # https (tailnet) memakai prefix __Host- (wajib Secure, Path=/, tanpa Domain)
-            if name.startswith("hermes_session") or name.startswith("__Host-hermes_session"):
-                resp.set_cookie(name, val, httponly=True, samesite="Lax",
-                                secure=https or name.startswith("__Host-"), path="/")
+        import secrets
+        now = time.monotonic()
+        for k, exp in list(_preview_sessions.items()):
+            if now > exp:
+                _preview_sessions.pop(k, None)
+        sess = secrets.token_urlsafe(32)
+        _preview_sessions[sess] = now + _PREVIEW_SESSION_TTL
+        resp.set_cookie("hm_preview_auth", sess, httponly=True, samesite="Strict", secure=https, path="/",
+                        max_age=_PREVIEW_SESSION_TTL)
         resp.set_cookie("hm_preview_port", port, httponly=True, samesite="Lax", secure=https, path="/")
         raise resp
-    if not await _cookie_authed(request, request.app["client"]):
-        return web.Response(status=401, text="Sign in to Hermes Mobile first.")
+    if not _preview_session_ok(request):
+        return web.Response(status=401, text="Preview expired — open it again from the Hermes app.")
     if request.path == "/__hermes_preview":
         port = request.query.get("port", "")
         if not port.isdigit() or not (1024 <= int(port) <= 65535) or int(port) in _PREVIEW_BLOCKED:

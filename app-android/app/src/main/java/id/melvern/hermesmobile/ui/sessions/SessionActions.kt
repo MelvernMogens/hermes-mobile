@@ -81,6 +81,7 @@ fun SessionActionSheet(
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     val profile = app.profile.value
+    val ctxApp = androidx.compose.ui.platform.LocalContext.current.applicationContext
 
     fun run(after: () -> Unit = onDone, action: suspend () -> Unit) {
         busy = true; notice = null
@@ -130,7 +131,10 @@ fun SessionActionSheet(
                 )
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { confirmingHide = false }) { Text("Cancel", style = Type.Callout.copy(color = Ink.Text2)) }
-                    TextButton(enabled = !busy, onClick = { run { MetaRepo(app.client!!).hideSession(row.id, profile) } }) {
+                    TextButton(enabled = !busy, onClick = { run {
+                        MetaRepo(app.client!!).hideSession(row.id, profile)
+                        id.melvern.hermesmobile.core.store.HiddenBotChats.set(ctxApp, row.id, true)
+                    } }) {
                         Text("Hide", style = Type.Callout.copy(color = Ink.Text))
                     }
                 }
@@ -193,7 +197,10 @@ fun SessionActionSheet(
                 }
                 if (!hidden) SheetActionRow("Hide", Icons.Outlined.VisibilityOff, enabled = !busy) { confirmingHide = true }
                 else SheetActionRow("Unhide", Icons.Outlined.Visibility, enabled = !busy) {
-                    run { MetaRepo(app.client!!).hideSession(row.id, profile, hidden = false) }
+                    run {
+                        MetaRepo(app.client!!).hideSession(row.id, profile, hidden = false)
+                        id.melvern.hermesmobile.core.store.HiddenBotChats.set(ctxApp, row.id, false)
+                    }
                 }
                 SheetActionRow("Copy session ID", Icons.Outlined.ContentCopy, enabled = !busy) {
                     clipboard.setText(AnnotatedString(row.id))

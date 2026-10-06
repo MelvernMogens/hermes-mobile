@@ -162,6 +162,9 @@ object UserMatch {
     /** [local] (tanpa quote) cocok dengan [server] (bisa diawali "> quote"). */
     fun same(local: String, server: String): Boolean {
         val a = key(local); val b = key(server)
-        return a == b || (a.isNotEmpty() && b.endsWith(a))
+        if (a == b) return true
+        // review P1-2: suffix hanya pada batas baris (server bisa menambah "> quote" di atas) —
+        // "ok" tidak boleh cocok dengan "book"/"hook".
+        return a.isNotEmpty() && b.endsWith("\n" + a)
     }
 }

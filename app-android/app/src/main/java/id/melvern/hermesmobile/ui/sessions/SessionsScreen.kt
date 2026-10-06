@@ -164,7 +164,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 val all = repo.listSessions(includeHidden = true)
                 // v26: "Bot Chat" disembunyikan otomatis oleh plugin bots di desktop —
                 // di HP tetap tampil sebagai chat biasa.
-                val forced = all.filter { isBotChat(it) && visible.none { v -> v.id == it.id } }
+                val forced = all.filter { isBotChat(it) && visible.none { v -> v.id == it.id } &&
+                    !id.melvern.hermesmobile.core.store.HiddenBotChats.has(ctx, it.id) }
                 val shown = visible + forced
                 if (showHidden) {
                     val shownIds = shown.map { it.id }.toSet()

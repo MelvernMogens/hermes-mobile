@@ -81,6 +81,9 @@ def test_parse_bot_procs_detects_cli_workers():
   01:01:03 /Users/m/.hermes/hermes-agent/venv/bin/python /Users/m/.hermes/hermes-agent/hermes -p coder chat --source tool --query-file /x
   2-03:00:00 /Users/m/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --profile default serve --host 127.0.0.1 --port 0
      05:10 /venv/bin/python /x/hermes --profile video chat --source tool -q hi
-     00:01 grep hermes -p coder chat"""
+     00:01 grep hermes -p coder chat
+  10:00:00 /venv/bin/python /x/hermes -p designer chat
+  01:00:00 vim /Users/m/.hermes/bin/bot-run qa
+  01:00:00 tail -f /x/bot-run content"""
     got = mm.parse_bot_procs(ps)
     assert got == {"coder": 3664, "video": 310}

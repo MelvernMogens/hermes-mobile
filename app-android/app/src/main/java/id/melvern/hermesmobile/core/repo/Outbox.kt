@@ -33,6 +33,10 @@ object Outbox {
     private val json = Json { ignoreUnknownKeys = true }
     private val ser = ListSerializer(Out.serializer())
     private val inFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    /** dicoba kirim di proses ini (gagal = benar-benar gagal). */
+    private val tried: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    /** sudah dicek ke transcript server di proses ini dan memang tidak ada. */
+    private val checkedMissing: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val _version = MutableStateFlow(0)
     /** naik tiap ada perubahan (kirim selesai / gagal) — layar chat yang terbuka me-rekonsiliasi bubble. */
     val version: StateFlow<Int> = _version
@@ -53,6 +57,15 @@ object Outbox {
     fun markSending(id: String) { inFlight += id; _version.value++ }
     fun markDone(id: String) { inFlight -= id; _version.value++ }
     fun isSending(id: String) = id in inFlight
+    fun markRetried(id: String) { tried += id }
+    /** Setelah transcript server segar dimuat: entri yang tersisa memang tidak sampai ke server. */
+    fun markCheckedMissing(ids: Collection<String>) { if (checkedMissing.addAll(ids)) _version.value++ }
+
+    /**
+     * review P1-4: setelah app di-kill saat kirim, status entri tidak diketahui (bisa sudah sampai).
+     * Tampilkan "gagal" hanya kalau dicoba di proses ini, atau sudah dicek ke server dan tidak ada.
+     */
+    fun isFailed(o: Out): Boolean = o.id !in inFlight && (o.id in tried || o.id in checkedMissing)
 
     /** Buang entri yang sudah ada di transcript server (row user cocok, waktunya tidak lebih tua dari entri). */
     fun settle(c: Context, storedId: String, serverUsers: List<Pair<String, Double?>>) {
@@ -68,7 +81,8 @@ object Outbox {
      * Pure: rekonsiliasi bubble dengan outbox — entri yang belum ada di [items] ditambah;
      * bubble ber-outboxId diset pending/failed sesuai status; yang sudah keluar outbox → normal.
      */
-    fun reconcile(items: List<ChatItem>, pending: List<Out>, sending: (String) -> Boolean, clock: (Double) -> String): List<ChatItem> {
+    fun reconcile(items: List<ChatItem>, pending: List<Out>, sending: (String) -> Boolean, clock: (Double) -> String,
+                  failed: (Out) -> Boolean = { !sending(it.id) }): List<ChatItem> {
         val byId = pending.associateBy { it.id }
         var out = items.map { item ->
             val u = item as? ChatItem.User ?: return@map item
@@ -76,7 +90,7 @@ object Outbox {
             val o = byId[id]
             when {
                 o == null -> if (u.pending || u.failed) u.copy(pending = false, failed = false) else u
-                sending(id) -> u.copy(pending = true, failed = false)
+                sending(id) || !failed(o) -> u.copy(pending = true, failed = false)
                 else -> u.copy(pending = false, failed = true)
             }
         }
@@ -85,7 +99,7 @@ object Outbox {
         val add = pending.filter { o -> o.id !in haveIds && confirmed.none { UserMatch.same(o.display, it) } }.map { o ->
             val at = o.at / 1000.0
             ChatItem.User(o.display, time = clock(at), at = at, quote = o.quote,
-                pending = sending(o.id), failed = !sending(o.id), outboxId = o.id)
+                pending = !failed(o), failed = failed(o), outboxId = o.id)
         }
         if (add.isNotEmpty()) out = out + add
         return out

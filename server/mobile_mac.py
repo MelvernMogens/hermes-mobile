@@ -308,8 +308,9 @@ def _title(html: str) -> str:
 # terpisah — tidak muncul di session.active_list gateway. Deteksi dari daftar proses + state.db
 # profile (read-only) supaya app bisa menampilkan "Running" + tugasnya.
 
-_BOT_CMD_RE = re.compile(r"(?:^|\s)(?:-p|--profile)\s+([A-Za-z0-9_.-]+)\s+chat\b")
-_BOTRUN_RE = re.compile(r"/bot-run\s+([A-Za-z0-9_.-]+)\b")
+_BOT_CMD_RE = re.compile(r"(?:^|\s)(?:-p|--profile)\s+([A-Za-z0-9_.-]+)\s+chat\b.*--source\s+tool\b")
+# hanya proses bash yang MENJALANKAN bot-run (bukan editor/tail dengan path bot-run di argumen)
+_BOTRUN_RE = re.compile(r"^(?:/bin/)?(?:ba)?sh\s+\S*/bot-run\s+([A-Za-z0-9_.-]+)\b")
 
 
 def _etime_secs(et: str) -> int:
@@ -351,7 +352,7 @@ def _profile_db(name: str) -> Path:
     return HOME / ".hermes" / ("state.db" if name == "default" else f"profiles/{name}/state.db")
 
 
-def _latest_task(name: str) -> dict | None:
+def _latest_task(name: str, running_secs: int = 0) -> dict | None:
     import sqlite3
     db = _profile_db(name)
     if not db.exists():
@@ -360,7 +361,9 @@ def _latest_task(name: str) -> dict | None:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         row = con.execute(
             "select id, coalesce(title,''), coalesce(last_activity_at, started_at) from sessions "
-            "where source='tool' order by coalesce(last_activity_at, started_at) desc limit 1").fetchone()
+            "where source='tool' and coalesce(last_activity_at, started_at) >= ? "
+            "order by coalesce(last_activity_at, started_at) desc limit 1",
+            (time.time() - running_secs - 120,)).fetchone()
         con.close()
     except Exception:
         return None
@@ -376,7 +379,7 @@ def bot_work() -> list[dict]:
     procs = parse_bot_procs(_run(["ps", "-axo", "etime=,command="], timeout=5))
     rows = []
     for name, secs in sorted(procs.items()):
-        t = _latest_task(name) or {}
+        t = _latest_task(name, secs) or {}
         rows.append({"profile": name, "running_secs": secs, "task": t.get("title", ""),
                      "session_id": t.get("session_id", ""), "last_activity": t.get("last_activity")})
     return rows
