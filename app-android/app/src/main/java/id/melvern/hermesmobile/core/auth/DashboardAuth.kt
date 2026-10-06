@@ -2,6 +2,7 @@ package id.melvern.hermesmobile.core.auth
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -131,14 +132,70 @@ class DashboardAuth(private val baseUrl: String) {
     suspend fun getJson(url: String): String? = withContext(Dispatchers.IO) {
         try {
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                if (resp.code == 401) SharedAuth.invalidate()
                 if (!resp.isSuccessful) return@use null
                 resp.body?.string()
             }
         } catch (_: Throwable) { null }
     }
+
+    /** v24: POST JSON (cookie ikut). Body dikembalikan juga untuk status 4xx (pesan error server). */
+    suspend fun postJson(url: String, body: String): String? = withContext(Dispatchers.IO) {
+        try {
+            http.newCall(Request.Builder().url(url).post(body.toRequestBody("application/json".toMediaType())).build()).execute().use { resp ->
+                if (resp.code == 401) SharedAuth.invalidate()
+                if (resp.code >= 500) null else resp.body?.string()
+            }
+        } catch (_: Throwable) { null }
+    }
+
+    /** v25: request umum → (status, body). status -1 = gagal jaringan. */
+    suspend fun request(method: String, url: String, body: String?): Pair<Int, String?> = withContext(Dispatchers.IO) {
+        try {
+            val rb = body?.toRequestBody("application/json".toMediaType())
+            http.newCall(Request.Builder().url(url).method(method, rb).build()).execute().use {
+                if (it.code == 401) SharedAuth.invalidate()
+                it.code to it.body?.string()
+            }
+        } catch (_: Throwable) { -1 to null }
+    }
+
+    /** v24: header Cookie untuk host [url] — ditanam ke WebView web preview. */
+    fun cookieHeaderFor(url: String): String? = try {
+        cookieJar.cookieStore.get(java.net.URI(url)).joinToString("; ") { "${it.name}=${it.value}" }.ifBlank { null }
+    } catch (_: Throwable) { null }
 }
 
 class AuthException(message: String) : Exception(message)
+
+/**
+ * v25 fix: satu sesi cookie dipakai bersama semua repo HTTP (limits, media, insights,
+ * mac, cron, search). Dulu tiap panggilan bikin DashboardAuth baru + password-login baru —
+ * server membatasi 10 login/menit per IP, jadi tab Mac + list chat + media bisa kena 429
+ * dan tampil "Couldn't reach your Mac". Login ulang hanya kalau belum login, base/user
+ * berganti, atau sudah >20 menit (cookie disegarkan).
+ */
+object SharedAuth {
+    private val lock = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var cached: DashboardAuth? = null
+    @Volatile private var key: String = ""
+    @Volatile private var loggedAt = 0L
+    private const val FRESH_MS = 20 * 60_000L
+
+    suspend fun get(baseUrl: String, username: String, password: String): DashboardAuth? = lock.withLock {
+        val k = baseUrl + "|" + username + "|" + password.hashCode()
+        val now = System.currentTimeMillis()
+        cached?.let { if (k == key && now - loggedAt < FRESH_MS) return@withLock it }
+        val a = if (k == key) (cached ?: DashboardAuth(baseUrl)) else DashboardAuth(baseUrl)
+        if (!a.ensureLogin(username, password)) return@withLock null
+        cached = a; key = k; loggedAt = now
+        a
+    }
+
+    /** Cookie ditolak (401) → paksa login ulang di panggilan berikut. */
+    fun invalidate() { loggedAt = 0L }
+    fun clear() { cached = null; key = ""; loggedAt = 0L }
+}
 
 // helper kecil supaya chained-call di atas ringkas
 private fun kotlinx.serialization.json.JsonPrimitive.contentOrNull2(): String? =

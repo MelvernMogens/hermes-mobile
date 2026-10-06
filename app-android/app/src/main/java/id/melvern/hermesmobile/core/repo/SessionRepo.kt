@@ -88,6 +88,7 @@ class SessionRepo(
             running = res["running"]?.jsonPrimitive?.booleanOrNull ?: false,
             hydrated = !(res["hydrating"]?.jsonPrimitive?.booleanOrNull ?: false),
             openRequests = openRequests,
+            todoState = res["todo_state"],
         )
     }
 
@@ -126,6 +127,8 @@ class SessionRepo(
         val running: Boolean,
         val hydrated: Boolean,
         val openRequests: List<OpenRequest> = emptyList(),
+        /** v23: snapshot todo (task board) — {todos:[{id,content,status}], revision}. */
+        val todoState: kotlinx.serialization.json.JsonElement? = null,
     )
 
     suspend fun sendPrompt(sessionId: String, text: String) {
@@ -188,6 +191,35 @@ class SessionRepo(
             val out = resume(storedSessionId)
             out.runtimeId to submitOn(out.runtimeId)
         }
+    }
+
+    /** v23 "Send after": antre di server, jalan setelah turn sekarang (tidak pernah steer/redirect). */
+    suspend fun submitQueued(runtimeId: String, text: String) {
+        client.call("prompt.submit", buildJsonObject {
+            put("session_id", runtimeId); put("text", text); put("queued", true); putProfile()
+        }, timeoutMs = 60_000)
+    }
+
+    /** v24: (row_id, text) pesan user AKTIF, urut — dari resume lazy berisi transcript. */
+    suspend fun activeUserRowIds(storedId: String): List<Pair<Int, String>> {
+        val res = client.call("session.resume", buildJsonObject { put("session_id", storedId); put("lazy", true); putProfile() }, timeoutMs = 30_000)
+        return res["messages"]?.jsonArray?.mapNotNull { el ->
+            val o = el.jsonObject
+            if (o["role"]?.jsonPrimitive?.contentOrNull != "user") return@mapNotNull null
+            val rid = o["row_id"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
+            rid to id.melvern.hermesmobile.core.model.SteerText.unwrap(o["text"]?.jsonPrimitive?.contentOrNull ?: "").first
+        } ?: emptyList()
+    }
+
+    /** v24 edit & resend: potong history sebelum row user [rowId] (sama dengan desktop "edit"), lalu kirim [text]. */
+    suspend fun submitEdit(runtimeId: String, text: String, rowId: Int, isFirstMessage: Boolean) {
+        client.call("prompt.submit", buildJsonObject {
+            put("session_id", runtimeId); put("text", text)
+            put("truncate_before_row_id", rowId); put("confirm_truncate", true)
+            // edit pesan PERTAMA = transcript kosong sebelum kirim ulang — server minta konfirmasi eksplisit
+            if (isFirstMessage) put("confirm_empty_truncate", true)
+            putProfile()
+        }, timeoutMs = 120_000)
     }
 
     suspend fun interrupt(sessionId: String) {

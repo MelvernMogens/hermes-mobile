@@ -7,6 +7,8 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Difference
+import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
@@ -65,6 +67,9 @@ fun SessionActionSheet(
     onTogglePin: () -> Unit = {},
     /** null = sembunyikan aksi grup. */
     onGroup: (() -> Unit)? = null,
+    /** v24 (menu chat): Code changes + Share chat. */
+    onCodeChanges: (() -> Unit)? = null,
+    onShareChat: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -159,6 +164,8 @@ fun SessionActionSheet(
                         onDismiss(); open()
                     }
                 }
+                onCodeChanges?.let { f -> SheetActionRow("Code changes", Icons.Outlined.Difference, enabled = !busy) { onDismiss(); f() } }
+                onShareChat?.let { f -> SheetActionRow("Share chat", Icons.Outlined.IosShare, enabled = !busy) { onDismiss(); f() } }
                 SheetActionRow("Rename", Icons.Outlined.DriveFileRenameOutline, enabled = !busy) { renaming = true }
                 SheetActionRow("New branch", Icons.AutoMirrored.Outlined.CallSplit, enabled = !busy) {
                     run(after = {}) {

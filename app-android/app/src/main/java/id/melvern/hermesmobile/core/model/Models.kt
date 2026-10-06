@@ -96,6 +96,8 @@ sealed interface ChatItem {
         val at: Double? = null,
         /** M11: teks pesan yang di-quote (reply) — tampil sebagai blok kutipan di atas isi. */
         val quote: String? = null,
+        /** v23: dikirim sebagai steer (masuk ke turn yang sedang jalan). */
+        val steered: Boolean = false,
     ) : ChatItem
     data class Assistant(
         val text: String,
@@ -127,3 +129,15 @@ data class Attachment(
     val path: String = "",
     val isVideo: Boolean = false,
 )
+
+
+/**
+ * Steer/redirect disimpan server sebagai baris user yang dibungkus penanda internal
+ * "[OUT-OF-BAND USER MESSAGE …] teks [/OUT-OF-BAND USER MESSAGE]". Untuk tampilan:
+ * buka bungkusnya → (teks asli, true). Teks biasa → (teks, false).
+ */
+object SteerText {
+    private val rx = Regex("""^\s*\[OUT-OF-BAND USER MESSAGE[^\]]*]\s*(.*?)\s*\[/OUT-OF-BAND USER MESSAGE]\s*$""", RegexOption.DOT_MATCHES_ALL)
+    fun unwrap(text: String): Pair<String, Boolean> =
+        rx.find(text)?.let { it.groupValues[1].trim() to true } ?: (text to false)
+}

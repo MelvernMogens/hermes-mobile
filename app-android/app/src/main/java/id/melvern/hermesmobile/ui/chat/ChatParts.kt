@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
@@ -230,6 +231,12 @@ fun UserBubble(
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
+                    item.steered -> {
+                        Icon(Icons.Rounded.CallSplit, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconTiny))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Steered", style = Type.Caption)
+                        if (item.time.isNotEmpty()) Spacer(Modifier.width(6.dp))
+                    }
                     item.queued -> {
                         Icon(Icons.Rounded.Schedule, null, tint = Ink.Text3, modifier = Modifier.size(Dim.IconTiny))
                         Spacer(Modifier.width(4.dp))

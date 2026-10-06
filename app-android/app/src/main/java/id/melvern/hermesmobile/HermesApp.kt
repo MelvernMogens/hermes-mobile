@@ -32,7 +32,9 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
     val windowSize = MutableStateFlow(WinSize.Compact)
 
     @Volatile var client: GatewayClient? = null
-        private set
+        private set(v) { field = v; clientFlow.value = v }
+    /** Review fix: layar yang collect `inbound` harus re-subscribe saat client dibuat/diganti. */
+    val clientFlow = MutableStateFlow<GatewayClient?>(null)
     @Volatile var auth: DashboardAuth? = null
         private set
 
@@ -168,6 +170,7 @@ class HermesApp : Application(), Application.ActivityLifecycleCallbacks {
 
     /** M14: putus total (logout) — service + koneksi mati rapi, shade dibersihkan. */
     fun disconnect() {
+        id.melvern.hermesmobile.core.auth.SharedAuth.clear()
         notifPollerJob?.cancel()
         HermesLiveService.stop(this)
         notifier.cancelSessionNotifications()

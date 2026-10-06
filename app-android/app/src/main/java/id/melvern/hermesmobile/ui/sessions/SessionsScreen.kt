@@ -120,6 +120,15 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
     var showHiddenLoaded by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    // v25: cari ISI chat (FTS server) — debounce 350ms, tampil di bawah hasil judul
+    var contentHits by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.ScheduleRepo.Hit>>(emptyList()) }
+    LaunchedEffect(query, searching) {
+        val q = query.trim()
+        if (!searching || q.length < 2) { contentHits = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(350)
+        val conn = app.connection ?: return@LaunchedEffect
+        contentHits = id.melvern.hermesmobile.core.repo.ScheduleRepo(conn).search(q, app.profile.value) ?: emptyList()
+    }
     // Pesan terakhir asli per session (proxy /api/mobile-last) — session.list
     // preview = prompt PERTAMA, jadi tanpa ini home selalu nunjukin chat lama.
     var lastMsgs by remember { mutableStateOf<Map<String, id.melvern.hermesmobile.core.repo.InsightsRepo.Last>>(emptyMap()) }
@@ -127,6 +136,18 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
     LaunchedEffect(Unit) { pinned = SettingsStore.loadPinned(ctx) }
     LaunchedEffect(Unit) { id.melvern.hermesmobile.core.store.ChatGroups.load(ctx) }
     var groupTarget by remember { mutableStateOf<SessionRow?>(null) }
+    // v23: permission inbox (lintas chat) + unread
+    var inbox by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.AgentWorkRepo.Pending>>(emptyList()) }
+    var inboxOpen by remember { mutableStateOf(false) }
+    var inboxKick by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { id.melvern.hermesmobile.core.repo.UnreadStore.load(ctx) }
+    val fleetLive by id.melvern.hermesmobile.core.notify.FleetBus.live.collectAsState()
+    val waitingKeys = fleetLive.filter { it.status == "waiting" }.map { it.sessionKey }.sorted()
+    LaunchedEffect(inboxOpen) { while (inboxOpen) { delay(30_000); inboxKick++ } }
+    LaunchedEffect(waitingKeys, inboxKick) {
+        val c = app.client ?: return@LaunchedEffect
+        inbox = try { id.melvern.hermesmobile.core.repo.AgentWorkRepo(c, app.profile.value).inbox() } catch (_: Throwable) { inbox }
+    }
     var editGroup by remember { mutableStateOf<id.melvern.hermesmobile.core.store.ChatGroups.Group?>(null) }
     var creating by remember { mutableStateOf(false) }
     val client = app.client
@@ -173,8 +194,9 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         }
     }
     // M6: multi-surface live update — event dari session lain → refresh (debounce 2s).
-    LaunchedEffect(Unit) {
-        val inbound = app.client?.inbound ?: return@LaunchedEffect
+    val liveClient by app.clientFlow.collectAsState()
+    LaunchedEffect(liveClient) {
+        val inbound = liveClient?.inbound ?: return@LaunchedEffect
         var lastRefresh = 0L
         scope.launch {
             inbound.collect { ev ->
@@ -320,6 +342,8 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
             }
         }
 
+        InboxBanner(inbox.size, onOpen = { inboxOpen = true })
+
         // Share masuk → pilih chat tujuan (tap chat mana pun / New chat).
         val shared by id.melvern.hermesmobile.core.share.ShareInbox.pending.collectAsState()
         shared?.let { sh ->
@@ -370,6 +394,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                             running = s.id in active || s.running == true,
                             pinned = s.id in pinned,
                             groupColor = id.melvern.hermesmobile.core.store.ChatGroups.groupOf(s.id)?.color,
+                            unread = id.melvern.hermesmobile.core.repo.UnreadStore.isUnread(s.id, lastMsgs[s.id]?.at, lastMsgs[s.id]?.role),
                             last = lastMsgs[s.id],
                             stamp = lastAt(s),
                             divider = !last,
@@ -401,8 +426,14 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                     item(key = "hidden-header") { SectionHeader("Hidden", trailing = hiddenRows.size.toString()) }
                     hiddenRows.forEachIndexed { i, s -> rowItem(s, "h-", i == hiddenRows.lastIndex) }
                 }
+                if (searching && contentHits.isNotEmpty()) {
+                    item(key = "content-header") { SectionHeader("In messages", trailing = contentHits.size.toString()) }
+                    contentHits.forEachIndexed { i, h ->
+                        item(key = "hit-${h.sessionId}-$i") { ContentHitRow(h, onClick = { openChat(h.sessionId) }) }
+                    }
+                }
                 item(key = "end-space") { Spacer(Modifier.height(24.dp)) }
-                if (searching && filtered.isEmpty()) item(key = "no-results") {
+                if (searching && filtered.isEmpty() && contentHits.isEmpty()) item(key = "no-results") {
                     Text(
                         "No chats match \"${query.trim()}\"",
                         style = Type.Callout.copy(color = Ink.Text2),
@@ -447,6 +478,12 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         }
     }
 
+    if (inboxOpen) InboxSheet(
+        app, inbox,
+        onDismiss = { inboxOpen = false; inboxKick++ },
+        onOpenChat = { id -> inboxOpen = false; openChat(id) },
+        onChanged = { },
+    )
     groupTarget?.let { t -> GroupPickerSheet(t.id, t.displayTitle, onDismiss = { groupTarget = null }) }
     editGroup?.let { g -> GroupEditSheet(g, onDismiss = { editGroup = null }) }
     if (profileSheet) {
@@ -630,6 +667,7 @@ private fun SessionRowView(
     running: Boolean,
     pinned: Boolean,
     groupColor: Int? = null,
+    unread: Boolean = false,
     last: id.melvern.hermesmobile.core.repo.InsightsRepo.Last?,
     stamp: Double,
     divider: Boolean,
@@ -671,15 +709,22 @@ private fun SessionRowView(
                     }
                     Text(
                         if (running) "now" else RelTime.listStamp(stamp.takeIf { it > 0 }),
-                        style = Type.Caption,
+                        style = if (unread) Type.Caption.copy(color = Ink.Text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) else Type.Caption,
                         maxLines = 1,
                     )
                 }
                 Spacer(Modifier.height(3.dp))
-                OneLine(
-                    if (running) "Working…" else secondLine(s, last),
-                    Type.Preview.copy(color = if (running) Ink.Text else Ink.Text3),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OneLine(
+                        if (running) "Working…" else secondLine(s, last),
+                        Type.Preview.copy(color = if (running || unread) Ink.Text else Ink.Text3),
+                        Modifier.weight(1f),
+                    )
+                    if (unread && !running) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(9.dp).clip(Radius.Full).background(Ink.Text))
+                    }
+                }
             }
         }
         if (divider) Hairline(Modifier.align(Alignment.BottomStart).padding(start = Dim.RowDividerInset, end = Dim.ScreenH))
@@ -785,5 +830,33 @@ private fun GroupHeader(g: id.melvern.hermesmobile.core.store.ChatGroups.Group, 
         Spacer(Modifier.weight(1f))
         Icon(if (g.collapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess, if (g.collapsed) "Expand" else "Collapse",
             tint = Ink.Text4, modifier = Modifier.size(16.dp))
+    }
+}
+
+
+/** v25: hasil cari isi pesan — judul chat + cuplikan dengan kata yang cocok ditebalkan. */
+@Composable
+private fun ContentHitRow(h: id.melvern.hermesmobile.core.repo.ScheduleRepo.Hit, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().pressClickable(onClick = onClick).padding(horizontal = Dim.ScreenH, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(h.title, style = Type.Callout.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(RelTime.listStamp(h.at), style = Type.Caption)
+        }
+        Spacer(Modifier.height(2.dp))
+        val snippet = remember(h.snippet) {
+            androidx.compose.ui.text.buildAnnotatedString {
+                var rest = h.snippet
+                while (true) {
+                    val a = rest.indexOf(">>>"); val b = rest.indexOf("<<<", a + 3)
+                    if (a < 0 || b < 0) { append(rest.replace(">>>", "").replace("<<<", "")); break }
+                    append(rest.substring(0, a))
+                    pushStyle(androidx.compose.ui.text.SpanStyle(color = Ink.Text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                    append(rest.substring(a + 3, b)); pop()
+                    rest = rest.substring(b + 3)
+                }
+            }
+        }
+        Text(snippet, style = Type.Preview.copy(color = Ink.Text3), maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }

@@ -22,10 +22,8 @@ class MediaRepo(private val settings: ConnectionSettings) {
 
     /** null = gagal (403/404/network/too-large) — pemanggil tampilin chip fallback. */
     suspend fun fetchImage(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
-        val auth = DashboardAuth(settings.baseUrl.trim().trimEnd('/'))
-        // cookie login: login ringan (idempotent — server 409 kalau sudah login)
-        val ok = auth.ensureLogin(settings.username, settings.password)
-        if (!ok) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(settings.baseUrl.trim().trimEnd('/'), settings.username, settings.password)
+            ?: return@withContext null
         // Hermes media roots first; images elsewhere (agent MEDIA:/path) via the
         // proxy's guarded /api/mobile-media (path must appear in a chat).
         auth.getJson(mediaUrl(settings.baseUrl, path))?.let { parseImageDataUrl(it) }?.let { return@withContext it }
@@ -40,9 +38,8 @@ class MediaRepo(private val settings: ConnectionSettings) {
      * pemanggil render chip fallback.
      */
     suspend fun fetchVideo(path: String, cacheDir: java.io.File): java.io.File? = withContext(Dispatchers.IO) {
-        val auth = DashboardAuth(settings.baseUrl.trim().trimEnd('/'))
-        val ok = auth.ensureLogin(settings.username, settings.password)
-        if (!ok) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(settings.baseUrl.trim().trimEnd('/'), settings.username, settings.password)
+            ?: return@withContext null
         // Hermes media roots first (agent-generated media lives there), then the
         // guarded /api/mobile-media for files elsewhere under $HOME.
         val body = auth.getJson(mediaUrl(settings.baseUrl, path))
@@ -55,8 +52,8 @@ class MediaRepo(private val settings: ConnectionSettings) {
 
     /** M10: unduh bytes file apa pun (save ke Downloads). Image roots → mobile-media fallback. */
     suspend fun fetchBytes(path: String): Pair<ByteArray, String>? = withContext(Dispatchers.IO) {
-        val auth = DashboardAuth(settings.baseUrl.trim().trimEnd('/'))
-        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(settings.baseUrl.trim().trimEnd('/'), settings.username, settings.password)
+            ?: return@withContext null
         val body = auth.getJson(mediaUrl(settings.baseUrl, path))
             ?: auth.getJson(mobileMediaUrl(settings.baseUrl, path))
             ?: return@withContext null

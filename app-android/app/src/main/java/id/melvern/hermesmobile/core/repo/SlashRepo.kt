@@ -21,7 +21,7 @@ class SlashRepo(private val c: GatewayClient) {
     sealed interface Result {
         data class Output(val text: String) : Result
         /** Command ini sebenarnya prompt (skill / queue) → kirim [message] ke agent. */
-        data class Send(val message: String, val notice: String?) : Result
+        data class Send(val message: String, val notice: String?, val queued: Boolean = false) : Result
     }
 
     suspend fun suggest(text: String): List<Suggestion> {
@@ -38,11 +38,19 @@ class SlashRepo(private val c: GatewayClient) {
 
     suspend fun run(runtimeId: String, command: String): Result {
         val cmd = command.trim()
+        val isQueue = cmd.removePrefix("/").substringBefore(' ').lowercase() in setOf("queue", "q")
+        val res = runRaw(runtimeId, cmd)
+        return if (isQueue && res is Result.Send) res.copy(queued = true) else res
+    }
+
+    private suspend fun runRaw(runtimeId: String, cmd: String): Result {
         return try {
             val r = c.call("slash.exec", buildJsonObject {
                 put("session_id", runtimeId); put("command", cmd)
             }, timeoutMs = 60_000)
-            Result.Output(cleanOutput((r["output"] as? JsonPrimitive)?.contentOrNull ?: "(no output)"))
+            // built-in pending-input (/queue /retry /plan …) dirutekan server ke command.dispatch → {type, message}
+            if (r["message"] != null && r["type"] != null) parseDispatch(r)
+            else Result.Output(cleanOutput((r["output"] as? JsonPrimitive)?.contentOrNull ?: "(no output)"))
         } catch (e: RpcException) {
             if (e.code != 4018) throw e
             val name = cmd.removePrefix("/").substringBefore(' ')

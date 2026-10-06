@@ -25,8 +25,7 @@ class LimitsRepo(private val settings: ConnectionSettings) {
 
     suspend fun fetch(): Limits? = withContext(Dispatchers.IO) {
         val base = settings.baseUrl.trim().trimEnd('/')
-        val auth = DashboardAuth(base)
-        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(base, settings.username, settings.password) ?: return@withContext null
         auth.getJson("$base/api/mobile-limits")?.let { parse(it) }
     }
 

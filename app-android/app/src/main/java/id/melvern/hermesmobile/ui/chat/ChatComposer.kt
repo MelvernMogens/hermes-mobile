@@ -1,5 +1,8 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -97,8 +100,14 @@ fun Composer(
     /** Saran slash command untuk token `/xxx` yang sedang diketik. */
     slashSuggestions: List<id.melvern.hermesmobile.core.repo.SlashRepo.Suggestion> = emptyList(),
     onPickSlash: (String) -> Unit = {},
+    /** Naik setiap kali composer harus difokus (mis. Edit & resend) — keyboard ikut muncul. */
+    focusKey: Int = 0,
 ) {
-    val canSend = connected && !readOnly && (value.isNotBlank() || attachment?.isImage == true)
+    val focus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(focusKey) { if (focusKey > 0) runCatching { focus.requestFocus() } }
+    // v25: offline tetap bisa "kirim" teks — masuk antrean lokal, terkirim saat Mac terjangkau.
+    val canSend = !readOnly && ((connected && (value.isNotBlank() || attachment?.isImage == true)) ||
+        (!connected && value.isNotBlank() && attachment == null))
     val showStop = running && value.isBlank() && attachment == null && !readOnly
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier).fillMaxWidth().background(Ink.Bg)) {
@@ -184,6 +193,7 @@ fun Composer(
                 keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
                 modifier = Modifier
                     .weight(1f)
+                    .focusRequester(focus)
                     // Keyboard fisik (tablet): Enter kirim, Shift+Enter baris baru (Settings).
                     // Dicegat di KeyDown sebelum field menyisipkan "\n".
                     .onPreviewKeyEvent { e ->
@@ -322,6 +332,10 @@ fun AttachSheet(
     onGallery: () -> Unit,
     onFile: () -> Unit,
     onLocation: () -> Unit,
+    /** v25: prompt tersimpan — tap = isi composer; long-press = hapus. */
+    favorites: List<String> = emptyList(),
+    onPickFavorite: (String) -> Unit = {},
+    onRemoveFavorite: (String) -> Unit = {},
 ) {
     QuietSheet(onDismiss = onDismiss) {
         Row(
@@ -339,6 +353,20 @@ fun AttachSheet(
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+        if (favorites.isNotEmpty()) {
+            Text("SAVED PROMPTS", style = Type.Caption.copy(color = Ink.Text3, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+                modifier = Modifier.padding(start = Dim.ScreenH, top = 16.dp, bottom = 4.dp))
+            favorites.take(12).forEach { f ->
+                Text(
+                    f, style = Type.Callout, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                        .combinedClickable(onClick = { onDismiss(); onPickFavorite(f) }, onLongClick = { onRemoveFavorite(f) })
+                        .padding(horizontal = Dim.ScreenH, vertical = 10.dp),
+                )
+            }
+            Text("Long-press a saved prompt to remove it", style = Type.Caption.copy(color = Ink.Text4),
+                modifier = Modifier.padding(start = Dim.ScreenH, top = 2.dp, bottom = 4.dp))
+        }
     }
 }
 

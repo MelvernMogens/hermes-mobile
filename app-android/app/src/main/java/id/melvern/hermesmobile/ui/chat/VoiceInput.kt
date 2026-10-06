@@ -70,8 +70,16 @@ class VoiceInput internal constructor(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
         }
         listening = true
-        r.startListening(intent)
+        try { r.startListening(intent) } catch (e: Throwable) {
+            listening = false; level = 0f; error = "Voice input unavailable"; return
+        }
+        // Review fix: recognizer bisa mati tanpa callback → jangan nyangkut "listening" selamanya
+        val token = ++session
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (listening && token == session) { recognizer?.cancel(); listening = false; level = 0f }
+        }, 60_000)
     }
+    private var session = 0
 
     fun stop() {
         recognizer?.stopListening()

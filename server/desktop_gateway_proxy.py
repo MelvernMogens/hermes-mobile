@@ -37,6 +37,7 @@ import yarl
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mobile_insights  # noqa: E402  (sibling module, read-only state.db queries)
 import mobile_limits  # noqa: E402  (plan limits via hermes-agent + Mac RAM)
+import mobile_mac  # noqa: E402  (v24: Mac panel, diff, web preview)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -404,6 +405,175 @@ async def proxy_ws(request: web.Request) -> web.WebSocketResponse:
     return downstream
 
 
+# ── v24: Mac panel, code diff, web preview ───────────────────────────────────
+
+async def _authed_or_401(request: web.Request) -> web.Response | None:
+    if not await _cookie_authed(request, request.app["client"]):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    return None
+
+
+async def handle_mobile_mac(request: web.Request) -> web.Response:
+    """GET /api/mobile-mac → status; POST /api/mobile-mac {action, arg} → allow-listed action."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    loop = asyncio.get_running_loop()
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        res = await loop.run_in_executor(None, mobile_mac.mac_action, str(body.get("action", "")), str(body.get("arg", "")))
+        return web.json_response(res, status=200 if res.get("ok") else 400)
+    return web.json_response(await loop.run_in_executor(None, mobile_mac.mac_status))
+
+
+async def handle_mobile_diff(request: web.Request) -> web.Response:
+    """GET /api/mobile-diff?path=<file or dir in a repo>&since=<epoch> → files + unified patch."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    since = request.query.get("since")
+    try:
+        since_f = float(since) if since else None
+    except ValueError:
+        since_f = None
+    res = await asyncio.get_running_loop().run_in_executor(None, mobile_mac.diff, request.query.get("path", ""), since_f)
+    return web.json_response(res, status=400 if "error" in res else 200)
+
+
+async def handle_mobile_ports(request: web.Request) -> web.Response:
+    """GET /api/mobile-ports → dev servers listening locally (for web preview)."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    return web.json_response({"ports": await asyncio.get_running_loop().run_in_executor(None, mobile_mac.listening_ports),
+                              "preview_port": PREVIEW_PUBLIC_PORT})
+
+
+# Web preview: a second listener (127.0.0.1:PREVIEW_PORT, exposed by `tailscale serve --https=PREVIEW_PUBLIC_PORT`).
+# Same login cookie (cookies are per-host, not per-port). /__hermes_preview?port=N picks the target dev server
+# (stored in a cookie), then every path is proxied to http://127.0.0.1:N — root-relative assets keep working.
+PREVIEW_PORT = int(os.environ.get("HERMES_PREVIEW_PORT", "8791"))
+PREVIEW_PUBLIC_PORT = int(os.environ.get("HERMES_PREVIEW_PUBLIC_PORT", "8443"))
+# gateway/auth + bot-browser CDP (9222/9333: /json/new bisa menyetir browser) tidak boleh dipreview
+_PREVIEW_BLOCKED = (8787, 8788, 8790, PREVIEW_PORT, 9222, 9333)
+
+
+def _safe_local_path(path: str) -> str:
+    """Hanya path relatif-origin ("/x"); tolak "//host" / "/\\host" (redirect keluar origin)."""
+    if not path.startswith("/") or path.startswith("//") or path.startswith("/\\"):
+        return "/"
+    return path
+_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
+        "transfer-encoding", "upgrade", "host", "content-length", "content-encoding"}
+
+
+_preview_tickets: dict[str, tuple[str, float]] = {}
+
+
+async def handle_preview_ticket(request: web.Request) -> web.Response:
+    """POST /api/mobile-preview-ticket (main proxy, cookie auth) → single-use 60s ticket that the
+    preview origin swaps for the same login cookie. WebViews don't reliably share cookies across
+    ports/origins, so the app opens /__hermes_preview?ticket=… instead of copying cookies."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    import secrets
+    now = time.monotonic()
+    for k, (_, t) in list(_preview_tickets.items()):
+        if now - t > 60:
+            _preview_tickets.pop(k, None)
+    tk = secrets.token_urlsafe(24)
+    _preview_tickets[tk] = (request.headers.get("Cookie", ""), now)
+    return web.json_response({"ticket": tk, "preview_port": PREVIEW_PUBLIC_PORT, "local_port": PREVIEW_PORT})
+
+
+async def preview_http(request: web.Request) -> web.StreamResponse:
+    if request.path == "/__hermes_preview" and (tk := request.query.get("ticket")):
+        cookie, at = _preview_tickets.pop(tk, ("", 0.0))
+        if not cookie or time.monotonic() - at > 60:
+            return web.Response(status=401, text="Preview link expired — open it again from the app.")
+        port = request.query.get("port", "")
+        if not port.isdigit() or not (1024 <= int(port) <= 65535) or int(port) in _PREVIEW_BLOCKED:
+            return web.Response(status=400, text="bad port")
+        https = request.headers.get("X-Forwarded-Proto", "").lower() == "https" or request.secure
+        resp = web.HTTPFound(_safe_local_path(request.query.get("path", "/")))
+        # copy the app's login cookie(s) onto the preview origin + remember the target port
+        for part in cookie.split(";"):
+            name, _, val = part.strip().partition("=")
+            if name.startswith("hermes_session"):
+                resp.set_cookie(name, val, httponly=True, samesite="Lax", secure=https, path="/")
+        resp.set_cookie("hm_preview_port", port, httponly=True, samesite="Lax", secure=https, path="/")
+        raise resp
+    if not await _cookie_authed(request, request.app["client"]):
+        return web.Response(status=401, text="Sign in to Hermes Mobile first.")
+    if request.path == "/__hermes_preview":
+        port = request.query.get("port", "")
+        if not port.isdigit() or not (1024 <= int(port) <= 65535) or int(port) in _PREVIEW_BLOCKED:
+            return web.Response(status=400, text="bad port")
+        resp = web.HTTPFound(_safe_local_path(request.query.get("path", "/")))
+        https = request.headers.get("X-Forwarded-Proto", "").lower() == "https" or request.secure
+        resp.set_cookie("hm_preview_port", port, httponly=True, samesite="Lax", secure=https)
+        raise resp
+    port = request.cookies.get("hm_preview_port", "")
+    if not port.isdigit() or int(port) in _PREVIEW_BLOCKED or not (1024 <= int(port) <= 65535):
+        return web.Response(status=400, text="Open a preview from the Hermes app first.")
+    target = yarl.URL.build(scheme="http", host="127.0.0.1", port=int(port), path=request.path, query_string=request.query_string)
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return await _preview_ws(request, target.with_scheme("ws"))
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP and k.lower() != "cookie"}
+    headers["Host"] = f"127.0.0.1:{port}"
+    try:
+        async with request.app["client"].request(request.method, target, headers=headers, data=await request.read(),
+                                                 allow_redirects=False, auto_decompress=True) as up:
+            out = web.StreamResponse(status=up.status)
+            for k, v in up.headers.items():
+                if k.lower() not in _HOP and k.lower() != "set-cookie":
+                    out.headers.add(k, v)
+            await out.prepare(request)
+            async for chunk in up.content.iter_chunked(64 * 1024):
+                await out.write(chunk)
+            await out.write_eof()
+            return out
+    except aiohttp.ClientConnectorError:
+        return web.Response(status=502, text=f"Nothing is running on port {port} on your Mac.")
+
+
+async def _preview_ws(request: web.Request, target: yarl.URL) -> web.StreamResponse:
+    down = web.WebSocketResponse(max_msg_size=0)
+    await down.prepare(request)
+    proto = request.headers.get("Sec-WebSocket-Protocol")
+    try:
+        async with request.app["client"].ws_connect(target, protocols=[proto] if proto else (), max_msg_size=0) as up:
+            async def pump(a, b):
+                async for m in a:
+                    if m.type == aiohttp.WSMsgType.TEXT:
+                        await b.send_str(m.data)
+                    elif m.type == aiohttp.WSMsgType.BINARY:
+                        await b.send_bytes(m.data)
+                    else:
+                        break
+            await asyncio.gather(pump(down, up), pump(up, down), return_exceptions=True)
+    except Exception:
+        pass
+    await down.close()
+    return down
+
+
+async def _start_preview(app: web.Application) -> None:
+    papp = web.Application(client_max_size=50 * 1024 * 1024)
+    papp["client"] = app["client"]
+    papp.router.add_route("*", "/{tail:.*}", preview_http)
+    runner = web.AppRunner(papp, access_log=None)
+    await runner.setup()
+    # 127.0.0.1 saja (tailscale serve + emulator 10.0.2.2→loopback). Tidak pernah ke LAN.
+    await web.TCPSite(runner, "127.0.0.1", PREVIEW_PORT).start()
+    app["preview_runner"] = runner
+
+
+async def _stop_preview(app: web.Application) -> None:
+    if (r := app.get("preview_runner")) is not None:
+        await r.cleanup()
+
+
 async def on_startup(app: web.Application) -> None:
     app["client"] = aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=None, connect=5))
@@ -422,9 +592,16 @@ def main() -> None:
     app.router.add_get("/api/mobile-usage", handle_mobile_usage)
     app.router.add_get("/api/mobile-user-tail", handle_mobile_user_tail)
     app.router.add_get("/api/mobile-limits", handle_mobile_limits)
+    app.router.add_route("GET", "/api/mobile-mac", handle_mobile_mac)
+    app.router.add_route("POST", "/api/mobile-mac", handle_mobile_mac)
+    app.router.add_get("/api/mobile-diff", handle_mobile_diff)
+    app.router.add_get("/api/mobile-ports", handle_mobile_ports)
+    app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
     app.on_startup.append(on_startup)
+    app.on_startup.append(_start_preview)
+    app.on_cleanup.append(_stop_preview)
     app.on_cleanup.append(on_cleanup)
 
     loop = asyncio.new_event_loop()

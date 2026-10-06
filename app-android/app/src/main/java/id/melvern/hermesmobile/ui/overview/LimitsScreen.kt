@@ -64,6 +64,7 @@ fun LimitsScreen(app: HermesApp) {
         now = System.currentTimeMillis()
     }
     LaunchedEffect(Unit) { while (true) { load(); delay(30_000) } }
+    var preview by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val ptr = rememberPullToRefreshState()
     PullToRefreshBox(
@@ -79,7 +80,7 @@ fun LimitsScreen(app: HermesApp) {
         modifier = Modifier.fillMaxSize().background(Ink.Bg),
     ) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Text("Limits", style = Type.Display,
+            Text("Mac", style = Type.Display,
                 modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Column(
@@ -88,6 +89,7 @@ fun LimitsScreen(app: HermesApp) {
                         .padding(horizontal = Dim.GroupInset).padding(top = 14.dp, bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    MacPanel(app, onPreview = { url, t -> preview = url to t })
                     val d = data
                     when {
                         d == null && failed -> Text("Couldn't reach your Mac", style = Type.Meta,
@@ -104,6 +106,12 @@ fun LimitsScreen(app: HermesApp) {
                 }
             }
         }
+    }
+    preview?.let { (url, t) ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { preview = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) { WebPreviewScreen(app, url, t, onClose = { preview = null }) }
     }
 }
 

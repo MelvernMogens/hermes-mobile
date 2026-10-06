@@ -1,0 +1,121 @@
+package id.melvern.hermesmobile
+
+import id.melvern.hermesmobile.core.model.ChatItem
+import id.melvern.hermesmobile.core.repo.AgentWorkRepo
+import id.melvern.hermesmobile.core.repo.MacRepo
+import id.melvern.hermesmobile.core.repo.ScheduleRepo
+import id.melvern.hermesmobile.core.repo.SessionRepo
+import id.melvern.hermesmobile.core.repo.UnreadStore
+import id.melvern.hermesmobile.core.share.ChatExport
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class V23to25LogicTest {
+    private fun obj(s: String) = Json.parseToJsonElement(s).jsonObject
+
+    // ── v23 ──
+    @Test fun todosParseFromSnapshot() {
+        val t = AgentWorkRepo.parseTodos(obj("""{"todos":[{"id":"1","content":"Read files","status":"completed"},
+            {"id":"2","content":"Write fix","status":"in_progress"},{"id":"3","content":"  ","status":"pending"}],"revision":3}"""))
+        assertEquals(2, t.size)
+        assertTrue(t[0].done); assertTrue(t[1].active)
+    }
+
+    @Test fun subagentsParse() {
+        val s = AgentWorkRepo.parseSubagents(obj("""{"subagents":[{"subagent_id":"sa-1","goal":"Audit","status":"running","tool_count":4,
+            "last_tool":"terminal","model":"glm-5.3","depth":1,"accepting_steer":true}],"delegations":[]}"""))
+        assertEquals("sa-1", s.single().id)
+        assertTrue(s.single().running)
+        assertEquals(4, s.single().toolCount)
+    }
+
+    @Test fun inboxApprovalAndClarify() {
+        val ap = AgentWorkRepo.toPending("st", "Chat", SessionRepo.OpenRequest("r1", "approval",
+            obj("""{"tool_name":"terminal","command":"rm -rf build"}""")))!!
+        assertEquals("approval", ap.kind); assertEquals("rm -rf build", ap.detail)
+        val cl = AgentWorkRepo.toPending("st", "Chat", SessionRepo.OpenRequest("r2", "clarify",
+            obj("""{"questions":[{"qid":"q1","question":"Which theme?","choices":["A","B"]}]}""")))!!
+        assertEquals("Which theme?", cl.detail)
+        assertNull(AgentWorkRepo.toPending("st", "Chat", SessionRepo.OpenRequest("r3", "other", null)))
+    }
+
+    @Test fun unreadOnlyForNewAssistantAfterSeen() {
+        assertFalse(UnreadStore.isUnreadPure(null, 100.0, "assistant"))   // never opened on this phone
+        assertTrue(UnreadStore.isUnreadPure(50.0, 100.0, "assistant"))
+        assertFalse(UnreadStore.isUnreadPure(150.0, 100.0, "assistant"))
+        assertFalse(UnreadStore.isUnreadPure(50.0, 100.0, "user"))       // own message isn't unread
+    }
+
+    @Test fun steerWrapperUnwrapped() {
+        val (t, steered) = id.melvern.hermesmobile.core.model.SteerText.unwrap(
+            "[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once]\nchange of plan: BANANA\n[/OUT-OF-BAND USER MESSAGE]")
+        assertEquals("change of plan: BANANA", t); assertTrue(steered)
+        assertEquals("hi" to false, id.melvern.hermesmobile.core.model.SteerText.unwrap("hi"))
+    }
+
+    @Test fun rowIdsBackfilledForLocalBubbles() {
+        val items = listOf(ChatItem.User("old", rowId = 5), ChatItem.User("first"), ChatItem.Assistant("a", true), ChatItem.User("hello again"))
+        val tail = listOf(
+            id.melvern.hermesmobile.core.repo.InsightsRepo.UserMsg(7, "first", 1.0),
+            id.melvern.hermesmobile.core.repo.InsightsRepo.UserMsg(9, "hello again", 2.0),
+        )
+        val out = id.melvern.hermesmobile.core.repo.InsightsRepo.backfillRowIds(items, tail).filterIsInstance<ChatItem.User>()
+        assertEquals(listOf(5, 7, 9), out.map { it.rowId })
+    }
+
+    // ── v24 ──
+    @Test fun macStatusParse() {
+        val s = MacRepo.parseStatus("""{"battery":{"percent":80,"state":"charging","ac":true},"load":[2.0,1,1],"cpu_count":8,
+            "uptime_days":3,"disk":{"free_bytes":1000,"total_bytes":2000},"keep_awake":true,
+            "services":[{"label":"x","name":"Mobile server","running":false}],"bot_tabs":5,"host":"Mac"}""")!!
+        assertEquals(80, s.batteryPct); assertTrue(s.keepAwake); assertFalse(s.services.single().running)
+    }
+
+    @Test fun diffSplitPerFile() {
+        val patch = "diff --git a/x.kt b/x.kt\nindex 1..2\n--- a/x.kt\n+++ b/x.kt\n@@ -1 +1,2 @@\n one\n+two\n" +
+            "diff --git a/y.md b/y.md\nnew file\n--- /dev/null\n+++ b/y.md\n@@ -0,0 +1 @@\n+hi\n"
+        val m = MacRepo.splitPatch(patch).toMap()
+        assertEquals(listOf("@@ -1 +1,2 @@", " one", "+two"), m["x.kt"]!!.filter { it.isNotEmpty() })
+        assertEquals(listOf("@@ -0,0 +1 @@", "+hi"), m["y.md"]!!.filter { it.isNotEmpty() })
+    }
+
+    @Test fun touchedPathsFromToolOutput() {
+        val p = MacRepo.touchedPaths(listOf("""{"path": "/Users/m/Code/app/src/A.kt", "x": 1}""", "edited /Users/m/Code/app/README.md."))
+        assertEquals(listOf("/Users/m/Code/app/src/A.kt", "/Users/m/Code/app/README.md"), p)
+    }
+
+    @Test fun exportSkipsToolsAndAttachmentNoise() {
+        val md = ChatExport.markdown("T", listOf(
+            ChatItem.User("hello\nMEDIA:/x.png"), ChatItem.Tool("terminal", "done"),
+            ChatItem.Assistant("hi there", done = true), ChatItem.Assistant("partial", done = false),
+        ))
+        assertEquals("# T\n\n**You:** hello\n\n**Hermes:** hi there\n", md)
+    }
+
+    // ── v25 ──
+    @Test fun cronJobsParse() {
+        val j = ScheduleRepo.parseJobs("""[{"id":"j1","name":"Brief","prompt":"news","schedule":{"kind":"cron","expr":"0 8 * * *","display":"0 8 * * *"},
+            "enabled":true,"state":"scheduled","next_run_at":"2026-10-07T08:00:00+07:00"}]""")!!
+        assertEquals("j1", j.single().id); assertEquals("0 8 * * *", j.single().schedule); assertFalse(j.single().paused)
+        assertEquals("Every morning 8:00", ScheduleRepo.humanSchedule("0 8 * * *"))
+    }
+
+    @Test fun snippetEscapesCleaned() {
+        val raw = "[{\"function\": {\"arguments\": \"{\\\\\"command\\\\\":\\\\\"tailscale switch | grep '\\\\\\\\*'\\\\nnext\"}}]"
+        val c = ScheduleRepo.cleanSnippet(raw)
+        assertFalse(c, c.contains("\\\\"))
+        assertTrue(c, c.startsWith("tailscale switch"))
+    }
+
+    @Test fun searchHitsParseAndHighlightMarkersKept() {
+        val h = ScheduleRepo.parseHits("""{"results":[{"session_id":"s2","lineage_root":"s1","title":"Tailscale fix",
+            "snippet":"switch >>>tailscale<<< account","role":"assistant","last_active":1.0}]}""")!!
+        assertEquals("s1", h.single().sessionId)
+        assertTrue(h.single().snippet.contains(">>>tailscale<<<"))
+    }
+}

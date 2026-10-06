@@ -1,5 +1,7 @@
 package id.melvern.hermesmobile.ui.layout
 
+import androidx.compose.material.icons.rounded.Laptop
+import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -108,7 +110,7 @@ private fun BottomBar(tab: Int, onTab: (Int) -> Unit, running: Int) {
             // badge cuma muncul kalau kita TIDAK di tab Overview (di sana angkanya sudah kelihatan)
             TabItem(Icons.Rounded.Hub, Icons.Outlined.Hub, "Agents", selected = tab == HomeTabs.OVERVIEW,
                 badge = running.takeIf { tab != HomeTabs.OVERVIEW }, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.OVERVIEW) }
-            TabItem(Icons.Rounded.Speed, Icons.Outlined.Speed, "Limits", selected = tab == HomeTabs.LIMITS,
+            TabItem(Icons.Rounded.Laptop, Icons.Outlined.Laptop, "Mac", selected = tab == HomeTabs.LIMITS,
                 badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.LIMITS) }
             TabItem(Icons.Rounded.Settings, Icons.Outlined.Settings, "Settings", selected = tab == HomeTabs.SETTINGS,
                 badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.SETTINGS) }
@@ -130,7 +132,7 @@ private fun Rail(tab: Int, onTab: (Int) -> Unit, running: Int, modifier: Modifie
                 onTab(HomeTabs.OVERVIEW)
             }
             Spacer(Modifier.height(4.dp))
-            RailItem(Icons.Rounded.Speed, Icons.Outlined.Speed, "Limits", selected = tab == HomeTabs.LIMITS, badge = null) {
+            RailItem(Icons.Rounded.Laptop, Icons.Outlined.Laptop, "Mac", selected = tab == HomeTabs.LIMITS, badge = null) {
                 onTab(HomeTabs.LIMITS)
             }
             Spacer(Modifier.height(4.dp))

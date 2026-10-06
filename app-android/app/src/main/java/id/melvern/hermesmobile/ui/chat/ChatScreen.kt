@@ -1,5 +1,10 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -123,7 +128,11 @@ fun ChatScreen(
     // M14: chat ini "yang dibuka di layar" — notif utk session ini di-mute.
     DisposableEffect(effectiveStoredId) {
         app.openChatStoredId = effectiveStoredId
-        onDispose { if (app.openChatStoredId == effectiveStoredId) app.openChatStoredId = null }
+        id.melvern.hermesmobile.core.repo.UnreadStore.markSeen(app, effectiveStoredId)
+        onDispose {
+            id.melvern.hermesmobile.core.repo.UnreadStore.markSeen(app, effectiveStoredId)
+            if (app.openChatStoredId == effectiveStoredId) app.openChatStoredId = null
+        }
     }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     var title by remember { mutableStateOf(initialTitle ?: "") }
@@ -150,6 +159,11 @@ fun ChatScreen(
     var activeModel by remember { mutableStateOf("") }
     // M4: approval + clarify card — server→client request.
     var approval by remember { mutableStateOf<AskApproval?>(null) }
+    // v23: task board + subagent monitor
+    var todos by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.AgentWorkRepo.Todo>>(emptyList()) }
+    var subagents by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.AgentWorkRepo.Subagent>>(emptyList()) }
+    var workSheet by remember { mutableStateOf(false) }
+    var subPollKick by remember { mutableStateOf(0) }
     var clarify by remember { mutableStateOf<AskClarify?>(null) }
     // agent berhenti nunggu jawaban (clarify/approval belum dijawab) → header "Waiting for you"
     val waitingOnUser = (clarify?.responded == null && clarify != null) || (approval?.responded == null && approval != null)
@@ -184,6 +198,14 @@ fun ChatScreen(
     var didInitialScroll by remember { mutableStateOf(false) }
     // M3.2: long-press salin teks
     var copyTarget by remember { mutableStateOf<String?>(null) }
+    // v24: edit & resend (user message), diff viewer
+    var editTarget by remember { mutableStateOf<ChatItem.User?>(null) }
+    var composerFocus by remember { mutableStateOf(0) }
+    var userActionTarget by remember { mutableStateOf<ChatItem.User?>(null) }
+    var diffOpen by remember { mutableStateOf(false) }
+    // v25: prompt favorit + antrean offline
+    var favorites by remember { mutableStateOf(id.melvern.hermesmobile.core.repo.PromptStore.favorites(app)) }
+    var offlineQueued by remember { mutableStateOf(id.melvern.hermesmobile.core.repo.PromptStore.queue(app).filter { it.storedId == actualStoredId }) }
     // M11: reply — teks pesan yang di-quote, tampil sebagai chip di atas composer.
     var replyQuote by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
@@ -291,6 +313,50 @@ fun ChatScreen(
             } finally { attaching = false }
         }
     }
+    // v23: subagent monitor — poll saat turn jalan (atau ada event subagent), berhenti saat idle & semua selesai.
+    LaunchedEffect(runtimeId, running, subPollKick) {
+        if (runtimeId.isBlank()) return@LaunchedEffect
+        val c = app.client ?: return@LaunchedEffect
+        val repo = id.melvern.hermesmobile.core.repo.AgentWorkRepo(c, app.profile.value)
+        var failures = 0
+        while (true) {
+            try { subagents = repo.subagents(runtimeId); failures = 0 }
+            catch (e: Throwable) {
+                // 4001/4010 = session bukan milik koneksi ini (mis. dibuka desktop) — berhenti, jangan spam
+                if ((e as? id.melvern.hermesmobile.core.rpc.RpcException)?.code in setOf(4001, 4010) || ++failures >= 3) break
+            }
+            if (!running && subagents.none { it.running }) break
+            delay(4000)
+        }
+    }
+
+    // v25: kirim antrean offline begitu koneksi OPEN + runtime siap (urut, satu per satu)
+    LaunchedEffect(connState, runtimeId, offlineQueued.size, loading) {
+        if (connState != ConnState.OPEN || runtimeId.isBlank() || offlineQueued.isEmpty() || loading) return@LaunchedEffect
+        val q = offlineQueued.first()
+        // Review fix: keluarkan dari antrean SEBELUM kirim (effect bisa restart di tengah kirim →
+        // jangan kirim dobel); gagal → kembalikan ke antrean.
+        id.melvern.hermesmobile.core.repo.PromptStore.removeQueued(app, q)
+        try {
+            val repo = SessionRepo(app.client ?: throw IllegalStateException("no client"), app.profile.value)
+            val nowE = System.currentTimeMillis() / 1000.0
+            items = items + ChatItem.User(q.text, time = RelTime.clock(nowE), at = nowE)
+            forceScroll = true
+            launch { delay(150); runCatching { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) } }
+            val (newRt, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, q.text)
+            if (newRt != runtimeId) runtimeId = newRt
+            if (status == SessionRepo.SubmitStatus.QUEUED) items = items.map { if (it is ChatItem.User && it.text == q.text) it.copy(queued = true) else it }
+            running = true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            id.melvern.hermesmobile.core.repo.PromptStore.requeueFront(app, q); throw e
+        } catch (_: Throwable) {
+            items = items.filterNot { it is ChatItem.User && it.text == q.text && it.rowId == null && !it.queued }
+            id.melvern.hermesmobile.core.repo.PromptStore.requeueFront(app, q)
+            delay(5000)
+        }
+        offlineQueued = id.melvern.hermesmobile.core.repo.PromptStore.queue(app).filter { it.storedId == effectiveStoredId }
+    }
+
     // Slash: saran saat mengetik token /xxx (debounce 150ms, sama sumber dengan desktop).
     var slashSuggestions by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.SlashRepo.Suggestion>>(emptyList()) }
     LaunchedEffect(input) {
@@ -302,7 +368,9 @@ fun ChatScreen(
     }
 
     // Share to Hermes: chat ini dipilih sebagai tujuan → teks ke draft, file pertama di-attach.
-    LaunchedEffect(effectiveStoredId, runtimeId) {
+    val shareTarget by id.melvern.hermesmobile.core.share.ShareInbox.target.collectAsState()
+    val sharePending by id.melvern.hermesmobile.core.share.ShareInbox.pending.collectAsState()
+    LaunchedEffect(effectiveStoredId, runtimeId, shareTarget, sharePending?.ready) {
         if (runtimeId.isBlank()) return@LaunchedEffect
         val sh = id.melvern.hermesmobile.core.share.ShareInbox.take(effectiveStoredId) ?: return@LaunchedEffect
         sh.text?.let { t -> input = listOf(input.trim(), t).filter { it.isNotEmpty() }.joinToString("\n") }
@@ -383,6 +451,24 @@ fun ChatScreen(
     }
 
     /**
+     * Bubble user yang dikirim dari HP (optimistic) belum punya row_id DB — tanpa itu
+     * "Edit & resend" menunjuk row lama / gagal. Setelah turn selesai, ambil row_id
+     * dari Mac (user tail) dan cocokkan per teks (urut dari belakang).
+     */
+    fun backfillRowIds() {
+        if (items.none { it is ChatItem.User && it.rowId == null }) return
+        val conn = app.connection ?: return
+        val sid = effectiveStoredId.takeIf { it.isNotBlank() } ?: return
+        scope.launch {
+            val since = (items.filterIsInstance<ChatItem.User>().filter { it.rowId == null }.mapNotNull { it.at }.minOrNull() ?: return@launch) - 300
+            val tail = id.melvern.hermesmobile.core.repo.InsightsRepo(conn).userTail(app.profile.value, sid, since) ?: return@launch
+            items = id.melvern.hermesmobile.core.repo.InsightsRepo.backfillRowIds(items, tail)
+            cacheSnapshot()
+        }
+    }
+
+
+    /**
      * Turn baru mulai (message.start) — mungkin dari surface lain. Ambil prompt
      * user sejak pesan user terakhir yang kita tahu (minus 2 menit buat clock skew)
      * dan sisipkan yang belum ada. Retry singkat: row prompt kadang baru tercatat
@@ -412,7 +498,10 @@ fun ChatScreen(
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
         when {
-            m.isUser -> listOf(ChatItem.User(m.text ?: "", m.rowId, time = RelTime.clock(m.timestamp), at = m.timestamp))
+            m.isUser -> {
+                val (txt, steered) = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text ?: "")
+                listOf(ChatItem.User(txt, m.rowId, time = RelTime.clock(m.timestamp), at = m.timestamp, steered = steered))
+            }
             m.role == "tool" -> listOf(
                 ChatItem.Tool(m.name ?: "tool", "done", (m.argsText ?: m.context ?: "").take(2000))
             )
@@ -510,6 +599,7 @@ fun ChatScreen(
                 // penuh — approval pending server-side membuat running=true dan
                 // justru di kasus ini card wajib muncul lagi.
                 out.openRequests.forEach { req -> restoreOpenRequest(req) }
+                todos = id.melvern.hermesmobile.core.repo.AgentWorkRepo.parseTodos(out.todoState)
             }
             // M4: restored server→client request (replay open_requests) —
             // card dimunculkan lagi; jawab via request.answer RPC (frame id
@@ -527,8 +617,9 @@ fun ChatScreen(
         } finally { loading = false }
     }
 
-    LaunchedEffect(runtimeId) {
-        app.client?.inbound?.collect { ev ->
+    val liveClient by app.clientFlow.collectAsState()
+    LaunchedEffect(runtimeId, liveClient) {
+        liveClient?.inbound?.collect { ev ->
             when (ev) {
                 is GatewayInbound.ServerAsk -> when (ev.method) {
                     "approval" -> {
@@ -595,6 +686,7 @@ fun ChatScreen(
                         pendingThought = null; thoughtBuf = ""
                         running = false
                         cacheSnapshot()
+                        backfillRowIds()
                         if (!atBottom) hasNew = true
                     }
                     "message.start" -> {
@@ -642,6 +734,10 @@ fun ChatScreen(
                     "session.title" -> {
                         ev.payload?.get("title")?.jsonStr()?.takeIf { it.isNotBlank() }?.let { title = it }
                     }
+                    "todo.updated" -> {
+                        todos = id.melvern.hermesmobile.core.repo.AgentWorkRepo.parseTodos(ev.payload)
+                    }
+                    "subagent.spawn_requested", "subagent.start", "subagent.complete" -> subPollKick++
                 }
                 is GatewayInbound.Ready -> app.client?.replaySince(runtimeId)
                 else -> {}
@@ -815,6 +911,8 @@ fun ChatScreen(
         // M15: hairline juga ikut max width center di expanded.
         // (dulu hairline yang memotong teks saat scroll — sekarang fade di atas list)
 
+        WorkStrip(todos, subagents, wide, onOpen = { workSheet = true })
+
         // ── Read-only banner (M7 derived) ──────────────────────────────
         if (readOnly) {
             Row(
@@ -860,7 +958,7 @@ fun ChatScreen(
                             is ChatRow.Thoughts -> ThoughtsRow(row.texts)
                             is ChatRow.Activity -> ActivityRow(row.tools, row.thoughts)
                             is ChatRow.Item -> when (val item = row.item) {
-                                is ChatItem.User -> UserBubble(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch)
+                                is ChatItem.User -> UserBubble(item, onLongPress = { userActionTarget = item }, mediaFetch = mediaFetch, videoFetch = videoFetch)
                                 is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) }, showMeta = row.index in turnEnds)
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,
@@ -973,6 +1071,63 @@ fun ChatScreen(
         }
 
             // M15: expanded → composer max 640 center.
+            if (offlineQueued.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH, vertical = 4.dp)) {
+                    offlineQueued.forEach { q ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Schedule, null, tint = Ink.Text3, modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(q.text, style = Type.Caption.copy(color = Ink.Text2), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text("Cancel", style = Type.Caption.copy(color = Ink.Text3), modifier = Modifier.clip(Radius.Chip).pressClickable {
+                                id.melvern.hermesmobile.core.repo.PromptStore.removeQueued(context, q)
+                                offlineQueued = id.melvern.hermesmobile.core.repo.PromptStore.queue(context).filter { it.storedId == effectiveStoredId }
+                            }.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
+                    Text("Will send when your Mac is reachable", style = Type.Caption.copy(color = Ink.Text4))
+                }
+            }
+            editTarget?.let { et ->
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    Row(
+                        Modifier.then(if (wide) Modifier.widthIn(max = Dim.ChatMaxW) else Modifier).fillMaxWidth()
+                            .padding(start = Dim.ScreenH, end = 4.dp, top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Edit, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Editing — replies after this message will be replaced", style = Type.Caption.copy(color = Ink.Text2), modifier = Modifier.weight(1f))
+                        QuietIconButton(Icons.Rounded.Close, "Cancel edit", tint = Ink.Text3, onClick = { editTarget = null; input = "" })
+                    }
+                }
+            }
+            if (running && input.isNotBlank() && attachment == null && !readOnly && !input.trimStart().startsWith("/")) {
+                BusySendBar(
+                    wide = wide,
+                    onSteer = {
+                        val t = input.trim(); input = ""
+                        items = items + ChatItem.User(t, time = RelTime.clock(nowEpoch()), at = nowEpoch(), steered = true)
+                        forceScroll = true
+                        scope.launch {
+                            val ok = try { id.melvern.hermesmobile.core.repo.AgentWorkRepo(app.client ?: return@launch, app.profile.value).steer(runtimeId, t) } catch (_: Throwable) { false }
+                            if (!ok) items = items + ChatItem.NoticeLine("Couldn't steer — the turn may have just ended. Send it as a new message.")
+                        }
+                    },
+                    onQueue = {
+                        val t = input.trim(); input = ""
+                        items = items + ChatItem.User(t, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch())
+                        forceScroll = true
+                        scope.launch {
+                            try {
+                                SessionRepo(app.client ?: return@launch, app.profile.value).submitQueued(runtimeId, t)
+                                items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = true) else it }
+                            } catch (e: Throwable) {
+                                items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it } + ChatItem.NoticeLine(e.message ?: "Send failed")
+                            }
+                        }
+                    },
+                )
+            }
             Composer(
                 value = input, onValueChange = { input = it },
                 running = running, connected = connState == ConnState.OPEN,
@@ -988,6 +1143,7 @@ fun ChatScreen(
                 wide = wide,
                 voice = voice.takeIf { it.available },
                 slashSuggestions = slashSuggestions,
+                focusKey = composerFocus,
                 onPickSlash = { t -> input = (if (t.startsWith("/")) t else "/$t").trimEnd() + " "; slashSuggestions = emptyList() },
                 onMic = {
                     val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) ==
@@ -1011,6 +1167,45 @@ fun ChatScreen(
                     mediaLine,
                 )
                 if (typed.isEmpty() && att == null) return@Composer
+                // v25 offline queue: Mac tidak terjangkau → simpan, kirim otomatis saat konek lagi
+                if (connState != ConnState.OPEN && att == null && !typed.startsWith("/")) {
+                    id.melvern.hermesmobile.core.repo.PromptStore.enqueue(context, effectiveStoredId, typed)
+                    offlineQueued = id.melvern.hermesmobile.core.repo.PromptStore.queue(context).filter { it.storedId == effectiveStoredId }
+                    input = ""; replyQuote = null
+                    return@Composer
+                }
+                // v24: edit & resend — potong history mulai pesan ini lalu kirim versi baru
+                editTarget?.let { et ->
+                    val rid = et.rowId
+                    editTarget = null
+                    if (rid != null && att == null) {
+                        input = ""
+                        val idx = items.indexOfFirst { it === et || (it is ChatItem.User && it.rowId == rid) }
+                        val isFirst = items.take(maxOf(idx, 0)).none { it is ChatItem.User }
+                        if (idx >= 0) items = items.take(idx)
+                        items = items + ChatItem.User(typed, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch())
+                        forceScroll = true
+                        val oldText = et.text.trim()
+                        val userOrdinal = items.take(maxOf(idx, 0)).count { it is ChatItem.User }
+                        scope.launch {
+                            try {
+                                // row_id lokal bisa basi (cache / edit sebelumnya me-rewind row) —
+                                // ambil row AKTIF terbaru dari transcript server sesuai urutan pesan user.
+                                val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
+                                val fresh = try { repo.activeUserRowIds(effectiveStoredId) } catch (_: Throwable) { emptyList() }
+                                val target = fresh.getOrNull(userOrdinal)?.takeIf { it.second.trim() == oldText || it.second.trim().endsWith(oldText) }?.first
+                                    ?: fresh.lastOrNull { it.second.trim() == oldText }?.first ?: rid
+                                repo.submitEdit(runtimeId, typed, target, isFirst)
+                                items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it }
+                                running = true
+                            } catch (e: Throwable) {
+                                items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false) else it } +
+                                    ChatItem.NoticeLine("Edit failed: ${e.message ?: "unknown"} — pull to reload")
+                            }
+                        }
+                        return@Composer
+                    }
+                }
                 // Slash command (tanpa lampiran): jalanin lewat slash.exec, output tampil
                 // sebagai kartu command. Skill/queue → balik jadi prompt dan dikirim normal.
                 if (att == null && quote == null && typed.startsWith("/") && typed.length > 1 && runtimeId.isNotBlank()) {
@@ -1033,6 +1228,11 @@ fun ChatScreen(
                                 items = items.filterNot { it === card } + ChatItem.User(typed, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch())
                                 try {
                                     val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
+                                    if (res.queued) {
+                                        repo.submitQueued(runtimeId, res.message)
+                                        items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = true) else it }
+                                        return@launch
+                                    }
                                     val (newRuntime, status) = repo.sendPromptResilient(effectiveStoredId, runtimeId, res.message)
                                     if (newRuntime != runtimeId) runtimeId = newRuntime
                                     items = items.map { if (it is ChatItem.User && it.pending) it.copy(pending = false, queued = status == SessionRepo.SubmitStatus.QUEUED) else it }
@@ -1123,6 +1323,35 @@ fun ChatScreen(
         )
     }
 
+    // v24: pesan user — Copy / Reply / Edit & resend
+    userActionTarget?.let { u ->
+        QuietSheet(onDismiss = { userActionTarget = null }, title = "Your message") {
+            Text(u.text.take(200), style = Type.Callout.copy(color = Ink.Text2), maxLines = 3, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
+            if (u.rowId != null && !running && !readOnly) SheetActionRow("Edit & resend", Icons.Rounded.Edit) {
+                editTarget = u; input = userDisplayText(u.text); userActionTarget = null; composerFocus++
+            }
+            val saved = userDisplayText(u.text).trim() in favorites
+            SheetActionRow(if (saved) "Remove from saved prompts" else "Save as prompt", Icons.Rounded.BookmarkBorder) {
+                id.melvern.hermesmobile.core.repo.PromptStore.toggleFavorite(context, userDisplayText(u.text))
+                favorites = id.melvern.hermesmobile.core.repo.PromptStore.favorites(context); userActionTarget = null
+            }
+            SheetActionRow("Reply", Icons.Rounded.Reply) { replyQuote = u.text.take(280); userActionTarget = null }
+            SheetActionRow("Copy text", Icons.Rounded.ContentCopy) { clipboard.setText(AnnotatedString(u.text)); userActionTarget = null }
+        }
+    }
+    if (diffOpen) {
+        val paths = remember(items) {
+            id.melvern.hermesmobile.core.repo.MacRepo.touchedPaths(items.mapNotNull { (it as? ChatItem.Tool)?.detail } +
+                items.mapNotNull { (it as? ChatItem.Assistant)?.text })
+        }
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { diffOpen = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            DiffScreen(app, paths, since = items.firstNotNullOfOrNull { (it as? ChatItem.User)?.at }?.minus(60), onClose = { diffOpen = false })
+        }
+    }
     // M3.2: long-press salin pesan
     copyTarget?.let { target ->
         QuietSheet(onDismiss = { copyTarget = null }, title = "Message") {
@@ -1140,6 +1369,10 @@ fun ChatScreen(
                 clipboard.setText(AnnotatedString(target))
                 copyTarget = null
             }
+            SheetActionRow("Share", Icons.Rounded.Share) {
+                id.melvern.hermesmobile.core.share.ChatExport.share(context, title.ifBlank { "Hermes" }, target)
+                copyTarget = null
+            }
         }
     }
     if (attachSheet) {
@@ -1151,6 +1384,9 @@ fun ChatScreen(
                     androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             },
             onFile = { pickFile.launch("*/*") },
+            favorites = favorites,
+            onPickFavorite = { f -> input = f },
+            onRemoveFavorite = { f -> id.melvern.hermesmobile.core.repo.PromptStore.toggleFavorite(context, f); favorites = id.melvern.hermesmobile.core.repo.PromptStore.favorites(context) },
             onLocation = {
                 val fine = android.Manifest.permission.ACCESS_FINE_LOCATION
                 val coarse = android.Manifest.permission.ACCESS_COARSE_LOCATION
@@ -1161,6 +1397,15 @@ fun ChatScreen(
         )
     }
     // Model sheet: live chat → switch this chat's model in place (desktop parity).
+    if (workSheet) {
+        WorkSheet(
+            todos = todos, subs = subagents,
+            repo = { app.client?.let { id.melvern.hermesmobile.core.repo.AgentWorkRepo(it, app.profile.value) } },
+            runtimeId = runtimeId,
+            onDismiss = { workSheet = false },
+            onRefreshSubs = { subPollKick++ },
+        )
+    }
     if (modelSheet) {
         ModelSheet(
             app = app,
@@ -1189,6 +1434,11 @@ fun ChatScreen(
             onDismiss = { menuSheet = false },
             onOpenBranch = { rt, stored -> menuSheet = false; onOpenChat("$stored|$rt") },
             onDeleted = { menuSheet = false; onBack() },
+            onCodeChanges = { diffOpen = true },
+            onShareChat = {
+                val md = id.melvern.hermesmobile.core.share.ChatExport.markdown(title.ifBlank { "Hermes chat" }, items)
+                id.melvern.hermesmobile.core.share.ChatExport.share(context, title.ifBlank { "Hermes chat" }, md)
+            },
         )
     }
     // M15: artifacts side sheet (expanded) — 380dp slide dari kanan di dalam

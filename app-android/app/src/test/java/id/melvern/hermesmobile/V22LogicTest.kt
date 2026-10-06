@@ -63,4 +63,10 @@ class V22LogicTest {
         val r = SlashRepo.parseDispatch(buildJsonObject { put("output", "\u001B[1mModel:\u001B[0m opus  \n") })
         assertEquals(SlashRepo.Result.Output("Model: opus"), r)
     }
+
+    @Test fun slashExecDirectDispatchPayloadIsPrompt() {
+        // server rutekan /queue dkk langsung lewat slash.exec → {type:send, message} (tanpa 4018)
+        val r = SlashRepo.parseDispatch(buildJsonObject { put("type", "send"); put("message", "do X later") })
+        assertEquals(SlashRepo.Result.Send("do X later", null), r)
+    }
 }

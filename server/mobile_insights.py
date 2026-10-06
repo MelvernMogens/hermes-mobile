@@ -37,10 +37,17 @@ def _connect(db: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=3)
 
 
+_OOB_RE = re.compile(r"^\s*\[OUT-OF-BAND USER MESSAGE[^\]]*\]\s*(.*?)\s*\[/OUT-OF-BAND USER MESSAGE\]\s*$", re.S)
+
+
 def _flatten(text: str) -> str:
     """One display line: collapse whitespace, strip markdown noise, MEDIA/@file lines and
     the server-inlined "--- Attached Context ---" block (model-only, desktop hides it too)."""
     text = re.split(r"(?:^|\n)--- Attached Context ---\s*\n", text, maxsplit=1)[0]
+    # steer/redirect rows are stored wrapped in an internal marker — show only the user's words
+    m = _OOB_RE.match(text)
+    if m:
+        text = m.group(1)
     lines = [ln for ln in text.splitlines() if not ln.strip().startswith(("MEDIA:", "@file:", "@image:"))]
     flat = " ".join(" ".join(lines).split())
     if not flat and "MEDIA:" in text:
@@ -66,7 +73,7 @@ def last_messages(db: Path, ids: list[str]) -> dict[str, dict]:
             row = con.execute(
                 "SELECT role, content, timestamp FROM messages "
                 "WHERE session_id = ? AND role IN ('user','assistant') "
-                "AND content IS NOT NULL AND TRIM(content) != '' "
+                "AND content IS NOT NULL AND TRIM(content) != '' " + _active_sql(con) +
                 "ORDER BY id DESC LIMIT 1",
                 (sid,),
             ).fetchone()
@@ -77,6 +84,12 @@ def last_messages(db: Path, ids: list[str]) -> dict[str, dict]:
     finally:
         con.close()
     return out
+
+
+def _active_sql(con) -> str:
+    """Rows rewound by edit/regenerate stay in the table with active=0 — skip them (older DBs lack the column)."""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
+    return "AND COALESCE(active, 1) = 1 " if "active" in cols else ""
 
 
 def user_messages_after(db: Path, session_id: str, after: float, limit: int = 20) -> list[dict]:
@@ -90,10 +103,11 @@ def user_messages_after(db: Path, session_id: str, after: float, limit: int = 20
         return []
     con = _connect(db)
     try:
+        _ACTIVE_SQL = _active_sql(con)
         rows = con.execute(
             "SELECT id, content, timestamp FROM messages "
             "WHERE session_id = ? AND role = 'user' AND timestamp > ? "
-            "AND content IS NOT NULL AND TRIM(content) != '' "
+            "AND content IS NOT NULL AND TRIM(content) != '' " + _ACTIVE_SQL +
             "ORDER BY id DESC LIMIT ?",
             (session_id, float(after), max(1, min(int(limit), 50))),
         ).fetchall()

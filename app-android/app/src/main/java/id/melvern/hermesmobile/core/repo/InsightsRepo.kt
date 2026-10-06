@@ -41,8 +41,7 @@ class InsightsRepo(private val settings: ConnectionSettings) {
 
     suspend fun lastMessages(profile: String, ids: List<String>): Map<String, Last>? = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext emptyMap()
-        val auth = DashboardAuth(base())
-        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(base(), settings.username, settings.password) ?: return@withContext null
         val body = auth.getJson("${base()}/api/mobile-last?profile=${enc(profile)}&ids=${enc(ids.take(120).joinToString(","))}")
             ?: return@withContext null
         parseLast(body)
@@ -52,16 +51,14 @@ class InsightsRepo(private val settings: ConnectionSettings) {
 
     /** Prompt user di session ini setelah [after] (epoch s) — termasuk yang diketik di desktop. */
     suspend fun userTail(profile: String, storedId: String, after: Double): List<UserMsg>? = withContext(Dispatchers.IO) {
-        val auth = DashboardAuth(base())
-        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(base(), settings.username, settings.password) ?: return@withContext null
         val body = auth.getJson("${base()}/api/mobile-user-tail?profile=${enc(profile)}&id=${enc(storedId)}&after=$after")
             ?: return@withContext null
         parseUserTail(body)
     }
 
     suspend fun usage(profile: String): Usage? = withContext(Dispatchers.IO) {
-        val auth = DashboardAuth(base())
-        if (!auth.ensureLogin(settings.username, settings.password)) return@withContext null
+        val auth = id.melvern.hermesmobile.core.auth.SharedAuth.get(base(), settings.username, settings.password) ?: return@withContext null
         val body = auth.getJson("${base()}/api/mobile-usage?profile=${enc(profile)}") ?: return@withContext null
         parseUsage(body)
     }
@@ -104,14 +101,35 @@ class InsightsRepo(private val settings: ConnectionSettings) {
             val missing = tail.filter { m ->
                 if (m.rowId != null && m.rowId in haveIds) return@filter false
                 // pesan dari HP: teks yang dikirim bisa diawali "> quote" — cocokkan ekor teks
-                val t = m.text.trim()
+                val t = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text).first.trim()
                 val hit = recentTexts.indexOfFirst { it == t || t.endsWith(it) && it.isNotEmpty() }
                 if (hit >= 0) { recentTexts.removeAt(hit); false } else true
             }
             if (missing.isEmpty()) return items
-            val add = missing.map { id.melvern.hermesmobile.core.model.ChatItem.User(it.text, it.rowId, time = clock(it.at), at = it.at) }
+            val add = missing.map {
+                val (txt, steered) = id.melvern.hermesmobile.core.model.SteerText.unwrap(it.text)
+                id.melvern.hermesmobile.core.model.ChatItem.User(txt, it.rowId, time = clock(it.at), at = it.at, steered = steered)
+            }
             val streamingIdx = items.indexOfLast { it is id.melvern.hermesmobile.core.model.ChatItem.Assistant && !it.done }
             return if (streamingIdx >= 0) items.take(streamingIdx) + add + items.drop(streamingIdx) else items + add
+        }
+
+        /** Pure: isi rowId bubble user yang kosong dari tail DB — cocok per teks, dari yang terbaru. */
+        fun backfillRowIds(items: List<id.melvern.hermesmobile.core.model.ChatItem>, tail: List<UserMsg>): List<id.melvern.hermesmobile.core.model.ChatItem> {
+            val used = items.mapNotNull { (it as? id.melvern.hermesmobile.core.model.ChatItem.User)?.rowId }.toMutableSet()
+            val pool = tail.filter { it.rowId != null && it.rowId !in used }.toMutableList()
+            val out = items.toMutableList()
+            for (i in out.indices.reversed()) {
+                val u = out[i] as? id.melvern.hermesmobile.core.model.ChatItem.User ?: continue
+                if (u.rowId != null) continue
+                val want = u.text.trim()
+                val k = pool.indexOfLast { m ->
+                    val t = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text).first.trim()
+                    t == want || (want.isNotEmpty() && t.endsWith(want))
+                }
+                if (k >= 0) { out[i] = u.copy(rowId = pool[k].rowId); pool.removeAt(k) }
+            }
+            return out
         }
 
         fun parseUsage(body: String): Usage? = try {

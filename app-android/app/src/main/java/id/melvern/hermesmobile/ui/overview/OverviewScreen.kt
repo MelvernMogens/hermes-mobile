@@ -162,6 +162,7 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
                     else -> {
                         SummaryStrip(b, tokens)
                         BotsSection(app, b, onOpen = { openBotChat(it) }, onLongPress = { actionBot = it })
+                        SchedulesSection(app)
                     }
                 }
             }

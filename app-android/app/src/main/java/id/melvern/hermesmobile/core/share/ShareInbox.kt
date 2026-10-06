@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -13,10 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
  * mengambilnya (teks → draft composer, file → upload seperti tombol +).
  */
 object ShareInbox {
-    data class Shared(val text: String?, val uris: List<Uri>, val subject: String? = null) {
+    data class Shared(val text: String?, val uris: List<Uri>, val subject: String? = null, val ready: Boolean = true) {
         val summary: String
             get() = when {
                 uris.size > 1 -> "${uris.size} files"
+                !ready -> "Preparing attachment…"
                 uris.size == 1 -> "1 attachment" + (text?.let { " + text" } ?: "")
                 else -> (text ?: "").take(120)
             }
@@ -31,10 +33,19 @@ object ShareInbox {
 
     fun offer(intent: Intent?, context: Context): Boolean {
         val shared = parse(intent) ?: return false
-        // izin baca URI share hanya hidup selama task — salin ke cache supaya aman diupload nanti
-        val copied = shared.uris.mapNotNull { copyToCache(context, it) }
-        _pending.value = shared.copy(uris = copied)
         _target.value = null
+        if (shared.uris.isEmpty()) { _pending.value = shared; return true }
+        // Review fix: salin file (bisa video besar) di IO, bukan main thread. Banner muncul dulu
+        // dengan URI asli; begitu salinan cache siap, pending diganti.
+        val staging = shared.copy(ready = false)
+        _pending.value = staging
+        val app = context.applicationContext
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val copied = shared.uris.mapNotNull { copyToCache(app, it) }
+            if (_pending.value === staging) _pending.value =
+                if (copied.isEmpty() && shared.text == null) null  // file tak terbaca → banner hilang, jangan nyangkut
+                else shared.copy(uris = copied, ready = true)
+        }
         return true
     }
 
@@ -44,6 +55,7 @@ object ShareInbox {
     fun take(storedId: String): Shared? {
         if (_target.value != storedId) return null
         val s = _pending.value
+        if (s != null && !s.ready) return null  // salinan file belum siap — chat menunggu (pending di-observe)
         _pending.value = null; _target.value = null
         return s
     }
@@ -85,7 +97,8 @@ object ShareInbox {
         (if (Build.VERSION.SDK_INT >= 33) i.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
         else i.getParcelableArrayListExtra(Intent.EXTRA_STREAM)) ?: emptyList()
 
-    private fun copyToCache(context: Context, uri: Uri): Uri? = runCatching { copyToCacheOrThrow(context, uri) }.getOrNull()
+    private fun copyToCache(context: Context, uri: Uri): Uri? = runCatching { copyToCacheOrThrow(context, uri) }
+        .onFailure { android.util.Log.w("HermesShare", "copy failed: $uri", it) }.getOrNull()
 
     private fun copyToCacheOrThrow(context: Context, uri: Uri): Uri? {
         val cr = context.contentResolver
