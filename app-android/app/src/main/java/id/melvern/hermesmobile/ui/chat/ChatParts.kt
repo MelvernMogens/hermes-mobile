@@ -24,7 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.selection.SelectionContainer
+import id.melvern.hermesmobile.ui.components.DismissibleSelectionContainer
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -227,7 +227,7 @@ fun UserBubble(
             if (id.melvern.hermesmobile.ui.components.MarkdownParser.containsMediaLine(item.text)) {
                 MarkdownText(userDisplayText(item.text), style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
             } else {
-                SelectionContainer { Text(userDisplayText(item.text), style = Type.Body) }
+                DismissibleSelectionContainer { Text(userDisplayText(item.text), style = Type.Body) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 when {
@@ -285,7 +285,7 @@ fun AssistantBlock(
             if (!thoughtOnly) Spacer(Modifier.height(8.dp))
         }
         if (thoughtOnly) return@Column
-        SelectionContainer {
+        DismissibleSelectionContainer {
             MarkdownText(item.text, style = Type.Body, imageFetch = mediaFetch, videoFetch = videoFetch)
         }
         if (item.done && showMeta) {

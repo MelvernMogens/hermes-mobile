@@ -441,6 +441,13 @@ async def handle_mobile_diff(request: web.Request) -> web.Response:
     return web.json_response(res, status=400 if "error" in res else 200)
 
 
+async def handle_mobile_bot_work(request: web.Request) -> web.Response:
+    """GET /api/mobile-bot-work → bots running as CLI workers (bot-run), invisible to session.active_list."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    return web.json_response({"bots": await asyncio.get_running_loop().run_in_executor(None, mobile_mac.bot_work)})
+
+
 async def handle_mobile_ports(request: web.Request) -> web.Response:
     """GET /api/mobile-ports → dev servers listening locally (for web preview)."""
     if (r := await _authed_or_401(request)) is not None:
@@ -598,6 +605,7 @@ def main() -> None:
     app.router.add_route("POST", "/api/mobile-mac", handle_mobile_mac)
     app.router.add_get("/api/mobile-diff", handle_mobile_diff)
     app.router.add_get("/api/mobile-ports", handle_mobile_ports)
+    app.router.add_get("/api/mobile-bot-work", handle_mobile_bot_work)
     app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)

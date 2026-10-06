@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
@@ -584,7 +583,7 @@ fun CodeBox(lang: String, code: String, modifier: Modifier = Modifier) {
             }
         }
         HorizontalDivider(thickness = hl, color = Ink.Hairline)
-        SelectionContainer {
+        DismissibleSelectionContainer {
             Text(
                 code,
                 style = Type.Mono,
@@ -1093,7 +1092,7 @@ fun TextFileReader(path: String, onSave: () -> Unit, saved: Boolean, onDismiss: 
             }
             val t = text
             when {
-                t != null -> androidx.compose.foundation.text.selection.SelectionContainer {
+                t != null -> DismissibleSelectionContainer {
                     val isMd = name.endsWith(".md", ignoreCase = true)
                     Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
                         if (isMd) {

@@ -1,5 +1,12 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import id.melvern.hermesmobile.ui.components.dismissOnTap
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Edit
@@ -185,6 +192,9 @@ fun ChatScreen(
     val waitingOnUser = (clarify?.responded == null && clarify != null) || (approval?.responded == null && approval != null)
     var modelSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var selectionActive by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = selectionActive) { focusManager.clearFocus(force = true) }
     val client = app.client
     val connState by client?.state?.collectAsState() ?: remember { mutableStateOf(ConnState.CLOSED) }
     // M7: mode gateway aktif — dipakai derive readOnly (banner 4090 hanya
@@ -994,7 +1004,13 @@ fun ChatScreen(
             LazyColumn(
                 state = listState,
                 modifier = (if (wide) Modifier.widthIn(max = Dim.ChatMaxW).fillMaxHeight()
-                            else Modifier.fillMaxSize()),
+                            else Modifier.fillMaxSize())
+                    // v26.1: seleksi teks aktif = SelectionContainer di list pegang fokus.
+                    // Tap di mana pun (bubble lain / area kosong) atau Back → lepas fokus → seleksi batal.
+                    .onFocusChanged { selectionActive = it.hasFocus }
+                    .pointerInput(Unit) {
+                        dismissOnTap({ selectionActive }) { focusManager.clearFocus(force = true) }
+                    },
                 contentPadding = PaddingValues(top = 12.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {

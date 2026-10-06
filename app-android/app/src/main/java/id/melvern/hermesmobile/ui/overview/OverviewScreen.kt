@@ -110,6 +110,7 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
         if (c.state.value != ConnState.OPEN) return
         refreshing = true
         scope.launch {
+            app.connection?.let { conn -> try { id.melvern.hermesmobile.core.repo.MacRepo(conn).botWork() } catch (_: Throwable) {} }
             try { bots = OverviewRepo(c).fetchBots() } catch (_: Throwable) { if (bots == null) bots = emptyList() }
             try { usage = OverviewRepo(c).usage() } catch (_: Throwable) { usage = UsageUi.UNAVAILABLE }
             app.connection?.let { conn ->
@@ -304,7 +305,14 @@ private fun BotCardRow(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             OneLine(Pretty.profile(bot.label), Type.RowTitle)
-            bot.model?.let {
+            val task = bot.task
+            if (task != null) {
+                Spacer(Modifier.height(2.dp))
+                OneLine(
+                    task + (bot.taskSecs?.let { " · " + id.melvern.hermesmobile.core.repo.FleetLogic.duration(it) } ?: ""),
+                    Type.Meta.copy(color = Ink.Text2),
+                )
+            } else bot.model?.let {
                 Spacer(Modifier.height(2.dp))
                 OneLine(Pretty.model(it), Type.Meta.copy(color = Ink.Text3))
             }

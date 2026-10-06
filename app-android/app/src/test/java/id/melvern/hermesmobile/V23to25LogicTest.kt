@@ -148,4 +148,12 @@ class V23to25LogicTest {
         val out = id.melvern.hermesmobile.ui.chat.liveAppend(items, ChatItem.Assistant("DONE2", done = true))
         assertEquals(listOf("run sleep", "DONE2", "after that QAFTER2"), out.map { (it as? ChatItem.User)?.text ?: (it as ChatItem.Assistant).text })
     }
+
+    @Test fun cliWorkerMarksBotRunning() {
+        val w = id.melvern.hermesmobile.core.repo.FleetLogic.parseWork(
+            """{"bots":[{"profile":"coder","running_secs":3727,"task":"B5: tebakan figur","session_id":"s1"}]}""")!!
+        assertEquals(1, w.size)
+        assertEquals("1 h 02 min", id.melvern.hermesmobile.core.repo.FleetLogic.duration(3727))
+        assertEquals("4 min", id.melvern.hermesmobile.core.repo.FleetLogic.duration(250))
+    }
 }

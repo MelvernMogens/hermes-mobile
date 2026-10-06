@@ -33,7 +33,14 @@ data class BotCard(
     val status: BotStatus,
     /** canonical "Bot Chat" stored id (null = profile belum punya Bot Chat). */
     val botChatStoredId: String?,
+    /** v26.1: tugas CLI (bot-run) yang sedang jalan — tidak terlihat di active_list. */
+    val task: String? = null,
+    val taskSecs: Int? = null,
+    val taskSessionId: String? = null,
 )
+
+/** v26.1: bot yang jalan sebagai worker CLI (bot-run / `hermes -p X chat --source tool`). */
+data class BotWork(val profile: String, val runningSecs: Int, val task: String, val sessionId: String)
 
 /** Satu bar dolar usage (UsageBar contract: *_display pre-formatted server). */
 data class UsageBarUi(
@@ -70,7 +77,9 @@ object FleetLogic {
     fun buildCards(
         profiles: List<MetaRepo.ProfileRow>,
         active: List<NotifPolicy.LiveRow>,
+        work: List<BotWork> = emptyList(),
     ): List<BotCard> {
+        val workBy = work.associateBy { it.profile }
         val byStored = active.filter { it.sessionKey.isNotBlank() }.groupBy { it.sessionKey }
         val byRuntime = active.filter { it.sessionKey.isBlank() }.associateBy { it.sid }
         return sort(profiles.map { p ->
@@ -82,19 +91,41 @@ object FleetLogic {
             ).filter { it.isNotBlank() }.distinct()
             val rows = keys.flatMap { k -> byStored[k] ?: listOfNotNull(byRuntime[k]) }
                 .distinctBy { it.sid }
+            val w = workBy[p.name]
             BotCard(
                 name = p.name,
                 label = p.displayName.ifBlank { p.name },
                 model = p.model?.takeIf { it.isNotBlank() },
                 isDefault = p.isDefault,
                 status = when {
+                    w != null -> BotStatus.RUNNING
                     rows.isEmpty() -> BotStatus.OFFLINE
                     rows.any { it.status != "idle" } -> BotStatus.RUNNING
                     else -> BotStatus.IDLE
                 },
                 botChatStoredId = p.canonicalSession?.id?.takeIf { it.isNotBlank() },
+                task = w?.task?.takeIf { it.isNotBlank() } ?: w?.let { "Working on a task" },
+                taskSecs = w?.runningSecs,
+                taskSessionId = w?.sessionId?.takeIf { it.isNotBlank() },
             )
         })
+    }
+
+    /** Pure: body /api/mobile-bot-work → daftar worker. */
+    fun parseWork(body: String): List<BotWork>? = runCatching {
+        val o = kotlinx.serialization.json.Json.parseToJsonElement(body).jsonObject
+        (o["bots"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { el ->
+            val b = el as? JsonObject ?: return@mapNotNull null
+            val name = b["profile"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            BotWork(name, b["running_secs"]?.jsonPrimitive?.intOrNull ?: 0,
+                b["task"]?.jsonPrimitive?.contentOrNull ?: "", b["session_id"]?.jsonPrimitive?.contentOrNull ?: "")
+        }
+    }.getOrNull()
+
+    /** "4 min" / "1 h 02 min" */
+    fun duration(secs: Int): String {
+        val m = secs / 60
+        return if (m < 60) "${maxOf(m, 1)} min" else "${m / 60} h ${"%02d".format(m % 60)} min"
     }
 
     /** Default dulu, sisanya abjad (case-insensitive). */
@@ -143,6 +174,14 @@ object BotFleet {
 
     @Volatile var profileRows: List<MetaRepo.ProfileRow>? = null
         private set
+    /** v26.1: worker CLI terakhir dari Mac (/api/mobile-bot-work). */
+    @Volatile var work: List<BotWork> = emptyList()
+    @Volatile private var lastActive: List<NotifPolicy.LiveRow> = emptyList()
+
+    fun publishWork(w: List<BotWork>) {
+        work = w
+        profileRows?.let { _bots.value = FleetLogic.buildCards(it, lastActive, w) }
+    }
 
     fun publish(cards: List<BotCard>, rows: List<MetaRepo.ProfileRow>) {
         profileRows = rows
@@ -155,12 +194,13 @@ object BotFleet {
      * harus hidup bahkan sebelum tab Overview pernah dibuka.
      */
     fun recomputeFrom(active: List<NotifPolicy.LiveRow>) {
+        lastActive = active
         val rows = profileRows
         if (rows == null) {
             pendingRefresh.value = true
             return
         }
-        _bots.value = FleetLogic.buildCards(rows, active)
+        _bots.value = FleetLogic.buildCards(rows, active, work)
     }
 
     /** OverviewScreen set ini sekali sebelum screen pertama dibuka (badge). */
@@ -196,7 +236,7 @@ class OverviewRepo(private val client: GatewayClient) {
         // pernah jalan (StateFlow mulai emptyList, bukan null — cek isEmpty).
         val snapshot = FleetBus.live.value
         val active = if (snapshot.isEmpty()) fetchActiveDirect() else snapshot
-        val cards = FleetLogic.buildCards(rows, active)
+        val cards = FleetLogic.buildCards(rows, active, BotFleet.work)
         BotFleet.publish(cards, rows)
         return cards
     }

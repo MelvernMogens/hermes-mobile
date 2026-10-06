@@ -301,3 +301,82 @@ def listening_ports() -> list[dict]:
 def _title(html: str) -> str:
     m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
     return re.sub(r"\s+", " ", m.group(1)).strip()[:80] if m else ""
+
+
+# ── Bot work (CLI) ───────────────────────────────────────────────────────────
+# Bot yang dijalankan lewat `bot-run` / `hermes -p <bot> chat --source tool` adalah proses CLI
+# terpisah — tidak muncul di session.active_list gateway. Deteksi dari daftar proses + state.db
+# profile (read-only) supaya app bisa menampilkan "Running" + tugasnya.
+
+_BOT_CMD_RE = re.compile(r"(?:^|\s)(?:-p|--profile)\s+([A-Za-z0-9_.-]+)\s+chat\b")
+_BOTRUN_RE = re.compile(r"/bot-run\s+([A-Za-z0-9_.-]+)\b")
+
+
+def _etime_secs(et: str) -> int:
+    """ps etime ([[dd-]hh:]mm:ss) → detik."""
+    days = 0
+    if "-" in et:
+        d, et = et.split("-", 1)
+        days = int(d or 0)
+    parts = [int(x) for x in et.split(":") if x.isdigit()]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    h, m, sec = parts[-3:]
+    return days * 86400 + h * 3600 + m * 60 + sec
+
+
+def parse_bot_procs(ps_out: str) -> dict[str, int]:
+    """Pure: output `ps -axo etime=,command=` → {profile: running_secs (proses tertua)}."""
+    out: dict[str, int] = {}
+    for line in ps_out.splitlines():
+        line = line.strip()
+        if not line or " " not in line:
+            continue
+        et, cmd = line.split(None, 1)
+        if " serve" in cmd or "grep" in cmd:
+            continue
+        m = _BOTRUN_RE.search(cmd) or (_BOT_CMD_RE.search(cmd) if "hermes" in cmd else None)
+        if not m:
+            continue
+        try:
+            secs = _etime_secs(et)
+        except ValueError:
+            continue
+        name = m.group(1)
+        out[name] = max(out.get(name, 0), secs)
+    return out
+
+
+def _profile_db(name: str) -> Path:
+    return HOME / ".hermes" / ("state.db" if name == "default" else f"profiles/{name}/state.db")
+
+
+def _latest_task(name: str) -> dict | None:
+    import sqlite3
+    db = _profile_db(name)
+    if not db.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        row = con.execute(
+            "select id, coalesce(title,''), coalesce(last_activity_at, started_at) from sessions "
+            "where source='tool' order by coalesce(last_activity_at, started_at) desc limit 1").fetchone()
+        con.close()
+    except Exception:
+        return None
+    if not row:
+        return None
+    title = re.sub(r"^#\s*", "", row[1]).strip()
+    title = re.sub(r"^BRIEF\s*@?\w+\s*[—-]\s*", "", title).strip()
+    return {"session_id": row[0], "title": title[:120], "last_activity": row[2]}
+
+
+def bot_work() -> list[dict]:
+    """[{profile, running_secs, task, session_id, last_activity}] — bot dengan proses CLI hidup."""
+    procs = parse_bot_procs(_run(["ps", "-axo", "etime=,command="], timeout=5))
+    rows = []
+    for name, secs in sorted(procs.items()):
+        t = _latest_task(name) or {}
+        rows.append({"profile": name, "running_secs": secs, "task": t.get("title", ""),
+                     "session_id": t.get("session_id", ""), "last_activity": t.get("last_activity")})
+    return rows

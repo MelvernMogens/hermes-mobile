@@ -49,6 +49,11 @@ class MacRepo(private val settings: ConnectionSettings) {
 
     suspend fun ports(): Pair<List<Port>, Int>? = auth()?.getJson("$base/api/mobile-ports")?.let { parsePorts(it) }
 
+    /** v26.1: bot yang jalan sebagai worker CLI (bot-run) — dipublish ke BotFleet. */
+    suspend fun botWork(): List<id.melvern.hermesmobile.core.repo.BotWork>? =
+        auth()?.getJson("$base/api/mobile-bot-work")?.let { FleetLogic.parseWork(it) }
+            ?.also { BotFleet.publishWork(it) }
+
     suspend fun diff(path: String, since: Double? = null): Diff? =
         auth()?.getJson("$base/api/mobile-diff?path=${enc(path)}" + (since?.let { "&since=${it.toLong()}" } ?: ""))?.let { parseDiff(it) }
 

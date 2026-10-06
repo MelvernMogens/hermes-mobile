@@ -57,6 +57,8 @@ fun GatewayClient.startNotifPoller(app: HermesApp, scope: CoroutineScope): Job =
     var prev: Map<String, NotifPolicy.LiveRow> = emptyMap()
     // Poll pertama setelah koneksi OPEN; lanjut tiap 20s selalu (WS cuma keepalive).
     while (isActive) {
+        // v26.1: worker CLI (bot-run) tidak ada di active_list — tarik dari Mac, ringan.
+        app.connection?.let { conn -> try { id.melvern.hermesmobile.core.repo.MacRepo(conn).botWork() } catch (_: Throwable) {} }
         val c = app.client ?: break
         if (c.state.value == ConnState.OPEN) {
             prev = router.pollOnce(prev)

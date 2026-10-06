@@ -74,3 +74,13 @@ def test_hermes_internal_servers_not_listed():
     assert mm._is_hermes_internal("/x/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --profile default serve --port 0")
     assert mm._is_hermes_internal("/x/venv/bin/python /Users/m/Code/hermes-webui/server.py")
     assert not mm._is_hermes_internal("node /Users/m/Code/reel-studio/node_modules/.bin/vite --port 4545")
+
+
+def test_parse_bot_procs_detects_cli_workers():
+    ps = """  01:01:04 /bin/bash /Users/m/.hermes/bin/bot-run coder /x/BRIEF.md /x
+  01:01:03 /Users/m/.hermes/hermes-agent/venv/bin/python /Users/m/.hermes/hermes-agent/hermes -p coder chat --source tool --query-file /x
+  2-03:00:00 /Users/m/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --profile default serve --host 127.0.0.1 --port 0
+     05:10 /venv/bin/python /x/hermes --profile video chat --source tool -q hi
+     00:01 grep hermes -p coder chat"""
+    got = mm.parse_bot_procs(ps)
+    assert got == {"coder": 3664, "video": 310}
