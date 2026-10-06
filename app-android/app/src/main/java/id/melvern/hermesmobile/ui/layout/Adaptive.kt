@@ -28,7 +28,7 @@ fun currentWinSize(): WinSize = LocalWinSize.current
  * Pure + testable (unit test state machine M15).
  */
 object ChatRouteArg {
-    data class Parsed(val storedId: String, val runtimeId: String?, val title: String?)
+    data class Parsed(val storedId: String, val runtimeId: String?, val title: String?, val profile: String? = null)
 
     fun parse(raw: String): Parsed {
         val segs = raw.split("|")
@@ -38,8 +38,9 @@ object ChatRouteArg {
             ?.takeIf { it.startsWith("t=") }
             ?.substring(2)
             ?.let { decodeUri(it) }
-        val runtime = second?.takeIf { title == null }
-        return Parsed(storedId, runtime, title)
+        val runtime = second?.takeIf { title == null && !it.startsWith("p=") }
+        val profile = segs.firstOrNull { it.startsWith("p=") }?.substring(2)?.takeIf { it.isNotBlank() }
+        return Parsed(storedId, runtime, title, profile)
     }
 
     /** Percent-decode UTF-8 (pure Kotlin — android.net.Uri gak jalan di unit test JVM). */

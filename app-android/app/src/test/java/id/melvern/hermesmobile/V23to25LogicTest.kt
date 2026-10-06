@@ -180,4 +180,18 @@ class V23to25LogicTest {
         val done = id.melvern.hermesmobile.core.repo.Outbox.reconcile(out, emptyList(), { false }) { "" }.last() as ChatItem.User
         assertFalse(done.failed); assertFalse(done.pending)
     }
+
+    @Test fun taskTitleFromFirstLine() {
+        assertEquals("Fix login bug", id.melvern.hermesmobile.ui.overview.taskTitle("\n  Fix login bug  \nDetails here"))
+        val long = id.melvern.hermesmobile.ui.overview.taskTitle("a".repeat(80))
+        assertEquals(48, long.length); assertTrue(long.endsWith("…"))
+    }
+
+    @Test fun routeArgCarriesProfile() {
+        val p = id.melvern.hermesmobile.ui.layout.ChatRouteArg.parse("s1|t=Fix%20bug|p=qa")
+        assertEquals("s1", p.storedId); assertEquals("Fix bug", p.title); assertEquals("qa", p.profile); assertNull(p.runtimeId)
+        val q = id.melvern.hermesmobile.ui.layout.ChatRouteArg.parse("s2|rt9|p=coder")
+        assertEquals("rt9", q.runtimeId); assertEquals("coder", q.profile)
+        assertNull(id.melvern.hermesmobile.ui.layout.ChatRouteArg.parse("s3|t=x").profile)
+    }
 }

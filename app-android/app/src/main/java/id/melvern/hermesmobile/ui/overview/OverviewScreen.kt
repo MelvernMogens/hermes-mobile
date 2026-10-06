@@ -1,6 +1,7 @@
 package id.melvern.hermesmobile.ui.overview
 
 import androidx.compose.material.icons.outlined.AddComment
+import androidx.compose.material.icons.outlined.AssignmentTurnedIn
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.foundation.background
@@ -8,6 +9,7 @@ import id.melvern.hermesmobile.ui.theme.hairline
 import id.melvern.hermesmobile.ui.components.StatusPill
 import id.melvern.hermesmobile.ui.components.SectionHeader
 import id.melvern.hermesmobile.ui.components.Pretty
+import id.melvern.hermesmobile.ui.theme.pressClickable
 import id.melvern.hermesmobile.ui.components.GroupSurface
 import id.melvern.hermesmobile.ui.components.GroupDivider
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -102,6 +104,7 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
     // spinner HANYA untuk tarikan user — auto-refresh 20s diam (dulu spinner nempel di judul)
     var userPull by remember { mutableStateOf(false) }
     var actionBot by remember { mutableStateOf<BotCard?>(null) }
+    var taskFor by remember { mutableStateOf<TaskTarget?>(null) }
     val connState by app.client?.state?.collectAsState()
         ?: remember { mutableStateOf(ConnState.CLOSED) }
 
@@ -138,7 +141,7 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
         val id = bot.botChatStoredId ?: run { actionBot = bot; return }
         // Uri.encode (bukan URLEncoder) — MainActivity decode pakai Uri.decode;
         // URLEncoder menghasilkan '+' untuk spasi yang tidak dikonversi balik.
-        onOpenChat("$id|t=${Uri.encode("Bot Chat")}")
+        onOpenChat("$id|t=${Uri.encode("Bot Chat")}" + (if (bot.isDefault) "" else "|p=${bot.name}"))
     }
 
     val ptrState = rememberPullToRefreshState()
@@ -156,7 +159,7 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
         modifier = Modifier.fillMaxSize().background(Ink.Bg),
     ) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            OverviewHeader()
+            OverviewHeader(onGiveTask = bots?.takeIf { it.isNotEmpty() }?.let { { taskFor = TaskTarget(null) } })
             val sections: @Composable () -> Unit = {
                 when (val b = bots) {
                     null -> Column { repeat(5) { SkeletonSessionRow(shimmerAlpha()) } }
@@ -202,14 +205,36 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
             app, bot,
             onOpenChat = { arg -> actionBot = null; onOpenChat(arg) },
             onDismiss = { actionBot = null },
+            onGiveTask = { actionBot = null; taskFor = TaskTarget(bot) },
+        )
+    }
+    taskFor?.let { t ->
+        GiveTaskSheet(
+            app, bots.orEmpty(), t.bot,
+            onDismiss = { taskFor = null },
+            onStarted = { arg -> taskFor = null; refresh(); onOpenChat(arg) },
         )
     }
 }
 
+private data class TaskTarget(val bot: BotCard?)
+
 @Composable
-private fun OverviewHeader() {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 4.dp)) {
-        Text("Agents", style = Type.Display)
+private fun OverviewHeader(onGiveTask: (() -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = Dim.ScreenH, end = 8.dp).padding(top = 6.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Agents", style = Type.Display, modifier = Modifier.weight(1f))
+        // v27: kasih tugas ke bot — aksi teks kecil, bukan tombol besar
+        if (onGiveTask != null) Text(
+            "Give task",
+            style = Type.Callout.copy(color = Ink.Text),
+            modifier = Modifier
+                .clip(Radius.Chip)
+                .pressClickable(onClick = onGiveTask)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
     }
 }
 
@@ -473,6 +498,7 @@ private fun BotActionSheet(
     bot: BotCard,
     onOpenChat: (arg: String) -> Unit,
     onDismiss: () -> Unit,
+    onGiveTask: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val current by app.profile.collectAsState()
@@ -489,12 +515,13 @@ private fun BotActionSheet(
 
     fun botChatArg(): String =
         // Uri.encode — konsisten dengan decoder MainActivity (Uri.decode).
-        "${bot.botChatStoredId}|t=${Uri.encode("Bot Chat")}"
+        "${bot.botChatStoredId}|t=${Uri.encode("Bot Chat")}" + (if (bot.isDefault) "" else "|p=${bot.name}")
 
     QuietSheet(onDismiss = onDismiss, title = Pretty.profile(bot.label)) {
         notice?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
         }
+        SheetActionRow("Give a task", Icons.Outlined.AssignmentTurnedIn, enabled = !busy) { onGiveTask() }
         SheetActionRow("New chat", Icons.Outlined.AddComment, enabled = !busy) {
             run {
                 val c = app.client ?: return@run
@@ -502,7 +529,7 @@ private fun BotActionSheet(
                 val (runtimeId, storedId) = SessionRepo(c, bot.name).createSession()
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                     onDismiss()
-                    onOpenChat("$storedId|$runtimeId")
+                    onOpenChat("$storedId|$runtimeId" + (if (bot.isDefault) "" else "|p=${bot.name}"))
                 }
             }
         }

@@ -142,8 +142,12 @@ fun ChatScreen(
     onOpenChat: (String) -> Unit = {},
     /** M13: buka ArtifactsScreen (route terpisah, back = balik chat) — bawa live title. */
     onOpenArtifacts: (String) -> Unit = {},
+    /** v27: profile pemilik chat (mis. chat tugas bot). null = profile aktif app. */
+    profileOverride: String? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val activeProfile by app.profile.collectAsState()
+    val chatProfile = profileOverride ?: activeProfile
     var runtimeId by remember { mutableStateOf(preattachedRuntime ?: actualStoredId) }
     // M5 fix: stored id aktif — bisa ganti pas "GIG baru dengan model ini"
     // (session.create balikin stored id baru; jangan resume session lama).
@@ -313,7 +317,7 @@ fun ChatScreen(
                         runtimeId, b64,
                         filename = name ?: "photo.jpg",
                         ext = name?.substringAfterLast('.', "") ?: "",
-                        profile = app.profile.value,
+                        profile = chatProfile,
                     )
                     if (!out.attached) throw RpcException(-1, "image.attach_bytes: failed")
                     Attachment(refText = "", name = name ?: "photo", isImage = true, path = out.path)
@@ -323,7 +327,7 @@ fun ChatScreen(
                         runtimeId,
                         dataUrl = "data:${mime ?: "application/octet-stream"};base64,$b64",
                         name = name ?: if (isVideo) "video.mp4" else "file",
-                        profile = app.profile.value,
+                        profile = chatProfile,
                     )
                     Attachment(refText = out.refText, name = out.name, isImage = false, path = out.path, isVideo = isVideo)
                 }
@@ -360,7 +364,7 @@ fun ChatScreen(
     LaunchedEffect(runtimeId, running, subPollKick) {
         if (runtimeId.isBlank()) return@LaunchedEffect
         val c = app.client ?: return@LaunchedEffect
-        val repo = id.melvern.hermesmobile.core.repo.AgentWorkRepo(c, app.profile.value)
+        val repo = id.melvern.hermesmobile.core.repo.AgentWorkRepo(c, chatProfile)
         var failures = 0
         while (true) {
             try { subagents = repo.subagents(runtimeId); failures = 0 }
@@ -381,7 +385,7 @@ fun ChatScreen(
         // jangan kirim dobel); gagal → kembalikan ke antrean.
         id.melvern.hermesmobile.core.repo.PromptStore.removeQueued(app, q)
         try {
-            val repo = SessionRepo(app.client ?: throw IllegalStateException("no client"), app.profile.value)
+            val repo = SessionRepo(app.client ?: throw IllegalStateException("no client"), chatProfile)
             val nowE = System.currentTimeMillis() / 1000.0
             items = items + ChatItem.User(q.text, time = RelTime.clock(nowE), at = nowE)
             forceScroll = true
@@ -491,6 +495,7 @@ fun ChatScreen(
     }
 
     fun cacheSnapshot() {
+        id.melvern.hermesmobile.core.store.OfflineStore.saveChat(app, effectiveStoredId, items)
         // app.client (bukan val client lama) — instance bisa diganti HermesApp saat reconnect.
         TranscriptCache.snapshot(
             effectiveStoredId, items, runtimeId,
@@ -509,7 +514,7 @@ fun ChatScreen(
         val sid = effectiveStoredId.takeIf { it.isNotBlank() } ?: return
         scope.launch {
             val since = (items.filterIsInstance<ChatItem.User>().filter { it.rowId == null }.mapNotNull { it.at }.minOrNull() ?: return@launch) - 300
-            val tail = id.melvern.hermesmobile.core.repo.InsightsRepo(conn).userTail(app.profile.value, sid, since) ?: return@launch
+            val tail = id.melvern.hermesmobile.core.repo.InsightsRepo(conn).userTail(chatProfile, sid, since) ?: return@launch
             items = id.melvern.hermesmobile.core.repo.InsightsRepo.backfillRowIds(items, tail)
             cacheSnapshot()
         }
@@ -531,7 +536,7 @@ fun ChatScreen(
             for (attempt in 0..2) {
                 if (attempt > 0) delay(1500L * attempt)
                 val tail = id.melvern.hermesmobile.core.repo.InsightsRepo(conn)
-                    .userTail(app.profile.value, sid, after) ?: continue
+                    .userTail(chatProfile, sid, after) ?: continue
                 // v26: prompt "Send after" sudah jalan (ada row di DB) → bubble normal, lepas dari store
                 id.melvern.hermesmobile.core.repo.PromptStore.settleServerQueued(app, sid, tail.map { it.text to it.at })
                 val tailTexts = tail.map { id.melvern.hermesmobile.core.model.SteerText.unwrap(it.text).first.trim() }
@@ -570,7 +575,7 @@ fun ChatScreen(
                 // socket bisa sedang reconnect (balik dari background) — tunggu OPEN sebentar
                 val deadline = System.currentTimeMillis() + 15_000
                 while (c.state.value != ConnState.OPEN && System.currentTimeMillis() < deadline) delay(300)
-                val repo = SessionRepo(c, app.profile.value)
+                val repo = SessionRepo(c, chatProfile)
                 var rt = runtimeId
                 val status = if (o.queued) {
                     repo.submitQueued(rt, o.text); SessionRepo.SubmitStatus.QUEUED
@@ -647,6 +652,18 @@ fun ChatScreen(
     // M9 (item 6): satu flag yang menahan restore cache SEBELUM transcript
     // server dipakai — mencegah flicker kosong dan cache menimpa hasil server.
     var cacheHydrated by remember { mutableStateOf(false) }
+    // v27: dibuka saat offline → begitu Mac terjangkau lagi, muat ulang transcript asli.
+    var openedOffline by remember { mutableStateOf(false) }
+    var flushOutboxAfterLoad by remember { mutableStateOf(false) }
+    LaunchedEffect(connState) {
+        if (connState == ConnState.OPEN && openedOffline) {
+            openedOffline = false
+            flushOutboxAfterLoad = true
+            items = items.filterNot { it is ChatItem.NoticeLine && it.text.startsWith("Offline —") }
+            TranscriptCache.drop(actualStoredId)
+            reloadKey++
+        }
+    }
     LaunchedEffect(actualStoredId, preattachedRuntime, reloadKey) {
         loadFailed = false
         val cachedEntry = TranscriptCache.get(actualStoredId)
@@ -671,13 +688,19 @@ fun ChatScreen(
         }
         val c = app.client ?: return@LaunchedEffect
         var waited = 0
-        while (c.state.value != ConnState.OPEN && waited < 25000) { delay(250); waited += 250 }
+        // v27: HP tanpa internet → jangan tunggu 25s, langsung salinan tersimpan
+        val limit = if (id.melvern.hermesmobile.core.store.NetState.hasInternet(app)) 25000 else 1500
+        while (c.state.value != ConnState.OPEN && waited < limit) { delay(250); waited += 250 }
         if (c.state.value != ConnState.OPEN) {
             if (items.isEmpty()) {
-                items = listOf(ChatItem.NoticeLine("Not connected."))
-                loadFailed = true
+                // v27: offline → tampilkan salinan tersimpan (bisa dibaca + ketik; kirim masuk antrean)
+                val saved = id.melvern.hermesmobile.core.store.OfflineStore.loadChat(app, actualStoredId) { RelTime.clock(it) }
+                items = if (saved.isNotEmpty()) withOutbox(saved) + ChatItem.NoticeLine("Offline — showing saved copy. New replies load when you're back online.")
+                        else listOf(ChatItem.NoticeLine("Offline — this chat isn't saved on the phone yet."))
+                loadFailed = saved.isEmpty()
                 loading = false
             }
+            openedOffline = true
             return@LaunchedEffect
         }
         try {
@@ -708,7 +731,7 @@ fun ChatScreen(
                     if ((items.lastOrNull() as? ChatItem.Assistant)?.done != false) loading = false
                 } else {
                     if (replay == null || replay.truncated || !epochFresh) {
-                        val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
+                        val out = SessionRepo(c, chatProfile).resume(actualStoredId)
                         runtimeId = out.runtimeId
                         running = out.running
                         items = withQueued(mapTranscript(out.messages))
@@ -717,7 +740,7 @@ fun ChatScreen(
                     loading = false
                 }
             } else {
-                val out = SessionRepo(c, app.profile.value).resume(actualStoredId)
+                val out = SessionRepo(c, chatProfile).resume(actualStoredId)
                 runtimeId = out.runtimeId
                 running = out.running
                 items = withQueued(mapTranscript(out.messages))
@@ -735,8 +758,17 @@ fun ChatScreen(
             // ada turn jalan (lazy attach bisa re-parent runtime aktif).
             // delta path: open_requests via lazy resume — HANYA kalau gak ada
             // turn jalan (lazy attach bisa re-parent runtime aktif).
-            if (!running) SessionRepo(c, app.profile.value).resumeOpenRequests(actualStoredId).forEach { req ->
+            if (!running) SessionRepo(c, chatProfile).resumeOpenRequests(actualStoredId).forEach { req ->
                 restoreOpenRequest(req)
+            }
+            // v27: balik online → kirim otomatis pesan yang diketik saat offline (≤30 menit, belum ada di server)
+            if (flushOutboxAfterLoad) {
+                flushOutboxAfterLoad = false
+                items = withOutbox(items)
+                val fresh = System.currentTimeMillis() - 30 * 60_000L
+                id.melvern.hermesmobile.core.repo.Outbox.forChat(app, actualStoredId)
+                    .filter { it.at >= fresh && !id.melvern.hermesmobile.core.repo.Outbox.isSending(it.id) }
+                    .forEach { deliver(it) }
             }
         } catch (e: Throwable) {
             items = listOf(ChatItem.NoticeLine("Couldn't load this chat (${e.message})."))
@@ -900,7 +932,7 @@ fun ChatScreen(
         while (c.state.value != ConnState.OPEN && waited < 15000) { delay(250); waited += 250 }
         if (c.state.value != ConnState.OPEN) return@LaunchedEffect
         try {
-            val prof = app.profile.value
+            val prof = chatProfile
             val opt = MetaRepo(c).modelOptions(sessionId = runtimeId, profile = prof)
             // M8: header cuma nama model (provider ada di model sheet)
             activeModel = opt.model.ifBlank { opt.provider }
@@ -1127,7 +1159,7 @@ fun ChatScreen(
                                         c.call("request.answer", buildJsonObject {
                                             put("id", ap.id)
                                             put("result", buildJsonObject { put("choice", choice) })
-                                            val prof = app.profile.value
+                                            val prof = chatProfile
                                             if (prof.isNotBlank() && prof != "default") put("profile", prof)
                                         })
                                     } catch (_: Throwable) { /* dim tetap — server kirim ulang kalau belum resolved */ }
@@ -1150,7 +1182,7 @@ fun ChatScreen(
                                     c.call("request.answer", buildJsonObject {
                                         put("id", cq.id)
                                         put("result", result)
-                                        val prof = app.profile.value
+                                        val prof = chatProfile
                                         if (prof.isNotBlank() && prof != "default") put("profile", prof)
                                     })
                                 } catch (_: Throwable) {}
@@ -1244,7 +1276,7 @@ fun ChatScreen(
                         items = items + ChatItem.User(t, time = RelTime.clock(nowEpoch()), at = nowEpoch(), steered = true)
                         forceScroll = true
                         scope.launch {
-                            val ok = try { id.melvern.hermesmobile.core.repo.AgentWorkRepo(app.client ?: return@launch, app.profile.value).steer(runtimeId, t) } catch (_: Throwable) { false }
+                            val ok = try { id.melvern.hermesmobile.core.repo.AgentWorkRepo(app.client ?: return@launch, chatProfile).steer(runtimeId, t) } catch (_: Throwable) { false }
                             if (!ok) items = items + ChatItem.NoticeLine("Couldn't steer — the turn may have just ended. Send it as a new message.")
                         }
                     },
@@ -1324,7 +1356,7 @@ fun ChatScreen(
                             try {
                                 // row_id lokal bisa basi (cache / edit sebelumnya me-rewind row) —
                                 // ambil row AKTIF terbaru dari transcript server sesuai urutan pesan user.
-                                val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
+                                val repo = SessionRepo(app.client ?: return@launch, chatProfile)
                                 val fresh = try { repo.activeUserRowIds(effectiveStoredId) } catch (_: Throwable) { emptyList() }
                                 val target = fresh.getOrNull(userOrdinal)?.takeIf { it.second.trim() == oldText || it.second.trim().endsWith(oldText) }?.first
                                     ?: fresh.lastOrNull { it.second.trim() == oldText }?.first ?: rid
@@ -1360,7 +1392,7 @@ fun ChatScreen(
                             is id.melvern.hermesmobile.core.repo.SlashRepo.Result.Send -> {
                                 items = items.filterNot { it === card } + ChatItem.User(typed, pending = true, time = RelTime.clock(nowEpoch()), at = nowEpoch())
                                 try {
-                                    val repo = SessionRepo(app.client ?: return@launch, app.profile.value)
+                                    val repo = SessionRepo(app.client ?: return@launch, chatProfile)
                                     if (res.queued) {
                                         repo.submitQueued(runtimeId, res.message)
                                         id.melvern.hermesmobile.core.repo.PromptStore.addServerQueued(context, effectiveStoredId, typed)
@@ -1402,7 +1434,7 @@ fun ChatScreen(
                 )
                 deliver(o)
             },
-            onStop = { scope.launch { app.client?.let { SessionRepo(it, app.profile.value).interrupt(runtimeId) } } },
+            onStop = { scope.launch { app.client?.let { SessionRepo(it, chatProfile).interrupt(runtimeId) } } },
         )
     }
 
@@ -1483,7 +1515,7 @@ fun ChatScreen(
     if (workSheet) {
         WorkSheet(
             todos = todos, subs = subagents,
-            repo = { app.client?.let { id.melvern.hermesmobile.core.repo.AgentWorkRepo(it, app.profile.value) } },
+            repo = { app.client?.let { id.melvern.hermesmobile.core.repo.AgentWorkRepo(it, chatProfile) } },
             runtimeId = runtimeId,
             onDismiss = { workSheet = false },
             onRefreshSubs = { subPollKick++ },

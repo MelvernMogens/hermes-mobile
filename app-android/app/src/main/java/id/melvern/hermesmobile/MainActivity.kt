@@ -240,9 +240,12 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
                     ?.takeIf { it.startsWith("t=") }
                     ?.substring(2)
                     ?.let { runCatching { Uri.decode(it) }.getOrNull() }
-                val runtime = second?.takeIf { initialTitle == null }
+                val runtime = second?.takeIf { initialTitle == null && !it.startsWith("p=") }
+                // v27: segmen "p=<profile>" — chat milik profile lain (tugas bot)
+                val chatProfile = segs.firstOrNull { it.startsWith("p=") }?.substring(2)?.takeIf { it.isNotBlank() }
                 ChatScreen(
                     app, storedId, runtime, initialTitle,
+                    profileOverride = chatProfile,
                     onBack = { nav.popBackStack() },
                     onOpenChat = { arg -> nav.navigate("chat/$arg") { popUpTo("sessions") } },
                     // M13: artifacts route — live title dari ChatScreen (bisa berubah

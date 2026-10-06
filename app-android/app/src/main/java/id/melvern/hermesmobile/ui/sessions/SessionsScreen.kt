@@ -174,6 +174,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                     hiddenIds = emptySet()
                     sessions = shown
                 }
+                id.melvern.hermesmobile.core.store.OfflineStore.save(ctx, profile, shown)
             } catch (_: Throwable) {}
             try { active = SessionRepo(c, profile).activeStoredIds() } catch (_: Throwable) {}
             loading = false
@@ -220,6 +221,13 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         }
     }
     // Koneksi baru OPEN (startup / reconnect) → refresh langsung, jangan tunggu poll 10s.
+    // v27: offline → tampilkan snapshot terakhir (bukan list kosong + skeleton).
+    LaunchedEffect(connState, profile) {
+        if (connState != ConnState.OPEN && sessions.isEmpty()) {
+            val cached = id.melvern.hermesmobile.core.store.OfflineStore.load(ctx, profile)
+            if (cached.isNotEmpty()) { sessions = cached; loading = false }
+        }
+    }
     LaunchedEffect(connState, showHiddenLoaded) {
         if (connState == ConnState.OPEN && showHiddenLoaded) refresh()
     }
@@ -366,10 +374,16 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         }
 
         // ── Isi ────────────────────────────────────────────────────────
-        val problem = when (connState) {
-            ConnState.OPEN -> null
-            ConnState.CLOSED -> "Offline — tap to retry"
-            else -> "Reconnecting…"
+        // v27: status koneksi jujur — beda "HP gak ada internet" vs "Mac gak kejangkau",
+        // plus umur list tersimpan kalau yang tampil snapshot offline.
+        val netOk = id.melvern.hermesmobile.core.store.NetState.rememberHasInternet()
+        val savedAt = remember(connState, profile) { id.melvern.hermesmobile.core.store.OfflineStore.savedAt(ctx, profile) }
+        val savedNote = if (savedAt > 0) " · saved list from " + RelTime.clock(savedAt / 1000.0) else ""
+        val problem = when {
+            connState == ConnState.OPEN -> null
+            !netOk -> "Offline — no internet on this phone$savedNote"
+            connState == ConnState.CLOSED -> "Offline — can't reach your Mac · tap to retry$savedNote"
+            else -> "Connecting to your Mac…$savedNote"
         }
         when {
             loading && sessions.isEmpty() -> {
@@ -472,6 +486,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                             preattachedRuntime = parsed.runtimeId,
                             initialTitle = parsed.title,
                             onBack = { paneSelection = null },
+                            profileOverride = parsed.profile,
                         )
                         }
                     }
@@ -558,6 +573,7 @@ private fun LargeTitle(problem: String?, onRetry: () -> Unit) {
                 Modifier
                     .padding(top = 2.dp)
                     .then(if (problem.startsWith("Offline")) Modifier.pressClickable(onClick = onRetry) else Modifier)
+                    .padding(end = 8.dp)
                     .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
