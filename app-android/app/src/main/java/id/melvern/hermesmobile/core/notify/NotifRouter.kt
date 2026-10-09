@@ -54,6 +54,7 @@ object FleetBus {
  */
 fun GatewayClient.startNotifPoller(app: HermesApp, scope: CoroutineScope): Job = scope.launch {
     val router = NotifRouter(app)
+    val tasks = TaskNotifs.Watcher(app)
     var prev: Map<String, NotifPolicy.LiveRow> = emptyMap()
     // Poll pertama setelah koneksi OPEN; lanjut tiap 20s selalu (WS cuma keepalive).
     while (isActive) {
@@ -64,6 +65,13 @@ fun GatewayClient.startNotifPoller(app: HermesApp, scope: CoroutineScope): Job =
                 try { id.melvern.hermesmobile.core.repo.MacRepo(conn).botWork() } catch (_: Throwable) { null }
             }
             if (ok == null) id.melvern.hermesmobile.core.repo.BotFleet.publishWork(emptyList())
+            // v28: tugas bot selesai → notif kaya (maks tiap 60 dtk, maks 4 dtk tunggu)
+            if (tasks.due(System.currentTimeMillis())) {
+                val list = kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    try { id.melvern.hermesmobile.core.repo.TasksRepo(conn).list() } catch (_: Throwable) { null }
+                }
+                tasks.onList(list)
+            }
         }
         val c = app.client ?: break
         if (c.state.value == ConnState.OPEN) {
