@@ -39,6 +39,7 @@ import mobile_insights  # noqa: E402  (sibling module, read-only state.db querie
 import mobile_limits  # noqa: E402  (plan limits via hermes-agent + Mac RAM)
 import mobile_mac  # noqa: E402  (v24: Mac panel, diff, web preview)
 import mobile_tasks  # noqa: E402  (v28: bot task history)
+import mobile_files  # noqa: E402  (v28: all-files gallery)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -466,6 +467,20 @@ async def handle_mobile_tasks(request: web.Request) -> web.Response:
     return web.json_response({"tasks": tasks})
 
 
+async def handle_mobile_files(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-files?limit=120&kind=all|image|video|audio|doc → {files:[{path,name,kind,size,at,
+    profile,session_id,session_title}]} — files the agent sent as MEDIA: lines (cached 30 s)."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    kind = request.query.get("kind", "all")
+    if kind not in mobile_files.KINDS:
+        return web.json_response({"detail": "bad kind"}, status=400)
+    limit = _int_q(request, "limit", 120, 1, 500)
+    files = await asyncio.get_running_loop().run_in_executor(
+        None, mobile_files.list_files, frozenset(_IMG_MIME), kind, limit)
+    return web.json_response({"files": files})
+
+
 async def handle_mobile_ports(request: web.Request) -> web.Response:
     """GET /api/mobile-ports → dev servers listening locally (for web preview)."""
     if (r := await _authed_or_401(request)) is not None:
@@ -642,6 +657,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-ports", handle_mobile_ports)
     app.router.add_get("/api/mobile-bot-work", handle_mobile_bot_work)
     app.router.add_get("/api/mobile-tasks", handle_mobile_tasks)
+    app.router.add_get("/api/mobile-files", handle_mobile_files)
     app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
