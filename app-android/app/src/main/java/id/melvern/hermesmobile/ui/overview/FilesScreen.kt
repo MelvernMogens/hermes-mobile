@@ -219,7 +219,8 @@ private fun BinCell(app: HermesApp, f: AgentFile, onTap: () -> Unit, onLong: () 
     ) {
         val t = thumb
         if (t != null) {
-            Image(t, f.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            // the picture sits ABOVE the slate strip (not under it), so nothing in the photo is hidden
+            Image(t, f.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().padding(bottom = 20.dp))
         } else {
             Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.Center) {
                 Icon(
@@ -227,7 +228,7 @@ private fun BinCell(app: HermesApp, f: AgentFile, onTap: () -> Unit, onLong: () 
                     null, tint = Ink.Text3, modifier = Modifier.size(22.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                Text(f.name, style = Type.Caption.copy(color = Ink.Text2), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(binName(f.name), style = Type.Caption.copy(color = Ink.Text2), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         if (f.kind == "video") {
@@ -237,9 +238,10 @@ private fun BinCell(app: HermesApp, f: AgentFile, onTap: () -> Unit, onLong: () 
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Rounded.PlayArrow, "Video", tint = Ink.Text, modifier = Modifier.size(16.dp)) }
         }
-        // slate label: kind code + clock, bottom-left on a dark band
+        // slate label: kind code + clock on a SOLID strip (never a see-through band over a photo's
+        // own burned-in caption)
         Row(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Ink.Bg.copy(alpha = 0.62f))
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Ink.Bg)
                 .padding(horizontal = 6.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -275,6 +277,18 @@ private fun decodeThumb(bytes: ByteArray, target: Int = 360): ImageBitmap? {
     while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= target) sample *= 2
     val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
     return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+}
+
+/**
+ * File names in a narrow tile: give the line breaker an explicit break opportunity (zero-width
+ * space) right after the name's own separators (`-`, `_`, `.`), so a wrap lands between parts
+ * ("Sesi-2-Tangan-dan- / Mata.pptx") instead of splitting a word ("…Tangan-da / n-Mata").
+ */
+internal fun binName(name: String): String = buildString(name.length + 8) {
+    name.forEachIndexed { i, ch ->
+        append(ch)
+        if ((ch == '-' || ch == '_' || ch == '.') && i < name.lastIndex) append('\u200B')
+    }
 }
 
 private fun sizeLabel(b: Long): String = when {

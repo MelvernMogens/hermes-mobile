@@ -4,6 +4,7 @@ import id.melvern.hermesmobile.ui.components.Timecode
 import id.melvern.hermesmobile.ui.components.channelCode
 import id.melvern.hermesmobile.ui.chat.toolShort
 import id.melvern.hermesmobile.ui.chat.toolRunningLabel
+import id.melvern.hermesmobile.ui.overview.binName
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -44,5 +45,13 @@ class V28ControlRoomTest {
         assertEquals("Working", toolShort("mystery_tool"))
         assertEquals("Running terminal", toolRunningLabel("terminal"))
         assertEquals("Browsing the web", toolRunningLabel("browser_exec"))
+    }
+
+    @Test fun fileNamesBreakOnlyAtTheirOwnSeparators() {
+        val zw = '\u200B'
+        assertEquals("Sesi-${zw}2-${zw}Tangan-${zw}dan-${zw}Mata.${zw}pptx", binName("Sesi-2-Tangan-dan-Mata.pptx"))
+        assertEquals("LAPORAN.${zw}md", binName("LAPORAN.md"))
+        assertEquals("a-", binName("a-"))                           // no trailing break
+        assertEquals("Sesi-2-Tangan-dan-Mata.pptx", binName("Sesi-2-Tangan-dan-Mata.pptx").replace(zw.toString(), ""))
     }
 }

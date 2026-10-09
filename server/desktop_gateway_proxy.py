@@ -42,6 +42,7 @@ import mobile_tasks  # noqa: E402  (v28: bot task history)
 import mobile_files  # noqa: E402  (v28: all-files gallery)
 import mobile_wait  # noqa: E402  (v28: long-poll wake-up)
 import mobile_tail  # noqa: E402  (v28: fast tail of huge chats)
+import mobile_efforts  # noqa: E402  (v28: per-model reasoning-effort menu)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -272,6 +273,22 @@ async def handle_mobile_usage(request: web.Request) -> web.Response:
     if db is None:
         return web.json_response({"available": False})
     data = await asyncio.get_running_loop().run_in_executor(None, mobile_insights.usage_summary, db)
+    return web.json_response(data)
+
+
+async def handle_mobile_efforts(request: web.Request) -> web.Response:
+    """GET /api/mobile-efforts?provider=&model=&base_url= → the model's real effort levels
+    (from Hermes' own request builders; Ultra = Hermes' top tier, runs as the model's strongest)."""
+    session: aiohttp.ClientSession = request.app["client"]
+    if not await _cookie_authed(request, session):
+        return web.json_response({"error": "unauthenticated"}, status=401)
+    provider = request.query.get("provider", "")
+    model = request.query.get("model", "")
+    if not model:
+        return web.json_response({"error": "model required"}, status=400)
+    base_url = request.query.get("base_url") or None
+    data = await asyncio.get_running_loop().run_in_executor(
+        None, mobile_efforts.effort_menu, provider, model, base_url)
     return web.json_response(data)
 
 
@@ -692,6 +709,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-usage", handle_mobile_usage)
     app.router.add_get("/api/mobile-user-tail", handle_mobile_user_tail)
     app.router.add_get("/api/mobile-limits", handle_mobile_limits)
+    app.router.add_get("/api/mobile-efforts", handle_mobile_efforts)
     app.router.add_route("GET", "/api/mobile-mac", handle_mobile_mac)
     app.router.add_route("POST", "/api/mobile-mac", handle_mobile_mac)
     app.router.add_get("/api/mobile-diff", handle_mobile_diff)

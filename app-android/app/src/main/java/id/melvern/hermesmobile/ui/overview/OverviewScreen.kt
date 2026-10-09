@@ -230,7 +230,7 @@ private data class TaskTarget(val bot: BotCard?)
 @Composable
 private fun OverviewHeader(onGiveTask: (() -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(start = Dim.ScreenH, end = 8.dp).padding(top = 6.dp, bottom = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Agents", style = Type.Display, modifier = Modifier.weight(1f))
@@ -387,8 +387,9 @@ private fun TokenCard(u: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage) {
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().height(10.dp).clip(Radius.Led).background(Ink.LampOff)) {
             providers.forEachIndexed { i, p ->
-                val f = p.tokens.toFloat() / total
-                if (f > 0.004f) Box(Modifier.weight(f).fillMaxSize().padding(end = 2.dp).background(shades[i.coerceAtMost(shades.lastIndex)]))
+                // every non-zero provider stays visible (≥1.5% of the bar) so legend ↔ bar always map
+                val f = (p.tokens.toFloat() / total).coerceAtLeast(if (p.tokens > 0) 0.015f else 0f)
+                if (f > 0f) Box(Modifier.weight(f).fillMaxSize().padding(end = 2.dp).background(shades[i.coerceAtMost(shades.lastIndex)]))
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -619,9 +620,12 @@ private fun BotMonitor(
                 OneLine(Pretty.profile(b.label), Type.Umd, Modifier.weight(1f))
                 Spacer(Modifier.width(6.dp))
                 if (running) {
-                    val start = b.taskSecs?.let { System.currentTimeMillis() / 1000.0 - it }
-                    if (start != null) id.melvern.hermesmobile.ui.components.LiveTimecode(start, Type.Timecode.copy(color = Ink.Text))
-                    else Text("On air", style = Type.Caption.copy(color = Ink.Live))
+                    // one footer format on every live monitor: lamp · name · elapsed timecode.
+                    // A chat-only run (no task clock) counts from when the wall first saw it live.
+                    val start = remember(b.name, b.taskSecs == null) {
+                        b.taskSecs?.let { System.currentTimeMillis() / 1000.0 - it } ?: (System.currentTimeMillis() / 1000.0)
+                    }
+                    id.melvern.hermesmobile.ui.components.LiveTimecode(start, Type.Timecode.copy(color = Ink.Text))
                 } else {
                     Text("Idle", style = Type.Caption.copy(color = Ink.Text3))
                 }

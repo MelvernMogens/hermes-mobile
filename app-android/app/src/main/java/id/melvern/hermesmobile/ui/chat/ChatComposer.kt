@@ -412,8 +412,6 @@ private fun AttachTile(label: String, icon: androidx.compose.ui.graphics.vector.
  * Live chat → tap switches THIS chat's model in place (config.set … --session,
  * same as desktop). Only a chat with no session yet falls back to creating one.
  */
-// M9 (item 2): chip effort — label → kata server (desktop pakai kata sama).
-private val EFFORT_CHIPS = listOf("Low" to "low", "Medium" to "medium", "High" to "high", "Max" to "max")
 /** remembered effort buat chat baru (session_id blank) — hidup selama app. */
 @Volatile
 private var pendingEffort: String? = null
@@ -435,6 +433,15 @@ fun ModelSheet(
     // M9 (item 2): effort aktif — null = belum ketahuan (chip kosong semua).
     var effort by remember { mutableStateOf<String?>(null) }
     var effortBusy by remember { mutableStateOf<String?>(null) }
+    // v28: the active model's own levels (Off · native · Ultra), from the Mac.
+    var effortMenu by remember { mutableStateOf<id.melvern.hermesmobile.core.repo.EffortRepo.Menu?>(null) }
+    LaunchedEffect(options?.provider, options?.model) {
+        val opt = options ?: return@LaunchedEffect
+        val conn = app.connection
+        effortMenu = (if (conn == null) null else try {
+            id.melvern.hermesmobile.core.repo.EffortRepo(conn).menu(opt.provider, opt.model)
+        } catch (_: Throwable) { null }) ?: id.melvern.hermesmobile.core.repo.EffortRepo.Menu.fallback
+    }
     LaunchedEffect(Unit) {
         val c = app.client ?: return@LaunchedEffect
         try { options = MetaRepo(c).modelOptions(sessionId = sessionId.ifBlank { null }, profile = app.profile.value) }
@@ -562,40 +569,41 @@ fun ModelSheet(
             }
         }
         Hairline(Modifier.padding(top = 4.dp))
-        // M9 (item 2): Effort — 4 chip segmented (aktif = bg putih teks hitam).
+        // v28: Effort — the active model's OWN levels (Off · native · Ultra), not a fixed 4.
         Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Effort", style = Type.Meta.copy(color = Ink.Text3))
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Effort", style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.weight(1f))
+                options?.model?.takeIf { it.isNotBlank() }?.let {
+                    Text(Pretty.model(it), style = Type.Catalog, maxLines = 1)
+                }
             }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp)
-                    .clip(Radius.Chip)
-                    .background(Ink.Surface1)
-                    .border(hairline(), Ink.Hairline, Radius.Chip)
-                    .padding(3.dp),
-            ) {
-                EFFORT_CHIPS.forEach { (label, word) ->
-                    val active = effort == word
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .heightIn(min = 36.dp)
-                            .clip(Radius.Inline)
-                            .then(if (active) Modifier.background(Ink.Accent) else Modifier)
-                            .pressClickable(enabled = effortBusy == null) { pickEffort(word) }
-                            .padding(vertical = 7.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (effortBusy == word) "…" else label,
-                            style = Type.Callout.copy(
-                                color = if (active) Ink.OnAccent else Ink.Text2,
-                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                            ),
-                            maxLines = 1,
-                        )
+            val menu = effortMenu
+            when {
+                menu == null -> Box(
+                    Modifier.fillMaxWidth().height(Dim.KeyH).clip(Radius.Key)
+                        .background(Ink.Surface1.copy(alpha = shimmerAlpha())),
+                )
+                !menu.dial -> Text(
+                    "This model has no effort levels",
+                    style = Type.Callout.copy(color = Ink.Text3),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+                else -> {
+                    val keys = buildList {
+                        if (menu.canOff) add("none")
+                        addAll(id.melvern.hermesmobile.core.repo.EffortRepo.chips(menu).map { it.word })
+                    }
+                    val lit = id.melvern.hermesmobile.core.repo.EffortRepo.selectedChip(menu, effort)
+                    EffortKeys(keys, lit, effortBusy, enabled = effortBusy == null) { pickEffort(it) }
+                    val ultraRunsAs = menu.levels.firstOrNull { it.word == "ultra" }?.runsAs
+                    val note = when {
+                        !menu.known -> "Levels this model lacks are adjusted by Hermes"
+                        ultraRunsAs != null && ultraRunsAs != "ultra" ->
+                            "Ultra runs at ${id.melvern.hermesmobile.core.repo.EffortRepo.label(ultraRunsAs)} on this model"
+                        else -> null
+                    }
+                    note?.let {
+                        Text(it, style = Type.Caption.copy(color = Ink.Text3), modifier = Modifier.padding(top = 8.dp))
                     }
                 }
             }
@@ -608,6 +616,45 @@ fun ModelSheet(
     }
 }
 
+
+/** Short legends so up to 8 keys fit one row on a phone (same words as the desktop's effort pill). */
+private fun effortKeyLabel(word: String) = when (word) {
+    "none" -> "Off"; "minimal" -> "Min"; "low" -> "Low"; "medium" -> "Med"; "high" -> "High"
+    "xhigh" -> "XHigh"; "max" -> "Max"; "ultra" -> "Ultra"; else -> word
+}
+
+/**
+ * v28: one row of compact selector keys — the level the chat runs at is lit (white face),
+ * the rest are dark key caps. Equal widths, so 3 keys and 8 keys both read as one panel.
+ */
+@Composable
+private fun EffortKeys(keys: List<String>, lit: String?, busy: String?, enabled: Boolean, onPick: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        keys.forEach { word ->
+            val on = word == lit
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(Dim.KeyH)
+                    .clip(Radius.Key)
+                    .background(if (on) Ink.Text else Ink.KeyFace)
+                    .border(1.dp, if (on) Ink.Text else Ink.KeyBezel, Radius.Key)
+                    .pressClickable(enabled = enabled && !on) { onPick(word) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (busy == word) "…" else effortKeyLabel(word),
+                    style = Type.Key.copy(
+                        color = if (on) Ink.OnAccent else Ink.Text2,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+    }
+}
 
 /** Mic: tonal saat idle; merekam = putih dengan halo yang ikut level suara. */
 @Composable

@@ -92,10 +92,10 @@ class MetaRepo(private val client: GatewayClient) {
             if (!sessionId.isNullOrBlank()) put("session_id", sessionId)
         })
         val v = res["value"]?.jsonPrimitive?.contentOrNull ?: return null
-        return v.takeIf { it.isNotBlank() && it != "none" }
+        return v.takeIf { it.isNotBlank() }   // "none" = thinking off (the Off key)
     }
 
-    /** `config.set key=reasoning value=<low|medium|high|max>` — session-scoped. */
+    /** `config.set key=reasoning value=<none|minimal|…|max|ultra>` — session-scoped. */
     suspend fun setReasoningEffort(sessionId: String, effort: String) {
         client.call("config.set", buildJsonObject {
             put("session_id", sessionId)

@@ -116,18 +116,31 @@ fun MacPanel(app: HermesApp, onPreview: (url: String, title: String) -> Unit) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // equal-width 2-up key grid: every row aligns, no ragged edge, no dead space
+        run {
             val awake = s?.keepAwake == true
-            KeyCap(if (awake) "Awake · on" else "Keep awake", icon = Icons.Outlined.Coffee, lit = awake) {
-                act("awake", "keep_awake", if (awake) "off" else "on")
+            val keys = buildList<@Composable (Modifier) -> Unit> {
+                add { m -> KeyCap(if (awake) "Awake · on" else "Keep awake", m, icon = Icons.Outlined.Coffee, lit = awake) {
+                    act("awake", "keep_awake", if (awake) "off" else "on")
+                } }
+                add { m -> KeyCap(if (armed == "lock") "Tap to lock" else "Lock screen", m, icon = Icons.Outlined.Lock, armed = armed == "lock") {
+                    act("lock", "lock", confirm = true)
+                } }
+                add { m -> KeyCap("Display off", m, icon = Icons.Outlined.DesktopAccessDisabled) { act("disp", "display_sleep") } }
+                s?.botTabs?.takeIf { it > 1 }?.let { n ->
+                    add { m -> KeyCap("Close $n bot tabs", m, icon = Icons.Outlined.Tab) { act("tabs", "close_bot_tabs") } }
+                }
+                add { m -> KeyCap(if (armed == "rs") "Tap to restart" else "Restart server", m, icon = Icons.Outlined.RestartAlt, armed = armed == "rs") {
+                    act("rs", "restart_service", "com.hermes.mobile-serve", confirm = true)
+                } }
             }
-            KeyCap(if (armed == "lock") "Tap to lock" else "Lock screen", icon = Icons.Outlined.Lock, armed = armed == "lock") { act("lock", "lock", confirm = true) }
-            KeyCap("Display off", icon = Icons.Outlined.DesktopAccessDisabled) { act("disp", "display_sleep") }
-            s?.botTabs?.takeIf { it > 1 }?.let { n ->
-                KeyCap("Close $n bot tabs", icon = Icons.Outlined.Tab) { act("tabs", "close_bot_tabs") }
-            }
-            KeyCap(if (armed == "rs") "Tap to restart" else "Restart server", icon = Icons.Outlined.RestartAlt, armed = armed == "rs") {
-                act("rs", "restart_service", "com.hermes.mobile-serve", confirm = true)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                keys.chunked(2).forEach { pair ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { key -> key(Modifier.weight(1f)) }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
             }
         }
         note?.let {
