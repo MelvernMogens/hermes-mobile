@@ -264,6 +264,8 @@ fun ChatScreen(
     // yang datang duluan / reset dari send lain tidak bisa menimpa (race
     // review M7: boolean di-reset setelah submit menimpa flag yang sudah true).
     var turnStartCount by remember { mutableStateOf(0) }
+    // v28: when the current turn went on air (epoch s) — drives the live timecode in the header.
+    var turnStartAt by remember { mutableStateOf<Double?>(null) }
     // M7: derive banner — 4090 NYATA (sessionNotOwned) DAN gateway mobile.
     // Desktop-linked = multi-surface, session bisa dipakai bareng → jangan
     // tampilkan banner read-only preventive.
@@ -864,6 +866,7 @@ fun ChatScreen(
                     }
                     "message.start" -> {
                         running = true; thinking = false; thinkingText = ""; turnStartCount++
+                        turnStartAt = nowEpoch()
                         thinkStartMs = 0L; thoughtBuf = ""; pendingThought = null
                         // Prompt yang diketik di desktop gak punya event sendiri — tarik dari Mac.
                         pullForeignPrompts()
@@ -1034,23 +1037,26 @@ fun ChatScreen(
             ) {
                 OneLine(title.ifBlank { "New chat" }, Type.Title)
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // v28: program status line — lamp + state word (flips on change) + live timecode
+                    val onAirSince = turnStartAt ?: items.lastOrNull { it is ChatItem.User && !it.queued }?.let { (it as ChatItem.User).at }
                     when {
                         connState != ConnState.OPEN -> {
-                            StatusDot(if (connState == ConnState.CLOSED) Ink.Danger else Ink.Warn)
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (connState == ConnState.CLOSED) "Offline" else "Reconnecting…", style = Type.Meta, maxLines = 1)
+                            id.melvern.hermesmobile.ui.components.TallyLabel(
+                                if (connState == ConnState.CLOSED) id.melvern.hermesmobile.ui.components.Tally.FAULT else id.melvern.hermesmobile.ui.components.Tally.WAIT,
+                                if (connState == ConnState.CLOSED) "Offline" else "Reconnecting…", style = Type.Meta,
+                            )
                         }
                         running && waitingOnUser -> {
-                            StatusDot(Ink.Warn)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Waiting for you", style = Type.Meta.copy(color = Ink.Text2), maxLines = 1)
-                            Text(" · " + Pretty.model(headerModel), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1)
+                            id.melvern.hermesmobile.ui.components.TallyLabel(id.melvern.hermesmobile.ui.components.Tally.WAIT, "Waiting for you", style = Type.Meta)
+                            Text(" · ", style = Type.Meta.copy(color = Ink.Text4))
+                            id.melvern.hermesmobile.ui.components.LiveTimecode(onAirSince, Type.Timecode.copy(color = Ink.Warn))
                         }
                         running -> {
-                            PulsingDot(Ink.Live, size = 6.dp)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Working", style = Type.Meta.copy(color = Ink.Text2), maxLines = 1)
-                            Text(" · " + Pretty.model(headerModel), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1)
+                            id.melvern.hermesmobile.ui.components.TallyLabel(id.melvern.hermesmobile.ui.components.Tally.LIVE, "On air", style = Type.Meta)
+                            Text(" · ", style = Type.Meta.copy(color = Ink.Text4))
+                            id.melvern.hermesmobile.ui.components.LiveTimecode(onAirSince, Type.Timecode.copy(color = Ink.Text))
+                            Text(" · " + Pretty.model(headerModel), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                         else -> {
                             OneLine(Pretty.model(headerModel).ifBlank { "Choose model" }, Type.Meta, Modifier.weight(1f, fill = false))

@@ -6,6 +6,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Edit
@@ -64,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.core.model.ChatItem
 import id.melvern.hermesmobile.ui.components.CodeBox
 import id.melvern.hermesmobile.ui.components.MarkdownText
@@ -173,8 +177,14 @@ internal fun mergeActivity(rows: List<ChatRow>): List<ChatRow> {
 
 @Composable
 fun DayChip(label: String) {
-    Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
-        Text(label, style = Type.Caption.copy(color = Ink.Text4))
+    // v28: day break as a log divider — hairline · label · hairline
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).height(hairline()).background(Ink.Hairline))
+        Text(label, style = Type.Caption.copy(color = Ink.Text3), modifier = Modifier.padding(horizontal = 10.dp))
+        Box(Modifier.weight(1f).height(hairline()).background(Ink.Hairline))
     }
 }
 
@@ -259,7 +269,7 @@ fun UserBubble(
                         if (item.time.isNotEmpty()) Spacer(Modifier.width(4.dp))
                     }
                 }
-                if (item.time.isNotEmpty()) Text(item.time, style = Type.Caption)
+                if (item.time.isNotEmpty()) Text(item.time, style = Type.Timecode.copy(color = Ink.Text3, fontSize = 11.sp))
             }
         }
     }
@@ -416,6 +426,12 @@ private data class ToolLook(val icon: ImageVector, val done: String, val running
 private fun toolLook(name: String): ToolLook {
     val n = name.lowercase()
     return when {
+        "vision" in n || "image" in n && "generate" !in n ->
+            ToolLook(Icons.Outlined.Image, "Looked at image", "Looking at image")
+        "delegate" in n || "subagent" in n ->
+            ToolLook(Icons.Outlined.Hub, "Ran subagents", "Running subagents")
+        "execute_code" in n || n == "python" ->
+            ToolLook(Icons.Outlined.Code, "Ran code", "Running code")
         listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } ->
             ToolLook(Icons.Outlined.Terminal, "Ran terminal", "Running terminal")
         listOf("search", "grep", "find").any { it in n } && "web" !in n ->
@@ -429,6 +445,26 @@ private fun toolLook(name: String): ToolLook {
         listOf("todo", "memory", "note", "skill").any { it in n } ->
             ToolLook(Icons.AutoMirrored.Outlined.Notes, "Updated ${name.replace('_', ' ')}", "Updating ${name.replace('_', ' ')}")
         else -> ToolLook(Icons.Outlined.Build, "Used ${name.replace('_', ' ')}", "Using ${name.replace('_', ' ')}")
+    }
+}
+
+/** v28: "Running terminal" / "Reading file" — what a live feed is doing right now. */
+fun toolRunningLabel(name: String): String = toolLook(name).running
+fun toolIcon(name: String): ImageVector = toolLook(name).icon
+/** v28: one-word source label for the monitor strip: Terminal, Code, Image, Web, Files… */
+fun toolShort(name: String): String {
+    val n = name.lowercase()
+    return when {
+        "vision" in n || "image" in n -> "Looking"
+        "delegate" in n || "subagent" in n -> "Delegating"
+        "execute_code" in n -> "Coding"
+        listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } -> "Running"
+        "web" in n || "browser" in n || "fetch" in n || "http" in n -> "Browsing"
+        listOf("write", "patch", "edit", "replace").any { it in n } -> "Editing"
+        listOf("search", "grep", "find").any { it in n } -> "Searching"
+        listOf("read", "file", "cat", "view").any { it in n } -> "Reading"
+        listOf("todo", "memory", "note", "skill").any { it in n } -> "Planning"
+        else -> "Working"
     }
 }
 
@@ -730,35 +766,51 @@ private fun StepPill(tools: List<ChatItem.Tool>, thoughts: List<String>, single:
     val running = tools.any { it.status == "run" }
     val failed = tools.count { it.status == "error" }
     val steps = tools.size + thoughts.count { it.isNotBlank() }.coerceAtLeast(if (thoughts.isNotEmpty()) 1 else 0)
+    // v28 as-run log strip: lamp · what happened · step count in mono · chevron.
+    // Running → live lamp + the tool running now; done → dim; failure → red lamp.
+    val current = single ?: tools.lastOrNull { it.status == "run" }
     val label = when {
         single != null -> toolLook(single.name).let { l ->
-            when (single.status) { "run" -> l.running + "…"; "error" -> l.done + " · failed"; else -> l.done }
+            when (single.status) { "run" -> l.running; "error" -> l.done + " · failed"; else -> l.done }
         }
-        running -> "Working · $steps steps"
-        else -> "Worked · $steps steps"
+        running && current != null -> toolLook(current.name).running
+        running -> "Working"
+        else -> "Worked"
+    }
+    val tally = when {
+        running -> id.melvern.hermesmobile.ui.components.Tally.LIVE
+        failed > 0 || single?.status == "error" -> id.melvern.hermesmobile.ui.components.Tally.FAULT
+        else -> id.melvern.hermesmobile.ui.components.Tally.OFF
     }
     Column(Modifier.fillMaxWidth().animateContentSize()) {
         Row(
             Modifier
                 .heightIn(min = Dim.ToolRow)
-                .clip(Radius.Full)
+                .clip(Radius.Key)
                 .background(Ink.Surface1)
+                .border(hairline(), Ink.Bezel, Radius.Key)
                 .pressClickable { open = !open }
-                .padding(start = 10.dp, end = 8.dp),
+                .padding(start = 6.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            when {
-                running -> PulsingDot(Ink.Live, size = 6.dp)
-                failed > 0 || single?.status == "error" -> Icon(Icons.Outlined.ErrorOutline, null, tint = Ink.Danger, modifier = Modifier.size(14.dp))
-                single != null -> Icon(toolLook(single.name).icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
-                else -> Icon(Icons.Outlined.Bolt, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+            id.melvern.hermesmobile.ui.components.TallyLamp(tally)
+            Spacer(Modifier.width(4.dp))
+            val icon = when {
+                single != null -> toolLook(single.name).icon
+                current != null -> toolLook(current.name).icon
+                else -> Icons.Outlined.Bolt
             }
+            Icon(icon, null, tint = if (running) Ink.Text2 else Ink.Text3, modifier = Modifier.size(13.dp))
             Spacer(Modifier.width(6.dp))
-            Text(label, style = Type.Caption.copy(color = Ink.Text2))
+            Text(label, style = Type.Caption.copy(color = if (running) Ink.Text else Ink.Text2))
+            if (single == null && steps > 0) {
+                Text("  ", style = Type.Caption)
+                Text("$steps ${if (steps == 1) "step" else "steps"}", style = Type.Timecode.copy(color = Ink.Text3, fontSize = 11.sp))
+            }
             if (failed > 0 && single == null) {
                 Text(" · $failed failed", style = Type.Caption.copy(color = Ink.Danger))
             }
-            Spacer(Modifier.width(2.dp))
+            Spacer(Modifier.width(4.dp))
             Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
         }
         if (open) Column(Modifier.padding(start = 12.dp, top = 6.dp)) {

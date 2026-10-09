@@ -16,6 +16,10 @@ object Motion {
     const val NavMs = 220
     const val MessageInMs = 180
     const val PulseMs = 1200
+    /** v28: split-flap status/timecode change. */
+    const val FlipMs = 180
+    /** v28: meter fill. */
+    const val MeterMs = 450
     val NavSlide = 24.dp
     val MessageRise = 8.dp
 }

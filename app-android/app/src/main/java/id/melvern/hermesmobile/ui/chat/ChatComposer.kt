@@ -170,8 +170,9 @@ fun Composer(
             Modifier
                 .fillMaxWidth()
                 .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp)
-                .clip(Radius.Bubble)
+                .clip(Radius.Composer)
                 .background(Ink.Surface1)
+                .border(hairline(), Ink.Bezel, Radius.Composer)
                 .padding(start = 4.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -257,13 +258,15 @@ private fun RoundAction(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val bg by androidx.compose.animation.animateColorAsState(if (filled) Ink.Accent else Ink.Surface3, label = "sendBg")
+    val bg by androidx.compose.animation.animateColorAsState(if (filled) Ink.Accent else Ink.KeyFace, label = "sendBg")
     val fg by androidx.compose.animation.animateColorAsState(if (filled) Ink.OnAccent else Ink.Text4, label = "sendFg")
+    // v28: console key — squared, lit white when it can send (the screen's one lit key)
     Box(
         Modifier
             .size(36.dp)
-            .clip(Radius.Full)
+            .clip(Radius.Key)
             .background(bg)
+            .border(1.dp, if (filled) Ink.Text else Ink.KeyBezel, Radius.Key)
             .pressClickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
@@ -275,16 +278,18 @@ private fun RoundAction(
 /** Stop: kontrol interrupt — tonal netral + kotak putih (bukan CTA, bukan hijau). */
 @Composable
 private fun StopAction(enabled: Boolean, onClick: () -> Unit) {
+    // v28: stop = a console key with a red-lamp square (the one place stop shows red)
     Box(
         Modifier
             .size(36.dp)
-            .clip(Radius.Full)
-            .background(Ink.Raised)
+            .clip(Radius.Key)
+            .background(Ink.KeyFace)
+            .border(1.dp, Ink.KeyBezel, Radius.Key)
             .pressClickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = "Stop" },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(11.dp).clip(RoundedCornerShape(2.5.dp)).background(Ink.Text))
+        Box(Modifier.size(11.dp).clip(RoundedCornerShape(2.dp)).background(if (enabled) Ink.Danger else Ink.Text4))
     }
 }
 
@@ -611,13 +616,14 @@ private fun MicAction(listening: Boolean, level: Float, onClick: () -> Unit) {
     Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
         if (listening) Box(
             Modifier.size(36.dp).graphicsLayer { scaleX = halo; scaleY = halo }
-                .clip(Radius.Full).background(Ink.Text.copy(alpha = 0.16f)),
+                .clip(Radius.Key).background(Ink.Text.copy(alpha = 0.16f)),
         )
         Box(
             Modifier
                 .size(36.dp)
-                .clip(Radius.Full)
-                .background(if (listening) Ink.Accent else Ink.Surface3)
+                .clip(Radius.Key)
+                .background(if (listening) Ink.Accent else Ink.KeyFace)
+                .border(1.dp, if (listening) Ink.Text else Ink.KeyBezel, Radius.Key)
                 .pressClickable(onClick = onClick)
                 .semantics { contentDescription = if (listening) "Stop voice input" else "Voice input" },
             contentAlignment = Alignment.Center,

@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -24,7 +25,7 @@ import java.net.URLEncoder
  */
 class InsightsRepo(private val settings: ConnectionSettings) {
 
-    data class Last(val role: String, val text: String, val at: Double?)
+    data class Last(val role: String, val text: String, val at: Double?, val turnAt: Double? = null, val tool: String? = null)
 
     data class ProviderUsage(val provider: String, val sessions: Int, val tokens: Long, val input: Long, val output: Long)
     data class Usage(
@@ -74,6 +75,8 @@ class InsightsRepo(private val settings: ConnectionSettings) {
                     role = (o["role"] as? JsonPrimitive)?.content.orEmpty(),
                     text = (o["text"] as? JsonPrimitive)?.content.orEmpty(),
                     at = (o["at"] as? JsonPrimitive)?.doubleOrNull,
+                    turnAt = (o["turn_at"] as? JsonPrimitive)?.doubleOrNull,
+                    tool = (o["tool"] as? JsonPrimitive)?.contentOrNull,
                 )
             }.filterValues { it.text.isNotBlank() }
         } catch (_: Throwable) { null }

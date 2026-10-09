@@ -50,6 +50,38 @@ class LastMessages(unittest.TestCase):
         self.assertEqual(got["s1"]["text"], "the real latest answer")
         self.assertEqual(got["s1"]["role"], "assistant")
 
+    def test_turn_at_is_first_row_of_current_turn(self):
+        self._msg("s3", "user", "old prompt", 10)
+        self._msg("s3", "assistant", "old answer", 11)
+        self._msg("s3", "user", "current prompt", 20)
+        self._msg("s3", "assistant", "on it", 22)
+        self._msg("s3", "tool", "running...", 23)
+        got = mi.last_messages(self.db, ["s3"])
+        self.assertEqual(got["s3"]["turn_at"], 22)
+
+    def test_turn_after_stale_user_row_starts_at_first_new_row(self):
+        # a days-old system note as the newest user row must not make the turn look 3 days long
+        con = sqlite3.connect(self.db)
+        con.execute("ALTER TABLE messages ADD COLUMN finish_reason TEXT")
+        con.execute("ALTER TABLE messages ADD COLUMN tool_name TEXT")
+        con.executemany(
+            "INSERT INTO messages(session_id, role, content, timestamp, finish_reason, tool_name) VALUES (?,?,?,?,?,?)",
+            [("s4", "assistant", "final answer", 100, "stop", None),
+             ("s4", "user", "[System: model changed]", 200, None, None),
+             ("s4", "assistant", "Gas, starting", 90_000, "tool_calls", None),
+             ("s4", "tool", "{}", 90_010, None, "terminal")],
+        )
+        con.commit(); con.close()
+        got = mi.last_messages(self.db, ["s4"])
+        self.assertEqual(got["s4"]["turn_at"], 90_000)
+        self.assertEqual(got["s4"]["tool"], "terminal")
+
+    def test_just_submitted_turn_uses_user_row(self):
+        self._msg("s5", "assistant", "previous", 5)
+        self._msg("s5", "user", "new prompt", 50)
+        got = mi.last_messages(self.db, ["s5"])
+        self.assertEqual(got["s5"]["turn_at"], 50)
+
     def test_media_lines_and_bad_ids_are_dropped(self):
         self._msg("s2", "assistant", "here you go\nMEDIA:/Users/x/a.png", 1)
         got = mi.last_messages(self.db, ["s2", "../etc", "s2;drop"])

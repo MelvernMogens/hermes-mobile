@@ -74,6 +74,20 @@ object Type {
     val Figure = s(28, 32, FontWeight.Medium, -1.0, Ink.Text, MonoFamily)
     val FigureSmall = s(15, 20, FontWeight.Medium, -0.3, Ink.Text, MonoFamily)
 
+    /** v28: timecode — Geist Mono tabular, tight. 00:32:14 */
+    val Timecode = s(12, 16, FontWeight.Medium, -0.2, Ink.Text2, MonoFamily)
+    val TimecodeLarge = s(15, 20, FontWeight.Medium, -0.4, Ink.Text, MonoFamily)
+    /** v28: key cap legend — 13 Medium. */
+    val Key = s(13, 16, FontWeight.Medium, -0.1, Ink.Text)
+    /** v28: rack unit name — 13 SemiBold text. */
+    val RackLabel = s(13, 18, FontWeight.SemiBold, -0.1, Ink.Text)
+    /** v28: chat name on a monitor screen — 14 SemiBold. */
+    val MonitorTitle = s(14, 18, FontWeight.SemiBold, -0.2, Ink.Text)
+    /** v28: under-monitor display label — 12 Medium. */
+    val Umd = s(12, 16, FontWeight.Medium, -0.1, Ink.Text)
+    /** v28: catalog number (#041) — mono 11. */
+    val Catalog = s(11, 14, FontWeight.Medium, 0.0, Ink.Text3, MonoFamily)
+
     /** Code block body 13/20. */
     val Mono = s(13, 20, FontWeight.Normal, 0.0, Ink.Text, MonoFamily)
     /** Nama bahasa di header code block / slug model. */

@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.repo.MetaRepo
@@ -185,25 +186,44 @@ val BotShape = RoundedCornerShape(percent = 30)
  */
 @Composable
 fun MonogramAvatar(key: String, label: String, size: Dp, modifier: Modifier = Modifier, groupColor: Int? = null) {
-    // chat di dalam grup → avatar ikut warna grup; lainnya abu tonal (warna = makna)
+    // v28 Control Room: a channel badge — two-letter source ID in mono on a squared tile
+    // (like a router source label). Group chats take the group colour (the one colour
+    // exception); everything else stays neutral tonal grey.
     val (bg, ink) = remember(key, groupColor) {
         groupColor?.let { id.melvern.hermesmobile.core.store.ChatGroups.avatarColors(it) } ?: Ink.monoTint(key)
     }
-    val letter = remember(label) {
-        label.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "·"
-    }
+    val code = remember(label) { channelCode(label) }
     Box(
-        modifier.size(size).clip(CircleShape).background(bg),
+        modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.28f))
+            .background(bg)
+            .border(1.dp, ink.copy(alpha = 0.14f), RoundedCornerShape(size * 0.28f)),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            letter,
+            code,
             style = Type.Title.copy(
-                fontSize = (size.value * 0.40f).sp, lineHeight = (size.value * 0.40f).sp,
+                fontSize = (size.value * (if (code.length > 1) 0.33f else 0.40f)).sp,
+                lineHeight = (size.value * 0.40f).sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                letterSpacing = 0.2.sp,
             ),
-            color = ink,
+            color = if (groupColor != null) ink else Ink.Text.copy(alpha = 0.82f),
         )
+    }
+}
+
+/**
+ * "Bot Chat" → "BC", "Blokees" → "BL", "UTS Web Review" → "UR" (first + last word).
+ * Letters/digits only; falls back to "·".
+ */
+internal fun channelCode(label: String): String {
+    val words = label.trim().split(Regex("[^\\p{L}\\p{N}]+")).filter { w -> w.any { it.isLetter() } }
+    return when {
+        words.size >= 2 -> "${words.first().first()}${words.last().first()}".uppercase()
+        words.size == 1 -> words[0].filter { it.isLetterOrDigit() }.take(2).uppercase()
+        else -> label.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "·"
     }
 }
 

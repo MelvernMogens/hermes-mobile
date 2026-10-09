@@ -91,7 +91,7 @@ fun HomeShell(
             ) {
                 when (tab) { HomeTabs.CHATS -> chats(); HomeTabs.LIMITS -> limits(); HomeTabs.SETTINGS -> settings(); else -> overview() }
                 // konten melebur ke nav (gak ada seam / baris kepotong keras)
-                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(16.dp)
                     .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg.copy(alpha = 0f), Ink.Bg))))
             }
             BottomBar(tab = tab, onTab = onTab, running = running)

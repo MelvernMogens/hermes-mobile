@@ -43,6 +43,23 @@ object Ink {
     val Warn = Color(0xFFF5A524)
     val Danger = Color(0xFFF2555A)
 
+    // v28 Control Room materials
+    /** Unlit lamp / unlit meter cell — a dark slot cut into the surface. */
+    val LampOff: Color get() = if (graphite) Color(0xFF2A2A2F) else Color(0xFF1E1E22)
+    /** Monitor glass (recessed screen inside the frame) — darker than the frame, like a real panel. */
+    val Glass: Color get() = if (graphite) Color(0xFF09090B) else Color(0xFF030304)
+    /** Top sheen of the glass (gradient start). */
+    val GlassSheen: Color get() = if (graphite) Color(0xFF141417) else Color(0xFF0C0C0F)
+    /** Monitor frame (bezel body around the screen + label strip). */
+    val Frame: Color get() = if (graphite) Color(0xFF24242A) else Color(0xFF1A1A1F)
+    /** Under-monitor display strip (label band under each monitor). */
+    val Umd: Color get() = if (graphite) Color(0xFF1C1C20) else Color(0xFF121214)
+    /** Monitor / rack bezel line. */
+    val Bezel: Color get() = if (graphite) Color(0xFF2E2E34) else Color(0xFF232327)
+    /** Key cap face + bezel. */
+    val KeyFace: Color get() = if (graphite) Color(0xFF232327) else Color(0xFF151518)
+    val KeyBezel: Color get() = if (graphite) Color(0xFF3A3A41) else Color(0xFF2F2F35)
+
     // overlay
     val Scrim = Color.Black.copy(alpha = 0.72f)
     val Transparent = Color.Transparent

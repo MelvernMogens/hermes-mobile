@@ -69,11 +69,12 @@ def last_messages(db: Path, ids: list[str]) -> dict[str, dict]:
         return out
     con = _connect(db)
     try:
+        act = _active_sql(con)
         for sid in clean:
             row = con.execute(
                 "SELECT role, content, timestamp FROM messages "
                 "WHERE session_id = ? AND role IN ('user','assistant') "
-                "AND content IS NOT NULL AND TRIM(content) != '' " + _active_sql(con) +
+                "AND content IS NOT NULL AND TRIM(content) != '' " + act +
                 "ORDER BY id DESC LIMIT 1",
                 (sid,),
             ).fetchone()
@@ -81,9 +82,51 @@ def last_messages(db: Path, ids: list[str]) -> dict[str, dict]:
                 text = _flatten(row[1])
                 if text:
                     out[sid] = {"role": row[0], "text": text, "at": row[2]}
+                    out[sid].update(_turn_info(con, sid, act))
     finally:
         con.close()
     return out
+
+
+def _has_col(con, col: str) -> bool:
+    return col in {r[1] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
+
+
+def _turn_info(con, sid: str, act: str) -> dict:
+    """When the CURRENT turn started + what it is doing right now (v28 "on air" monitors).
+
+    A turn starts with the first row after the newest user prompt or the newest FINAL
+    assistant answer (finish_reason='stop'), whichever is later — not simply at the newest
+    user row: goal/continuation turns and system notes ("[System: model changed…]") leave a
+    days-old user row in front of a turn that began minutes ago. ``tool`` = the newest tool
+    the agent ran in this turn (rows after the last prose answer), for "Running terminal".
+    """
+    info: dict = {}
+    has_fin = _has_col(con, "finish_reason")
+    stop = "OR (role = 'assistant' AND finish_reason = 'stop') " if has_fin else ""
+    anchor = con.execute(
+        "SELECT id, role, timestamp FROM messages WHERE session_id = ? AND (role = 'user' " + stop + ") " + act +
+        "ORDER BY id DESC LIMIT 1",
+        (sid,),
+    ).fetchone()
+    if anchor:
+        nxt = con.execute(
+            "SELECT timestamp FROM messages WHERE session_id = ? AND id > ? " + act + "ORDER BY id LIMIT 1",
+            (sid, anchor[0]),
+        ).fetchone()
+        if nxt:
+            info["turn_at"] = nxt[0]
+        elif anchor[1] == "user":
+            info["turn_at"] = anchor[2]
+        if _has_col(con, "tool_name"):
+            t = con.execute(
+                "SELECT tool_name FROM messages WHERE session_id = ? AND id > ? AND role = 'tool' "
+                "AND tool_name IS NOT NULL AND tool_name != '' " + act + "ORDER BY id DESC LIMIT 1",
+                (sid, anchor[0]),
+            ).fetchone()
+            if t:
+                info["tool"] = t[0]
+    return info
 
 
 def _active_sql(con) -> str:

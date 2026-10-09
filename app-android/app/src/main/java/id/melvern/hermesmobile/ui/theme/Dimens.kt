@@ -52,6 +52,15 @@ object Dim {
     val EmptyIcon = 48.dp
     val NavBar = 64.dp
 
+    // v28 Control Room
+    val LampW = 11.dp            // tally lamp (LED segment)
+    val LampH = 5.dp
+    val MeterH = 10.dp           // segmented meter
+    val KeyH = 36.dp             // key cap (inside a 48dp row)
+    val MonitorW = 168.dp        // Live-now rail monitor
+    val MonitorH = 112.dp
+    val WallTileH = 132.dp       // Agents multiview tile
+
     /** Inset divider session = margin + avatar + gap (sejajar teks, gaya iOS/WA). */
     val RowDividerInset: Dp = ScreenH + AvatarRow + RowGap
 }
@@ -68,6 +77,15 @@ object Radius {
     /** Bubble user: sudut kanan-bawah 6 (ekor). */
     val BubbleUser = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = 6.dp, bottomStart = 20.dp)
     val Sheet = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    /** v28: key caps are near-square hardware keys, monitors/rack units have tight industrial corners. */
+    val Key = RoundedCornerShape(8.dp)
+    /** Composer = console input well. */
+    val Composer = RoundedCornerShape(14.dp)
+    val Monitor = RoundedCornerShape(12.dp)
+    val Screen = RoundedCornerShape(8.dp)
+    /** Tally lamp = LED segment, not a pill. */
+    val Led = RoundedCornerShape(1.5.dp)
+    val Rack = RoundedCornerShape(12.dp)
     val Full = CircleShape
 }
 

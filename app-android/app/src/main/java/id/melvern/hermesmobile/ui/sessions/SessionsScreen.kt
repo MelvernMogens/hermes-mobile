@@ -61,6 +61,12 @@ import id.melvern.hermesmobile.ui.components.QuietSheet
 import id.melvern.hermesmobile.ui.components.RelTime
 import id.melvern.hermesmobile.ui.components.SkeletonSessionRow
 import id.melvern.hermesmobile.ui.components.StatusDot
+import id.melvern.hermesmobile.ui.components.LogHeader
+import id.melvern.hermesmobile.ui.components.LiveTimecode
+import id.melvern.hermesmobile.ui.components.SignalLine
+import id.melvern.hermesmobile.ui.components.Tally
+import id.melvern.hermesmobile.ui.components.TallyLabel
+import id.melvern.hermesmobile.ui.components.TallyLamp
 import id.melvern.hermesmobile.ui.components.shimmerAlpha
 import id.melvern.hermesmobile.ui.chat.ChatScreen
 import id.melvern.hermesmobile.ui.layout.ChatRouteArg
@@ -279,7 +285,44 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         if (q.isEmpty()) sessions else sessions.filter { it.displayTitle.contains(q, ignoreCase = true) }
     }
     fun lastAt(r: SessionRow): Double = lastMsgs[r.id]?.at ?: r.updatedAt ?: r.startedAt ?: 0.0
-    val visibleAll = filtered.filterNot { it.id in hiddenIds }
+    // v28: live feeds for the "Live now" rail — running chats of this profile + bot tasks.
+    val fleet by id.melvern.hermesmobile.core.repo.BotFleet.bots.collectAsState()
+    val liveFeeds: List<LiveFeed> = if (searching) emptyList() else run {
+        val chatFeeds = sessions.filter { (it.id in active || it.running == true) && it.id !in hiddenIds }
+            .sortedByDescending { lastMsgs[it.id]?.turnAt ?: lastAt(it) }
+            .map { s ->
+                val l = lastMsgs[s.id]
+                LiveFeed(
+                    key = "c-" + s.id,
+                    title = s.displayTitle,
+                    text = if (l != null && l.role == "assistant") Pretty.preview(l.text) else "",
+                    startAt = l?.turnAt,
+                    tally = if (s.id in waitingKeys) Tally.WAIT else Tally.LIVE,
+                    arg = "${s.id}|t=${Uri.encode(s.displayTitle)}",
+                    tool = l?.tool,
+                    sessionId = s.id,
+                )
+            }
+        val botFeeds = fleet.orEmpty().filter { it.status == id.melvern.hermesmobile.core.repo.BotStatus.RUNNING && it.task != null && it.name != profile }
+            .map { b ->
+                val task = b.task.orEmpty()
+                LiveFeed(
+                    key = "b-" + b.name,
+                    title = Pretty.profile(b.label),
+                    text = task,
+                    startAt = b.taskSecs?.let { System.currentTimeMillis() / 1000.0 - it },
+                    tally = Tally.LIVE,
+                    arg = (b.taskSessionId?.let { "$it|t=${Uri.encode(task)}" } ?: "${b.botChatStoredId}|t=${Uri.encode("Bot Chat")}") +
+                        (if (b.isDefault) "" else "|p=${b.name}"),
+                    source = "Bot task",
+                )
+            }
+        chatFeeds + botFeeds
+    }
+
+    // Live chats are ON the stage (rail) while they run — not repeated in the rundown below.
+    val liveIds = liveFeeds.mapNotNull { it.sessionId }.toSet()
+    val visibleAll = filtered.filterNot { it.id in hiddenIds || it.id in liveIds }
     val pinnedRows = visibleAll.filter { it.id in pinned }.sortedByDescending { lastAt(it) }
     val unpinned = visibleAll.filterNot { it.id in pinned }.sortedByDescending { lastAt(it) }
     // Grup: chat ber-grup tampil di section grupnya (urut terbaru), sisanya di "All chats".
@@ -327,6 +370,20 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         }
         if (scrolled || searching) Hairline() else Spacer(Modifier.height(hairline()))
 
+        // v27/v28: honest link status — signal line under the bar, only when unhealthy.
+        // "No internet on this phone" vs "Can't reach your Mac" vs "Connecting…", plus
+        // the age of the saved list being shown.
+        val netOk = id.melvern.hermesmobile.core.store.NetState.rememberHasInternet()
+        val savedAt = remember(connState, profile) { id.melvern.hermesmobile.core.store.OfflineStore.savedAt(ctx, profile) }
+        val savedNote = if (savedAt > 0) " · list from " + RelTime.clock(savedAt / 1000.0) else ""
+        when {
+            connState == ConnState.OPEN -> {}
+            !netOk -> SignalLine(Tally.FAULT, "Offline — no internet on this phone$savedNote")
+            connState == ConnState.CLOSED -> SignalLine(Tally.FAULT, "Offline — can't reach your Mac$savedNote",
+                action = "Retry", onClick = { app.client?.start() })
+            else -> SignalLine(Tally.WAIT, "Connecting to your Mac…$savedNote")
+        }
+
         // M14: banner permission notif mati — cuma di API 33+ dan belum granted.
         val notifDenied = remember {
             android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -335,10 +392,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 ) != android.content.pm.PackageManager.PERMISSION_GRANTED
         }
         if (notifDenied) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .pressClickable {
+            SignalLine(Tally.WAIT, "Notifications are off", action = "Turn on", onClick = {
                         // Buka settings app (dialog permission cuma bisa muncul sekali per install).
                         runCatching {
                             ctx.startActivity(
@@ -347,12 +401,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
                             )
                         }
-                    }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Notifications disabled — tap to enable", style = Type.MetaMedium, color = Ink.Text2)
-            }
+                    })
         }
 
         InboxBanner(inbox.size, onOpen = { inboxOpen = true })
@@ -377,26 +426,18 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         // ── Isi ────────────────────────────────────────────────────────
         // v27: status koneksi jujur — beda "HP gak ada internet" vs "Mac gak kejangkau",
         // plus umur list tersimpan kalau yang tampil snapshot offline.
-        val netOk = id.melvern.hermesmobile.core.store.NetState.rememberHasInternet()
-        val savedAt = remember(connState, profile) { id.melvern.hermesmobile.core.store.OfflineStore.savedAt(ctx, profile) }
-        val savedNote = if (savedAt > 0) " · saved list from " + RelTime.clock(savedAt / 1000.0) else ""
-        val problem = when {
-            connState == ConnState.OPEN -> null
-            !netOk -> "Offline — no internet on this phone$savedNote"
-            connState == ConnState.CLOSED -> "Offline — can't reach your Mac · tap to retry$savedNote"
-            else -> "Connecting to your Mac…$savedNote"
-        }
+        val problem: String? = null
         when {
             loading && sessions.isEmpty() -> {
                 Column(Modifier.fillMaxSize()) {
-                    LargeTitle(problem, onRetry = { app.client?.start() })
+                    LargeTitle(liveFeeds.size)
                     val a = shimmerAlpha()
                     repeat(3) { SkeletonSessionRow(a) }
                 }
             }
             sessions.isEmpty() -> {
                 Column(Modifier.fillMaxSize()) {
-                    LargeTitle(problem, onRetry = { app.client?.start() })
+                    LargeTitle(liveFeeds.size)
                     EmptyChats(Modifier.weight(1f))
                 }
             }
@@ -405,12 +446,17 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = WindowInsets.navigationBars.asPaddingValues(),
             ) {
-                if (!searching) item(key = "title") { LargeTitle(problem, onRetry = { app.client?.start() }) }
+                if (!searching) item(key = "title") { LargeTitle(liveFeeds.size) }
+                if (!searching && liveFeeds.isNotEmpty()) item(key = "live-rail") {
+                    LiveRail(liveFeeds, onOpen = { f -> openChat(f.arg) },
+                        onLongPress = { f -> sessions.firstOrNull { it.id == f.sessionId }?.let { actionTarget = it } })
+                }
                 fun rowItem(s: SessionRow, keyPrefix: String, last: Boolean) {
                     item(key = keyPrefix + s.id) {
                         SessionRowView(
                             app, s,
                             running = s.id in active || s.running == true,
+                            waiting = s.id in waitingKeys,
                             pinned = s.id in pinned,
                             groupColor = id.melvern.hermesmobile.core.store.ChatGroups.groupOf(s.id)?.color,
                             unread = id.melvern.hermesmobile.core.repo.UnreadStore.isUnread(s.id, lastMsgs[s.id]?.at, lastMsgs[s.id]?.role),
@@ -423,7 +469,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                     }
                 }
                 if (pinnedRows.isNotEmpty() && !searching) {
-                    item(key = "pinned-header") { SectionHeader("Pinned") }
+                    item(key = "pinned-header") { LogHeader("Pinned", trailing = pinnedRows.size.toString()) }
                     pinnedRows.forEachIndexed { i, s -> rowItem(s, "p-", i == pinnedRows.lastIndex) }
                 }
                 groupSections.filter { (_, rows) -> rows.isNotEmpty() || !searching }.forEach { (g, rows) ->
@@ -436,17 +482,17 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                     }
                     if (!g.collapsed || searching) rows.forEachIndexed { i, s -> rowItem(s, "g-${g.id}-", i == rows.lastIndex) }
                 }
-                if ((pinnedRows.isNotEmpty() || groupSections.isNotEmpty()) && !searching && visibleRows.isNotEmpty()) {
-                    item(key = "all-header") { SectionHeader("All chats") }
+                if ((pinnedRows.isNotEmpty() || groupSections.isNotEmpty() || liveFeeds.isNotEmpty()) && !searching && visibleRows.isNotEmpty()) {
+                    item(key = "all-header") { LogHeader("All chats", trailing = visibleRows.size.toString()) }
                 }
                 visibleRows.forEachIndexed { i, s -> rowItem(s, "", i == visibleRows.lastIndex) }
                 if (searching) pinnedRows.forEachIndexed { i, s -> rowItem(s, "ps-", i == pinnedRows.lastIndex) }
                 if (hiddenRows.isNotEmpty()) {
-                    item(key = "hidden-header") { SectionHeader("Hidden", trailing = hiddenRows.size.toString()) }
+                    item(key = "hidden-header") { LogHeader("Hidden", trailing = hiddenRows.size.toString()) }
                     hiddenRows.forEachIndexed { i, s -> rowItem(s, "h-", i == hiddenRows.lastIndex) }
                 }
                 if (searching && contentHits.isNotEmpty()) {
-                    item(key = "content-header") { SectionHeader("In messages", trailing = contentHits.size.toString()) }
+                    item(key = "content-header") { LogHeader("In messages", trailing = contentHits.size.toString()) }
                     contentHits.forEachIndexed { i, h ->
                         item(key = "hit-${h.sessionId}-$i") { ContentHitRow(h, onClick = { openChat(h.sessionId) }) }
                     }
@@ -564,25 +610,15 @@ private fun SelectAChatPane() {
     }
 }
 
-/** Large title "Chats" (display 28) + subtitle kecil HANYA kalau ada masalah koneksi. */
+/** Large title "Chats" + on-air count at right (tally lamp) when anything is live. */
 @Composable
-private fun LargeTitle(problem: String?, onRetry: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 6.dp)) {
-        Text("Chats", style = Type.Display)
-        if (problem != null) {
-            Row(
-                Modifier
-                    .padding(top = 2.dp)
-                    .then(if (problem.startsWith("Offline")) Modifier.pressClickable(onClick = onRetry) else Modifier)
-                    .padding(end = 8.dp)
-                    .padding(vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusDot(if (problem.startsWith("Offline")) Ink.Danger else Ink.Warn)
-                Spacer(Modifier.width(8.dp))
-                Text(problem, style = Type.Meta)
-            }
-        }
+private fun LargeTitle(live: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text("Chats", style = Type.Display, modifier = Modifier.weight(1f))
+        @Suppress("UNUSED_EXPRESSION") live
     }
 }
 
@@ -594,18 +630,9 @@ private fun AvatarWithStatus(app: HermesApp, profile: String, state: ConnState) 
         ConnState.CLOSED -> Ink.Danger
         else -> Ink.Warn
     }
-    Box {
-        ProfileAvatar(app, profile, Dim.AvatarBar)
-        if (dot != null) Box(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 2.dp, y = 2.dp)
-                .size(Dim.Dot + 4.dp)
-                .clip(Radius.Full)
-                .background(Ink.Bg),
-            contentAlignment = Alignment.Center,
-        ) { StatusDot(dot!!) }
-    }
+    // v28: link status lives in the signal line under the bar — the avatar stays clean.
+    @Suppress("UNUSED_VARIABLE") val unused = dot
+    ProfileAvatar(app, profile, Dim.AvatarBar)
 }
 
 @Composable
@@ -686,6 +713,7 @@ private fun SessionRowView(
     app: HermesApp,
     s: SessionRow,
     running: Boolean,
+    waiting: Boolean = false,
     pinned: Boolean,
     groupColor: Int? = null,
     unread: Boolean = false,
@@ -704,47 +732,60 @@ private fun SessionRowView(
                 .padding(horizontal = Dim.ScreenH, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // monogram per chat (identitas), bot avatar kecil di pojok kalau bukan profile aktif
-            Box(Modifier.size(Dim.AvatarRow)) {
-                MonogramAvatar(s.id, s.displayTitle, Dim.AvatarRow, groupColor = groupColor)
-                if (running) {
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .offset(x = 2.dp, y = 2.dp)
-                            .size(16.dp)
-                            .clip(Radius.Full)
-                            .background(Ink.Bg),
-                        contentAlignment = Alignment.Center,
-                    ) { PulsingDot(Ink.Live, size = 10.dp) }
-                }
-            }
+            // monogram per chat (identitas; group colour is the one colour exception)
+            MonogramAvatar(s.id, s.displayTitle, Dim.AvatarRow, groupColor = groupColor)
             Spacer(Modifier.width(Dim.RowGap))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OneLine(s.displayTitle, Type.RowTitle, Modifier.weight(1f))
-                    Spacer(Modifier.width(10.dp))
-                    if (pinned) {
-                        Icon(Icons.Rounded.PushPin, "Pinned", tint = Ink.Text4, modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text(
-                        if (running) "now" else RelTime.listStamp(stamp.takeIf { it > 0 }),
-                        style = if (unread) Type.Caption.copy(color = Ink.Text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) else Type.Caption,
-                        maxLines = 1,
+                    OneLine(
+                        s.displayTitle,
+                        if (unread) Type.RowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) else Type.RowTitle,
+                        Modifier.weight(1f, fill = false),
                     )
+                    if (pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Rounded.PushPin, "Pinned", tint = Ink.Text4, modifier = Modifier.size(12.dp))
+                    }
                 }
                 Spacer(Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OneLine(
-                        if (running) "Working…" else secondLine(s, last),
-                        Type.Preview.copy(color = if (running || unread) Ink.Text else Ink.Text3),
-                        Modifier.weight(1f),
-                    )
-                    if (unread && !running) {
-                        Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(9.dp).clip(Radius.Full).background(Ink.Text))
+                OneLine(
+                    when {
+                        waiting -> "Needs your answer"
+                        running -> last?.takeIf { it.role == "assistant" }?.let { Pretty.preview(it.text) } ?: "Working…"
+                        else -> secondLine(s, last)
+                    },
+                    Type.Preview.copy(color = when {
+                        waiting -> Ink.Warn
+                        running || unread -> Ink.Text
+                        else -> Ink.Text3
+                    }),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            // time column (mono, tabular) + lamp — each sits on the baseline row of its text line
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(min = 44.dp)) {
+                Box(Modifier.height(22.dp), contentAlignment = Alignment.CenterEnd) {
+                    if (running || waiting) {
+                        val t = last?.turnAt
+                        if (t != null) LiveTimecode(t, Type.Timecode.copy(color = Ink.Text))
+                        else Text("on air", style = Type.Timecode.copy(color = Ink.Text))
+                    } else {
+                        Text(
+                            RelTime.listStamp(stamp.takeIf { it > 0 }),
+                            style = Type.Timecode.copy(color = if (unread) Ink.Text else Ink.Text3),
+                            maxLines = 1,
+                        )
                     }
+                }
+                Spacer(Modifier.height(3.dp))
+                Box(Modifier.height(19.dp), contentAlignment = Alignment.CenterEnd) {
+                    val lamp = when {
+                        waiting -> Tally.WAIT
+                        running -> Tally.LIVE
+                        unread -> Tally.CUE
+                        else -> null
+                    }
+                    if (lamp != null) TallyLamp(lamp)
                 }
             }
         }
@@ -843,11 +884,11 @@ private fun GroupHeader(g: id.melvern.hermesmobile.core.store.ChatGroups.Group, 
             .padding(start = Dim.ScreenH, end = Dim.ScreenH, top = 18.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(8.dp).clip(Radius.Full).background(id.melvern.hermesmobile.core.store.ChatGroups.color(g.color)))
+        Box(Modifier.size(width = Dim.LampW, height = Dim.LampH).clip(Radius.Full).background(id.melvern.hermesmobile.core.store.ChatGroups.color(g.color)))
+        Spacer(Modifier.width(9.dp))
+        Text(g.name, style = Type.Section.copy(color = Ink.Text2))
         Spacer(Modifier.width(8.dp))
-        Text(g.name.uppercase(), style = Type.Caption.copy(color = Ink.Text2, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium))
-        Spacer(Modifier.width(6.dp))
-        Text(count.toString(), style = Type.Caption.copy(color = Ink.Text4))
+        Text(count.toString(), style = Type.MonoMeta.copy(color = Ink.Text4))
         Spacer(Modifier.weight(1f))
         Icon(if (g.collapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess, if (g.collapsed) "Expand" else "Collapse",
             tint = Ink.Text4, modifier = Modifier.size(16.dp))

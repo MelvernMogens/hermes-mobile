@@ -41,24 +41,15 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** Banner kecil di atas Chats: "2 waiting for you" — muncul hanya kalau ada. */
+/** Signal line on Chats: "2 requests waiting for you" — amber lamp, only when there are any. */
 @Composable
 fun InboxBanner(count: Int, onOpen: () -> Unit) {
     if (count <= 0) return
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = Dim.GroupInset, vertical = 4.dp)
-            .clip(Radius.Card).background(Ink.Surface1).pressClickable(onClick = onOpen)
-            .padding(horizontal = 14.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StatusDot(Ink.Warn)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            if (count == 1) "1 request waiting for you" else "$count requests waiting for you",
-            style = Type.Callout.copy(fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f),
-        )
-        Text("Review", style = Type.Caption.copy(color = Ink.Text2))
-    }
+    id.melvern.hermesmobile.ui.components.SignalLine(
+        id.melvern.hermesmobile.ui.components.Tally.WAIT,
+        if (count == 1) "1 request waiting for you" else "$count requests waiting for you",
+        action = "Review", onClick = onOpen,
+    )
 }
 
 /**
