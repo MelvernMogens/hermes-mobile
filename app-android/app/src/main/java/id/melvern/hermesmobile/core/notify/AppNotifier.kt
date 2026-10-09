@@ -82,13 +82,33 @@ class AppNotifier(private val context: Context) {
         nm.notify(d.storedId.hashCode(), b.build())
     }
 
+    /**
+     * v28: notif "bot selesai". Tap → chat tugas (route `id|t=…|p=<profile>`); Reply → prompt.submit
+     * ke session itu di profile bot (profile ikut di intent action).
+     */
+    fun postTaskDone(t: id.melvern.hermesmobile.core.repo.BotTask, title: String, text: String) {
+        ensureChannels()
+        val big = t.result.ifBlank { text }
+        val b = base(CHANNEL_AGENT)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(big).setSummaryText(t.title.take(60)))
+            .setContentIntent(mainIntent(openChat = t.chatRoute))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setGroup(GROUP_AGENT)
+            .addAction(replyAction(t.id, null, label = "Reply", profile = t.profile))
+        nm.notify(t.id.hashCode(), b.build())
+    }
+
     /** Sesudah aksi dari shade: ganti notif dengan status singkat, lalu hilang sendiri. */
-    fun settle(storedId: String, status: String, reply: String?) {
+    fun settle(storedId: String, status: String, reply: String?, profile: String? = null) {
         ensureChannels()
         val n = base(CHANNEL_AGENT)
             .setContentTitle(status)
             .setContentText(reply ?: "")
-            .setContentIntent(mainIntent(openChat = storedId))
+            .setContentIntent(mainIntent(openChat = chatRoute(storedId, profile)))
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setAutoCancel(true)
@@ -100,10 +120,15 @@ class AppNotifier(private val context: Context) {
 
     data class PendingAsk(val kind: String, val requestId: String, val text: String, val qid: String? = null)
 
-    private fun actionIntent(action: String, storedId: String, ask: PendingAsk?): PendingIntent {
+    /** Route chat untuk deep link — chat milik profile bot membawa `|p=<profile>`. */
+    private fun chatRoute(storedId: String, profile: String?): String =
+        if (profile.isNullOrBlank() || profile == "default") storedId else "$storedId|p=$profile"
+
+    private fun actionIntent(action: String, storedId: String, ask: PendingAsk?, profile: String? = null): PendingIntent {
         val i = Intent(context, NotifActionReceiver::class.java).apply {
             this.action = action
             putExtra(NotifActionReceiver.EXTRA_STORED, storedId)
+            profile?.let { putExtra(NotifActionReceiver.EXTRA_PROFILE, it) }
             putExtra(NotifActionReceiver.EXTRA_REQUEST, ask?.requestId.orEmpty())
             putExtra(NotifActionReceiver.EXTRA_KIND, ask?.kind.orEmpty())
             ask?.qid?.let { putExtra(NotifActionReceiver.EXTRA_QID, it) }
@@ -116,9 +141,9 @@ class AppNotifier(private val context: Context) {
         )
     }
 
-    private fun replyAction(storedId: String, ask: PendingAsk?, label: String): NotificationCompat.Action {
+    private fun replyAction(storedId: String, ask: PendingAsk?, label: String, profile: String? = null): NotificationCompat.Action {
         val input = androidx.core.app.RemoteInput.Builder(NotifActionReceiver.KEY_REPLY).setLabel(label).build()
-        return NotificationCompat.Action.Builder(0, label, actionIntent(NotifActionReceiver.ACTION_REPLY, storedId, ask))
+        return NotificationCompat.Action.Builder(0, label, actionIntent(NotifActionReceiver.ACTION_REPLY, storedId, ask, profile))
             .addRemoteInput(input)
             .setAllowGeneratedReplies(false)
             .build()

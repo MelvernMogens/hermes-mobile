@@ -28,6 +28,8 @@ class NotifActionReceiver : BroadcastReceiver() {
         const val EXTRA_REQUEST = "request_id"
         const val EXTRA_KIND = "request_kind"     // approval | clarify | "" (plain reply)
         const val EXTRA_QID = "clarify_qid"
+        /** v28: profile pemilik session (notif tugas bot) — null = profile aktif app. */
+        const val EXTRA_PROFILE = "profile"
         const val KEY_REPLY = "reply_text"
         private const val TAG = "HermesNotifAction"
     }
@@ -38,6 +40,7 @@ class NotifActionReceiver : BroadcastReceiver() {
         val requestId = intent.getStringExtra(EXTRA_REQUEST).orEmpty()
         val kind = intent.getStringExtra(EXTRA_KIND).orEmpty()
         val qid = intent.getStringExtra(EXTRA_QID)
+        val profile = intent.getStringExtra(EXTRA_PROFILE)?.takeIf { it.isNotBlank() }
         val reply = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)?.toString()?.trim()
         val pending = goAsync()
         app.appScope.launch {
@@ -65,7 +68,7 @@ class NotifActionReceiver : BroadcastReceiver() {
                             })
                             "Answered"
                         } else {
-                            val repo = SessionRepo(c, app.profile.value)
+                            val repo = SessionRepo(c, profile ?: app.profile.value)
                             val runtime = repo.resumeAttachLazy(stored) ?: stored
                             repo.sendPromptResilient(stored, runtime, reply)
                             "Sent"
@@ -77,7 +80,7 @@ class NotifActionReceiver : BroadcastReceiver() {
                 Log.w(TAG, "action failed: ${e.message}")
                 "Couldn't reach your Mac — open the app"
             }
-            status?.let { app.notifier.settle(stored, it, reply) }
+            status?.let { app.notifier.settle(stored, it, reply, profile) }
             pending.finish()
         }
     }

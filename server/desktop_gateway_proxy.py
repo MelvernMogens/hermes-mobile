@@ -38,6 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mobile_insights  # noqa: E402  (sibling module, read-only state.db queries)
 import mobile_limits  # noqa: E402  (plan limits via hermes-agent + Mac RAM)
 import mobile_mac  # noqa: E402  (v24: Mac panel, diff, web preview)
+import mobile_tasks  # noqa: E402  (v28: bot task history)
+import mobile_files  # noqa: E402  (v28: all-files gallery)
+import mobile_wait  # noqa: E402  (v28: long-poll wake-up)
+import mobile_tail  # noqa: E402  (v28: fast tail of huge chats)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -448,6 +452,76 @@ async def handle_mobile_bot_work(request: web.Request) -> web.Response:
     return web.json_response({"bots": await asyncio.get_running_loop().run_in_executor(None, mobile_mac.bot_work)})
 
 
+def _int_q(request: web.Request, key: str, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(int(request.query.get(key, default)), hi))
+    except ValueError:
+        return default
+
+
+async def handle_mobile_tasks(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-tasks?limit=60 → {tasks:[{profile,id,title,started_at,ended_at,message_count,
+    last_activity,status,result}]} — bot task sessions (source='tool') across all bot profiles."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    limit = _int_q(request, "limit", 60, 1, 200)
+    tasks = await asyncio.get_running_loop().run_in_executor(None, mobile_tasks.list_tasks, limit)
+    return web.json_response({"tasks": tasks})
+
+
+async def handle_mobile_files(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-files?limit=120&kind=all|image|video|audio|doc → {files:[{path,name,kind,size,at,
+    profile,session_id,session_title}]} — files the agent sent as MEDIA: lines (cached 30 s)."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    kind = request.query.get("kind", "all")
+    if kind not in mobile_files.KINDS:
+        return web.json_response({"detail": "bad kind"}, status=400)
+    limit = _int_q(request, "limit", 120, 1, 500)
+    files = await asyncio.get_running_loop().run_in_executor(
+        None, mobile_files.list_files, frozenset(_IMG_MIME), kind, limit)
+    return web.json_response({"files": files})
+
+
+async def handle_mobile_tail(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-tail?profile=&id=<stored>&limit=120 → {messages (session.resume shape), has_more,
+    total_active} — last N active messages so huge chats render before the full resume lands."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    db = mobile_insights.state_db(request.query.get("profile"))
+    if db is None:
+        return web.json_response({"detail": "unknown profile"}, status=404)
+    sid = request.query.get("id", "")
+    if not mobile_insights._SESSION_RE.match(sid):
+        return web.json_response({"detail": "bad id"}, status=400)
+    limit = _int_q(request, "limit", 120, 1, 500)
+    res = await asyncio.get_running_loop().run_in_executor(None, mobile_tail.tail, db, sid, limit)
+    return web.json_response(res)
+
+
+WAIT_STEP = 1.5
+
+
+async def handle_mobile_wait(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-wait?since=<cursor>&timeout=25 → {cursor, events:[{kind:"message"|"task",profile,
+    session_id,title,at}]}. Long-poll: answers as soon as a phone-relevant change lands, else at timeout.
+    No/garbled `since` → immediate answer with a fresh baseline cursor."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    timeout = _int_q(request, "timeout", 25, 0, 30)
+    cursor = request.query.get("since", "")[:2000]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        res = await loop.run_in_executor(None, mobile_wait.check, cursor)
+        remaining = deadline - loop.time()
+        if res["events"] or res.get("baseline") or remaining <= 0.05:
+            res.pop("baseline", None)
+            return web.json_response(res)
+        cursor = res["cursor"]  # rows tanpa event (tool/user) — maju, jangan dilaporkan ulang
+        await asyncio.sleep(min(WAIT_STEP, remaining))
+
+
 async def handle_mobile_ports(request: web.Request) -> web.Response:
     """GET /api/mobile-ports → dev servers listening locally (for web preview)."""
     if (r := await _authed_or_401(request)) is not None:
@@ -623,6 +697,10 @@ def main() -> None:
     app.router.add_get("/api/mobile-diff", handle_mobile_diff)
     app.router.add_get("/api/mobile-ports", handle_mobile_ports)
     app.router.add_get("/api/mobile-bot-work", handle_mobile_bot_work)
+    app.router.add_get("/api/mobile-tasks", handle_mobile_tasks)
+    app.router.add_get("/api/mobile-files", handle_mobile_files)
+    app.router.add_get("/api/mobile-wait", handle_mobile_wait)
+    app.router.add_get("/api/mobile-tail", handle_mobile_tail)
     app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
