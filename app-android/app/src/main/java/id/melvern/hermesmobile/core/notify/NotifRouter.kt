@@ -56,6 +56,10 @@ fun GatewayClient.startNotifPoller(app: HermesApp, scope: CoroutineScope): Job =
     val router = NotifRouter(app)
     val tasks = TaskNotifs.Watcher(app)
     var prev: Map<String, NotifPolicy.LiveRow> = emptyMap()
+    var wake: WakePoll? = null
+    var wakeConn: Any? = null
+    var wakeBackoff = 0L
+    var wakeRetryAt = 0L
     // Poll pertama setelah koneksi OPEN; lanjut tiap 20s selalu (WS cuma keepalive).
     while (isActive) {
         // v26.1: worker CLI (bot-run) tidak ada di active_list — tarik dari Mac, ringan.
@@ -79,12 +83,39 @@ fun GatewayClient.startNotifPoller(app: HermesApp, scope: CoroutineScope): Job =
         } else {
             prev = emptyMap() // reset baseline saat putus — hindari notif palsu pas reconnect
         }
-        delay(POLL_INTERVAL_MS)
+        // v28: di background, tidur = long-poll /api/mobile-wait (bangun begitu ada jawaban/tugas
+        // selesai). Foreground / long-poll sedang backoff / belum OPEN → delay lama 20 dtk.
+        val conn = app.connection
+        val nowMs = System.currentTimeMillis()
+        if (!app.isForeground && conn != null && c.state.value == ConnState.OPEN && nowMs >= wakeRetryAt) {
+            if (wake == null || wakeConn != conn) { wake = WakePoll(conn); wakeConn = conn }
+            val o = try { wake!!.await() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { WakePoll.Outcome.Error }
+            if (o is WakePoll.Outcome.Error) {
+                wakeBackoff = WakePoll.nextBackoff(wakeBackoff)
+                wakeRetryAt = System.currentTimeMillis() + wakeBackoff
+            } else wakeBackoff = 0L
+            if (o is WakePoll.Outcome.Events && o.task) tasks.forceDue()
+            delay(sleepAfterWake(o, System.currentTimeMillis() - nowMs))
+        } else {
+            delay(POLL_INTERVAL_MS)
+        }
     }
     Log.i(TAG, "poller exit")
 }
 
-private const val POLL_INTERVAL_MS = 20_000L
+internal const val POLL_INTERVAL_MS = 20_000L
+
+/**
+ * v28 pure: jeda sesudah satu long-poll (sudah berjalan [elapsedMs]).
+ * Events → poll segera tapi maks satu bangun per MIN_GAP (agent streaming ≠ loop rapat).
+ * Timeout → normalnya sudah ~25 dtk; kalau server pulang terlalu cepat, genapi ke 20 dtk.
+ * Error → delay lama 20 dtk (long-poll sendiri di-backoff 20→40→60 dtk lewat wakeRetryAt).
+ */
+fun sleepAfterWake(o: WakePoll.Outcome, elapsedMs: Long): Long = when (o) {
+    is WakePoll.Outcome.Events -> (WakePoll.MIN_GAP_MS - elapsedMs).coerceAtLeast(0)
+    WakePoll.Outcome.Timeout -> (POLL_INTERVAL_MS - elapsedMs).coerceAtLeast(0)
+    WakePoll.Outcome.Error -> POLL_INTERVAL_MS
+}
 
 /**
  * State + aksi poll. Judul utk notif dari active_list (server sudah resolve title).

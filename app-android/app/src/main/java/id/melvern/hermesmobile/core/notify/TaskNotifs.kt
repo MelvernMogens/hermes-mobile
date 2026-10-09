@@ -71,6 +71,9 @@ object TaskNotifs {
 
         fun due(nowMs: Long): Boolean = nowMs - lastCheck >= CHECK_EVERY_MS
 
+        /** v28 D: long-poll melaporkan event tugas → cek di putaran berikut (tetap maks 1x per bangun). */
+        fun forceDue() { lastCheck = 0L }
+
         /** [list] = hasil TasksRepo.list() (null = gagal → baseline dipertahankan). */
         fun onList(list: List<BotTask>?, nowMs: Long = System.currentTimeMillis()) {
             lastCheck = nowMs

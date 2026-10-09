@@ -40,6 +40,7 @@ import mobile_limits  # noqa: E402  (plan limits via hermes-agent + Mac RAM)
 import mobile_mac  # noqa: E402  (v24: Mac panel, diff, web preview)
 import mobile_tasks  # noqa: E402  (v28: bot task history)
 import mobile_files  # noqa: E402  (v28: all-files gallery)
+import mobile_wait  # noqa: E402  (v28: long-poll wake-up)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -481,6 +482,28 @@ async def handle_mobile_files(request: web.Request) -> web.Response:
     return web.json_response({"files": files})
 
 
+WAIT_STEP = 1.5
+
+
+async def handle_mobile_wait(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-wait?since=<cursor>&timeout=25 → {cursor, events:[{kind:"message"|"task",profile,
+    session_id,title,at}]}. Long-poll: answers as soon as a phone-relevant change lands, else at timeout.
+    No/garbled `since` → immediate answer with a fresh baseline cursor."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    timeout = _int_q(request, "timeout", 25, 0, 30)
+    cursor = request.query.get("since", "")[:2000]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        res = await loop.run_in_executor(None, mobile_wait.check, cursor)
+        if res["events"] or res.get("baseline") or loop.time() + WAIT_STEP > deadline:
+            res.pop("baseline", None)
+            return web.json_response(res)
+        cursor = res["cursor"]  # rows tanpa event (tool/user) — maju, jangan dilaporkan ulang
+        await asyncio.sleep(WAIT_STEP)
+
+
 async def handle_mobile_ports(request: web.Request) -> web.Response:
     """GET /api/mobile-ports → dev servers listening locally (for web preview)."""
     if (r := await _authed_or_401(request)) is not None:
@@ -658,6 +681,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-bot-work", handle_mobile_bot_work)
     app.router.add_get("/api/mobile-tasks", handle_mobile_tasks)
     app.router.add_get("/api/mobile-files", handle_mobile_files)
+    app.router.add_get("/api/mobile-wait", handle_mobile_wait)
     app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
