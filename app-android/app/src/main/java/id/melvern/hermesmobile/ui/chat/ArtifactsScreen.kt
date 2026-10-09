@@ -374,7 +374,7 @@ private fun ArtifactSkeleton() {
  * (transform gesture: pinch 1x–5x + drag pan), tombol Save reuse MediaFetchSave.
  */
 @Composable
-private fun ImagePreviewDialog(
+internal fun ImagePreviewDialog(
     path: String,
     conn: id.melvern.hermesmobile.core.store.ConnectionSettings?,
     onDismiss: () -> Unit,
@@ -472,7 +472,7 @@ private fun videoFetcherFor(conn: id.melvern.hermesmobile.core.store.ConnectionS
 
 /** Video fullscreen dialog — reuse MarkdownVideo (player media3 16:9). */
 @Composable
-private fun VideoPreviewDialog(
+internal fun VideoPreviewDialog(
     path: String,
     conn: id.melvern.hermesmobile.core.store.ConnectionSettings?,
     onDismiss: () -> Unit,

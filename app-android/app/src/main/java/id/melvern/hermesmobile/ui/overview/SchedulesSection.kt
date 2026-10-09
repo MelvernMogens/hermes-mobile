@@ -1,6 +1,7 @@
 package id.melvern.hermesmobile.ui.overview
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,19 +66,10 @@ fun SchedulesSection(app: HermesApp) {
         if (got != null) { jobs = got; loadFailed = false } else loadFailed = jobs == null
     }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.GroupInset, vertical = 8.dp)) {
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("SCHEDULES", style = Type.Caption.copy(color = Ink.Text2, fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f))
-            Row(
-                Modifier.clip(Radius.Full).pressClickable { creating = true }.padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.Add, null, tint = Ink.Text2, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("New", style = Type.Caption.copy(color = Ink.Text2))
-            }
-        }
-        Column(Modifier.fillMaxWidth().clip(Radius.Card).background(Ink.Surface1)) {
+    Column(Modifier.fillMaxWidth()) {
+        id.melvern.hermesmobile.ui.components.LogHeader("Schedules", trailing = jobs?.size?.toString(), action = "New", onAction = { creating = true })
+        Column(Modifier.padding(horizontal = Dim.ScreenH).fillMaxWidth().clip(Radius.Rack).background(Ink.Surface1)
+            .border(1.dp, Ink.Bezel, Radius.Rack)) {
             val js = jobs
             when {
                 js == null && loadFailed -> Text("Couldn't load schedules — tap to retry", style = Type.Caption.copy(color = Ink.Text3),
@@ -90,10 +82,10 @@ fun SchedulesSection(app: HermesApp) {
                         Modifier.fillMaxWidth().pressClickable { selected = j }.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        StatusDot(when {
-                            j.paused -> Ink.Text4
-                            j.lastStatus in setOf("error", "failed") -> Ink.Danger
-                            else -> Ink.Live
+                        id.melvern.hermesmobile.ui.components.TallyLamp(when {
+                            j.paused -> id.melvern.hermesmobile.ui.components.Tally.OFF
+                            j.lastStatus in setOf("error", "failed") -> id.melvern.hermesmobile.ui.components.Tally.FAULT
+                            else -> id.melvern.hermesmobile.ui.components.Tally.CUE
                         })
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {

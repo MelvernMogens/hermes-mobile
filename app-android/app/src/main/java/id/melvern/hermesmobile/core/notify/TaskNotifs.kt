@@ -51,8 +51,9 @@ object TaskNotifs {
 
     /** Nama tampilan bot dari fleet (displayName) — fallback nama profile berhuruf besar. */
     fun botName(profile: String): String =
-        BotFleet.bots.value?.firstOrNull { it.name == profile }?.label?.takeIf { it.isNotBlank() }
-            ?: profile.replaceFirstChar { it.uppercase() }
+        id.melvern.hermesmobile.ui.components.Pretty.profile(
+            BotFleet.bots.value?.firstOrNull { it.name == profile }?.label?.takeIf { it.isNotBlank() } ?: profile,
+        )
 
     private fun sp(c: Context) = c.getSharedPreferences(PREF, Context.MODE_PRIVATE)
     private const val KEEP_SECS = 3 * 86400L

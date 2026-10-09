@@ -1,6 +1,7 @@
 package id.melvern.hermesmobile.ui.overview
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -45,21 +46,17 @@ fun GiveTaskSheet(
 
     QuietSheet(onDismiss = onDismiss, title = "Give a task") {
         // pilih bot — chip rapat satu baris
+        Box(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Dim.ScreenH),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             choices.forEach { b ->
-                val sel = b.name == target?.name
-                Text(
-                    Pretty.profile(b.label),
-                    style = Type.Callout.copy(color = if (sel) Ink.Bg else Ink.Text),
-                    modifier = Modifier
-                        .background(if (sel) Ink.Text else Ink.Surface2, Radius.Chip)
-                        .pressClickable { target = b }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                )
+                id.melvern.hermesmobile.ui.components.KeyCap(Pretty.profile(b.label), selected = b.name == target?.name) { target = b }
             }
+        }
+            Box(Modifier.align(Alignment.CenterEnd).width(40.dp).height(Dim.KeyH)
+                .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Ink.Surface2.copy(alpha = 0f), Ink.Surface2))))
         }
         target?.task?.let {
             Text("Busy now: $it", style = Type.Meta.copy(color = Ink.Warn),
@@ -82,16 +79,19 @@ fun GiveTaskSheet(
                 .fillMaxWidth()
                 .padding(horizontal = Dim.ScreenH, vertical = 10.dp)
                 .focusRequester(fr)
-                .background(Ink.Surface2, Radius.Chip)
+                .background(Ink.Glass, Radius.Key)
+                .border(1.dp, Ink.KeyBezel, Radius.Key)
                 .padding(12.dp),
         )
         error?.let { Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH)) }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onDismiss) { Text("Cancel", style = Type.Callout.copy(color = Ink.Text2)) }
-            TextButton(
+        Row(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+            id.melvern.hermesmobile.ui.components.KeyCap("Cancel", onClick = onDismiss)
+            id.melvern.hermesmobile.ui.components.KeyCap(
+                if (busy) "Sending…" else "Send task",
+                lit = !busy && task.isNotBlank() && target != null,
                 enabled = !busy && task.isNotBlank() && target != null,
                 onClick = {
-                    val bot = target ?: return@TextButton
+                    val bot = target ?: return@KeyCap
                     val text = task.trim()
                     busy = true
                     scope.launch {
@@ -108,7 +108,7 @@ fun GiveTaskSheet(
                         }
                     }
                 },
-            ) { Text(if (busy) "Sending…" else "Send task", style = Type.Callout.copy(color = if (!busy && task.isNotBlank()) Ink.Text else Ink.Text3)) }
+            )
         }
         Spacer(Modifier.height(8.dp))
     }

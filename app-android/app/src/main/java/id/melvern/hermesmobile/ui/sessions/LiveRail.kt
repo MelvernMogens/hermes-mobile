@@ -95,7 +95,7 @@ fun LiveRail(feeds: List<LiveFeed>, onOpen: (LiveFeed) -> Unit, onLongPress: (Li
             if (feeds.size > 2) {
                 // right-edge fade: the peek reads as "more monitors", not as overflow
                 Box(
-                    Modifier.align(Alignment.CenterEnd).width(28.dp).height(Dim.MonitorH)
+                    Modifier.align(Alignment.CenterEnd).width(48.dp).height(Dim.MonitorH)
                         .background(Brush.horizontalGradient(listOf(Ink.Bg.copy(alpha = 0f), Ink.Bg))),
                 )
             }
@@ -137,9 +137,9 @@ private fun Monitor(f: LiveFeed, modifier: Modifier, onLongClick: () -> Unit, on
             OneLine(f.title, Type.MonitorTitle)
             Spacer(Modifier.height(3.dp))
             Text(
-                f.text.ifBlank { if (wait) "Waiting for your answer" else toolRunningLabel(f.tool ?: "") .takeIf { f.tool != null } ?: "Working on it…" },
+                f.text.ifBlank { if (wait) "Waiting for your answer" else "Working on it…" },
                 style = Type.Meta.copy(color = if (f.text.isBlank()) Ink.Text3 else Ink.Text2),
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
         }

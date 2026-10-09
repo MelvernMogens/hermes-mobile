@@ -19,6 +19,9 @@ RESULT_MAX = 160
 # review fix: session tanpa ended_at yang masih aktif < 10 menit di profile yang prosesnya hidup = running
 # (bukan cuma session terbaru — dua bot-run paralel di satu profile).
 RECENT_SECS = 600
+# v28 fix: tugas yang jalan DI GATEWAY (Give task dari HP / chat bot di desktop) tidak punya proses
+# bot-run — status dari transcript: jawaban final = done; belum final & aktif < 30 menit = running.
+GATEWAY_RECENT_SECS = 1800
 _FAILED_END = re.compile(r"error|fail|crash|exception", re.I)
 
 
@@ -84,12 +87,17 @@ def _profile_tasks(profile: str, db: Path, limit: int, live_profile: bool | None
     try:
         active = mobile_insights._active_sql(con)
         has_tc = "tool_calls" in {r[1] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
+        # Tugas = session bot-run (source='tool') + session gateway di profile bot (Give task dari HP,
+        # chat bot di desktop) KECUALI Bot Chat permanen, subagent, dan chat kosong.
         rows = con.execute(
             "SELECT id, COALESCE(title,''), started_at, ended_at, COALESCE(message_count,0), "
-            "COALESCE(end_reason,'') FROM sessions WHERE source='tool' "
+            "COALESCE(end_reason,''), COALESCE(source,'') FROM sessions "
+            "WHERE (source='tool' OR (COALESCE(source,'') NOT IN ('subagent','cron') "
+            "AND COALESCE(title,'') != 'Bot Chat' AND COALESCE(message_count,0) > 0)) "
             "ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
         out = []
-        for i, (sid, title, started, ended, count, end_reason) in enumerate(rows):
+        tool_rank = 0
+        for (sid, title, started, ended, count, end_reason, source) in rows:
             last = con.execute(
                 "SELECT role, content, " + ("tool_calls" if has_tc else "NULL") +
                 " FROM messages WHERE session_id=? " + active +
@@ -105,8 +113,14 @@ def _profile_tasks(profile: str, db: Path, limit: int, live_profile: bool | None
                     "SELECT content FROM messages WHERE session_id=? AND role='user' " + active +
                     "ORDER BY id LIMIT 1", (sid,)).fetchone()
                 title = prose(first[0], 120) if first else ""
-            recent_open = ended is None and (last_at or started or 0) > now - RECENT_SECS
-            live = (live_profile is True and (i == 0 or recent_open)) or (live_profile is None and recent_open)
+            if source == "tool":
+                recent_open = ended is None and (last_at or started or 0) > now - RECENT_SECS
+                live = (live_profile is True and (tool_rank == 0 or recent_open)) or (live_profile is None and recent_open)
+                tool_rank += 1
+            else:
+                done_now = task_status(last[0] if last else None, last[1] if last else None, end_reason,
+                                       live=False, last_tool_calls=last[2] if last else None) == "done"
+                live = (not done_now) and ended is None and (last_at or started or 0) > now - GATEWAY_RECENT_SECS
             status = task_status(last[0] if last else None, last[1] if last else None, end_reason,
                                  live=live, last_tool_calls=last[2] if last else None)
             out.append({
@@ -114,6 +128,7 @@ def _profile_tasks(profile: str, db: Path, limit: int, live_profile: bool | None
                 "started_at": started, "ended_at": ended, "message_count": count,
                 "last_activity": last_at or started, "status": status,
                 "result": prose(ans[0]) if ans else "",
+                "via": "cli" if source == "tool" else "chat",
             })
         return out
     finally:

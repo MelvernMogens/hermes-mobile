@@ -4,6 +4,7 @@ import id.melvern.hermesmobile.core.store.SettingsStore
 import id.melvern.hermesmobile.core.store.ConnectionSettings
 import kotlinx.coroutines.launch
 import id.melvern.hermesmobile.ui.overview.LimitsScreen
+import id.melvern.hermesmobile.ui.overview.FilesScreen
 import id.melvern.hermesmobile.ui.overview.SettingsScreen
 import android.Manifest
 import android.content.pm.PackageManager
@@ -202,7 +203,7 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
                             }
                         })
                     },
-                    limits = { LimitsScreen(app) },
+                    limits = { LimitsScreen(app, onOpenFiles = { nav.navigate("files") }) },
                     settings = {
                         SettingsScreen(app, onSignOut = {
                             app.disconnect()
@@ -214,6 +215,14 @@ fun AppNav(app: HermesApp, notifOpenChat: String? = null) {
                             nav.navigate("connect") { popUpTo(0) }
                         })
                     },
+                )
+            }
+            // v28: clip bin — semua file dari semua chat/bot.
+            composable("files") {
+                FilesScreen(
+                    app,
+                    onBack = { nav.popBackStack() },
+                    onOpenChat = { arg: String -> nav.navigate("chat/$arg") },
                 )
             }
             // M13: artifacts per chat — parse client-side dari TranscriptCache.

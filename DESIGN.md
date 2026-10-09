@@ -1,127 +1,119 @@
-# Hermes Mobile — DESIGN.md ("Quiet Mono", M8)
+# Hermes Mobile — DESIGN.md ("Control Room", v28)
 
-Hitam-putih, tenang, rapi — WhatsApp/iMessage tapi lebih dewasa. Konten dulu,
-chrome hampir tak terlihat. Warna HANYA untuk makna (status), bukan hiasan.
-Rasa referensi: Linear mobile, iMessage dark, Things.
+The phone is the control room for a studio that never stops: every chat and
+bot is a live feed, status is a tally lamp, time is timecode. Black and white
+only; colour is reserved for status (and user-picked chat-group colours).
+Brightness = activity (dark-cockpit rule): idle things sit dim, live things
+are bright. One lit (white) key per screen at most.
 
-Sumber kebenaran kode: `app-android/app/src/main/java/id/melvern/hermesmobile/ui/theme/`
-(Color.kt `Ink`, Type.kt `Type`, Dimens.kt `Dim`/`Radius`/`hairline()`, Motion.kt `Motion`,
-Theme.kt ripple). **Nol hex / sp / dp ajaib di screen** — semua lewat token.
+Code source of truth: `app-android/app/src/main/java/id/melvern/hermesmobile/ui/theme/`
+(`Color.kt` Ink, `Type.kt` Type, `Dimens.kt` Dim/Radius/hairline, `Motion.kt`) and the
+atoms in `ui/components/ControlRoom.kt`. **No hex / sp / dp literals in screens** —
+everything goes through tokens. `Ink` surface colours are getters (Black / Graphite theme).
 
-## 1. Warna (`Ink`)
+## 1. Colour (`Ink`) — Black theme values (Graphite one step lighter)
 
-| Token | Hex | Pakai |
+| Token | Hex | Use |
 |---|---|---|
-| Bg | #0B0B0C | canvas, top bar, composer container |
-| Surface1 | #141416 | composer field, sheet, code block body, banner, card |
-| Surface2 | #1C1C1F | user bubble, pressed row, chip, inline code, scroll-to-bottom |
-| Surface3 | #26262A | code block header, field focus bg |
-| Hairline | #232326 | divider (1dp; 0.5dp kalau density ≥ 3) |
-| HairlineStrong | #3A3A3F | border field idle, garis blockquote, outline send redup |
-| Text | #F2F2F3 | primary (18.1:1 di Bg) |
-| Text2 | #A1A1A6 | secondary: meta, preview (7.65:1) |
-| Text3 | #808086 | tertiary: timestamp, placeholder (5.01:1 Bg / 4.69:1 Surface1) |
-| Accent | = Text | send aktif, tombol Connect |
-| OnAccent | = Bg | ikon/teks di atas fill putih |
-| Live | #34C759 | running / streaming / connected |
-| Warn | #FF9F0A | read-only, reconnecting |
-| Danger | #FF453A | error, delete |
-| Scrim | black 60% | di belakang semua sheet |
+| Bg | #000000 | canvas |
+| Surface1 | #0E0E10 | rack units, composer well, signal line |
+| Surface2 / Surface3 / Raised | #17171A / #212125 / #2A2A2F | bubbles, pressed, selected key face |
+| Frame | #1A1A1F | monitor body (bezel around screen + label strip) |
+| Glass / GlassSheen | #030304 / #0C0C0F | recessed monitor screen (vertical gradient) |
+| Bezel | #232327 | 1dp outline of monitors, rack units, strips |
+| KeyFace / KeyBezel | #151518 / #2F2F35 | key caps |
+| LampOff | #1E1E22 | unlit lamp slot, unlit meter cell |
+| Text / Text2 / Text3 / Text4 | #F5F5F4 / #9E9EA4 / #7C7C83 / #5E5E65 | primary → faintest |
+| Live | #3DD68C | running / on air |
+| Warn | #F5A524 | waiting for the user, connecting, stopped |
+| Danger | #F2555A | offline, failed, stop key square |
 
-- Text3 menyimpang dari brief (#6C6C72 = 3.77:1, fallback #7A7A80 = 4.31:1 di
-  Surface1 → dua-duanya gagal 4.5:1 untuk placeholder composer). #808086 lolos keduanya.
-- Semantik HANYA sebagai dot 8dp, ring 2dp avatar running, atau teks status kecil.
-  Tidak pernah fill besar. Tidak ada hijau-aksen, ungu, amber dekorasi.
+Colour appears ONLY as: a tally lamp, a status word next to its lamp, a monitor
+bezel for WAIT/FAULT, meter cells past 80% / 95%, the group colour exception.
 
-## 2. Tipografi (`Type`)
+## 2. Type (`Type`) — Geist + Geist Mono (OFL)
 
-Inter v4.1 (OFL, `docs/licenses/Inter-OFL.txt`) — Regular/Medium/SemiBold/Bold di `res/font`.
-JetBrains Mono HANYA untuk code, inline code, path. Semua sp (ikut font scale sistem).
+Display 30/36 SemiBold (screen titles) · Title 17/22 · RowTitle 16/22 Medium ·
+Body 15.5/24 · Callout 15/20 · Preview 14/19 · Meta 13/18 · Caption 12/16 ·
+Section 13/18 Medium (sentence case, never uppercase+tracking).
+Mono only for code and MEASUREMENTS: `Timecode` 12/16 Medium (H:MM:SS, always —
+reads as elapsed, never as a clock), `TimecodeLarge` 15/20, `Catalog` 11/14
+(slate labels, model tags), `Mono` 13/20 code.
+Control Room additions: `Key` 13/16 Medium (key legends), `RackLabel` 13/18
+SemiBold, `Umd` 12/16 Medium, `MonitorTitle` 14/18 SemiBold.
 
-| Style | Ukuran | Pakai |
-|---|---|---|
-| Display | 28/34 SemiBold, −0.4 | large title "Chats", judul Connect |
-| Title | 17/22 SemiBold, −0.2 | header chat, nama session, judul sheet, heading markdown |
-| Body | 16/24 Regular | prosa assistant, bubble user, input composer |
-| Callout | 15/20 Regular | preview baris 2, isi sheet, banner, card |
-| Meta | 13/18 Regular (MetaMedium) | model line, waktu list, label kecil, tool row |
-| Caption | 12/16 Medium | timestamp bubble, badge, day chip |
-| Button | 16 SemiBold | tombol solid Connect |
-| Mono | 13/19 | body code block |
-| MonoMeta | 12/16 | nama bahasa di header code block (lowercase) |
+## 3. Atoms (`ui/components/ControlRoom.kt`)
 
-**Aturan:** nol uppercase + letterSpacing lebar. Sentence case di semua UI copy (English).
+- **TallyLamp** — 11×5dp LED segment (corner 1.5dp). Unlit = dark slot with 1dp
+  KeyBezel outline; lit = status colour + soft radial bloom. LIVE breathes
+  (alpha, 1.2s) via a deferred read — redraws its layer, never recomposes. The
+  ONLY status atom app-wide (replaces dots/pills). Tally: OFF / LIVE / WAIT / FAULT / CUE (white = unread / selected).
+- **TallyLabel** — lamp + status word in the lamp colour; the word changes with a
+  split-flap drop (FlipText, 180ms).
+- **LiveTimecode** — ticks every second from a real start epoch; null start →
+  renders nothing (never a fake 0:00:00).
+- **SegmentMeter** — 24 cells, 2dp gaps, lit cells white, amber > 80%, red > 95%;
+  fill animates 450ms.
+- **KeyCap** — 36dp min height, radius 8, 1dp bezel. States: default (dim
+  legend), `selected` (raised face, bright bezel — filters/segments), `lit`
+  (white face, black legend — the ONE primary action), `armed` (amber bezel —
+  waiting for a confirm tap), disabled.
+- **MonitorTile** — Frame body (radius 12, 1dp bezel, 4dp inset) → recessed Glass
+  screen (radius 8, top-edge shadow, faint scanlines) → label strip (UMD) on the
+  frame: lamp · status word · timecode. Idle monitors dim to 55%.
+- **SignalLine** — full-width Surface1 strip under a top bar: lamp + plain words
+  + optional key word ("Retry", "Review", "Turn on"). Shown ONLY when something
+  needs attention (offline, connecting, requests waiting, notifications off).
+- **RackUnit** — full-width Surface1 panel, radius 12, 1dp bezel, label row
+  (RackLabel) with trailing readout. Replaces floating cards.
+- **LogHeader** — section label (Section, Text2) + mono count right beside it +
+  optional key action at the right.
 
-## 3. Ikon
+## 4. Screens
 
-`material-icons-extended`, **Icons.Rounded.\*** saja (+ `AutoMirrored.Rounded.ArrowBack`).
-Tidak ada emoji/unicode sebagai ikon. Standar 22dp (`Dim.Icon`) dalam target 48dp;
-16dp di baris tool/chevron model; 12dp status di bubble.
-attach = Add · send = ArrowUpward · stop = Stop · copy = ContentCopy → Check ·
-back = ArrowBack · model = ExpandMore · new chat = Edit · search = Search ·
-more = MoreVert · file = Description · image = Image · tool: Terminal / Search / Description / Build.
+- **Chats (rundown)** — top bar: profile avatar + name, search, new chat. Signal
+  line(s) under it when needed. Large title "Chats". **Live now**: one monitor
+  per chat/bot task working right now (1 = full width, 2 = pair, 3+ = scrolling
+  wall with a 48dp right fade); screen shows the chat name + latest words (or
+  "You: …" while the agent hasn't answered yet), strip shows lamp · current tool
+  verb (Running / Coding / Reading / Editing / Browsing / Looking / Delegating) ·
+  on-air timecode (from server `turn_at`). Live chats move to the stage while
+  they run and drop back into the list when done. Rundown rows: channel badge
+  (2-letter code, first+last word, squared tile 48dp; group colour when grouped)
+  · title (Pretty.preview-cleaned) + preview · right column: time in mono + lamp
+  (LIVE / WAIT / CUE=unread; nothing when idle). Sections: Pinned, groups, All
+  chats, Hidden — all LogHeaders with counts.
+- **Chat (program)** — header: avatar, title, status line = TallyLabel ("On air" /
+  "Waiting for you" / "Offline" / "Reconnecting…") + live timecode; idle shows the
+  model selector. Work runs as an as-run strip (lamp · tool icon · current action
+  · "N steps" mono · chevron). Day breaks = hairline · label · hairline.
+  Bubbles stay WhatsApp-like (user right, prose left); bubble times in mono.
+  Composer = console well (radius 14, 1dp bezel); send = square key lit white
+  when sendable; stop = key with a red square; mic = key.
+- **Agents (multiview)** — "Give task" = the lit key. Multiview wall 2-up: one
+  monitor per agent (avatar + model tag on screen, task or last task as body;
+  strip: lamp · name · timecode / Idle). Task log (as-run log): mono start time +
+  duration column, lamp, agent + status word, title, one-line result; tap opens
+  the task chat. Schedules (rack, lamps), Today readout, Usage.
+- **Mac (rack)** — header key "Files". Rack units: the Mac (Online lamp, mono
+  vitals line, action keys with armed-confirm), Web preview rows, Memory and
+  plan limits as segmented meters with mono %.
+- **Files (clip bin)** — selector keys (All / Images / Videos / Docs / Audio),
+  day-grouped grid of 116dp+ thumbnails (radius 8) with a slate band (kind code +
+  clock in Catalog mono); tap previews/saves, long-press → "Open the chat it came
+  from" / "Save to phone".
+- **Settings** — rack units per section; segments as selected keys; switches
+  with a LampOff track when off.
+- **Bottom bar** — hairline on top; the active tab lights an 18×3dp white
+  segment above its icon (bus key). Badge = live agents count.
 
-## 4. Radius & spacing
+## 5. Motion
 
-Grid 4dp. Margin layar 16dp. Radius: 6 inline code · 8 thumbnail · 10 chip/code block ·
-12 field + tombol Connect · 14 card approval · 18 bubble/composer (user: kanan-bawah 6) ·
-22 sheet atas · full avatar/send. Semua avatar lingkaran, ukuran per konteks:
-32 top bar · 44 row session · 40 sheet · 56 empty chat.
+Nav shared-axis 220ms; new message fade + 8dp rise 180ms; status word and
+timecode changes flip (180ms); meters fill 450ms; LIVE lamps breathe 1.2s.
+`ANIMATOR_DURATION_SCALE == 0` → all motion off (flip = instant, lamps steady).
 
-## 5. Komponen
+## 6. System chrome
 
-**Sessions ("Chats")** — top bar: avatar profil 32 + dot status (live/warn/danger) + nama profil
-meta; kanan Search (filter lokal inline) + Edit (new chat). Large title "Chats" collapse jadi
-title 17 di bar saat scroll; hairline muncul saat scroll. Subtitle hanya kalau ada masalah
-("Reconnecting…", "Offline — tap to retry"). Row min 72dp, padding 16h/12v: avatar 44
-(ring 2dp live saat running) · title 1 baris · preview 1 baris (kosong → "Desktop · 509 messages")
-· waktu relatif kanan atas (18:54 / Yesterday / Mon / 15 Sep) · "Running" live kanan bawah.
-Divider inset 72dp. Pressed = Surface2. Section "Hidden" (meta text2). Empty: ikon 48 +
-"No chats yet" + "Start one from the pencil icon". Loading: 3 skeleton row shimmer.
-Tidak ada FAB / tombol besar.
-
-**Chat** — top bar 56: back · avatar 32 · title + model line (ExpandMore → model sheet) atau
-"Working…" + dot live pulse 1.2s · MoreVert (rename/branch/hide/delete/copy id). Hairline
-hanya saat scroll. Read-only: strip 36dp Surface1, dot warn + "Open on desktop — view only" + "Retry".
-User bubble kanan max 80% Surface2, padding 12h/9v, timestamp caption di dalam; Queued = ikon
-Schedule + "Queued"; tidak ada centang. Assistant tanpa bubble, full width. Markdown: heading
-Title, list indent 20, link underline warna text (long-press copy), blockquote garis kiri 2dp
-HairlineStrong + text2, inline code mono 14 Surface2 radius 6. Code block: Surface1 radius 10
-border hairline, header 32 Surface3 (bahasa lowercase mono + Copy→Check 1.5s), body mono 13/19
-scroll horizontal. Tool: row 32dp ikon 16 + "Ran terminal"/"Read file" + chevron, expand → code
-block (args + output); berurutan → "Used N tools". Thinking: "Thinking…" shimmer → "Thought for Ns".
-Day chip "Today"/"Yesterday". Scroll-to-bottom 36dp Surface2 + badge, hanya saat > 1 layar di atas.
-Empty: avatar 56 + "Chat with default" + model line. Loading: 3 skeleton blok.
-
-**Composer** — container Bg + hairline atas, imePadding. Add 22 (target 44) → sheet Photo/File.
-Field Surface1 radius 18, min 44, maks 6 baris, placeholder "Message" / "Reply or queue a message".
-Tombol 36: kosong = outline redup; ada teks = putih + ArrowUpward hitam; running & kosong = Stop.
-Attachment chip: thumb 40 radius 8 / ikon file + nama + X.
-
-**Approval / clarify** — Surface1 radius 14 border hairline, judul Title, isi Callout, tombol
-teks kanan: "Deny" text2, "Allow" text SemiBold.
-
-**Sheets** — ModalBottomSheet: Surface1, atas 22, handle 32×4 Text3, scrim 60%.
-Profiles: row 64 avatar 40, nama Title, baris 2 model (meta), Check untuk aktif; "Show hidden
-chats" Switch (thumb putih, track putih 30%) di bawah dengan divider. Model: row + provider meta,
-Check aktif, footer "Model applies to new chats".
-
-**Connect** — terpusat optik, max 420. Logo 56 · "Connect to your Mac" (Display) · sub Callout
-text2. OutlinedTextField radius 12 label mengambang: Server address (auto `https://`), Username,
-Password (masked + Visibility). Border idle HairlineStrong, fokus Text 1.5dp. Tombol Connect
-50dp putih teks hitam (satu-satunya tombol solid); loading = spinner 18 hitam + "Connecting…"
-(tetap putih). Error Danger Callout di bawah: unreachable → "Can't reach your Mac. Check
-Tailscale is on (same account on both devices)."; 401 → "Wrong username or password.";
-lain → "Couldn't connect (HTTP 502). Is Hermes running on your Mac?". Tanpa footnote install.
-
-## 6. Motion (`Motion`)
-
-Satu keluarga, halus. Nav list→chat shared axis X: slide 24dp + fade, 220ms emphasized
-(back = kebalikan). Pesan baru: fade + translateY 8→0, 180ms; streaming = append tanpa animasi.
-Sheet = default M3. Ripple putih 8%. `ANIMATOR_DURATION_SCALE == 0` → semua motion mati
-(nav, pulse, shimmer, enter).
-
-## 7. System chrome
-
-`enableEdgeToEdge` (bar transparan, ikon terang). Splash (values-v31) bg #0B0B0C + logo
-foreground; < 31 windowBackground gelap. Adaptive icon background #0B0B0C.
+Edge-to-edge, light icons; splash + adaptive icon on #0B0B0C; themed-icon
+monochrome layer = the sheared H mark.

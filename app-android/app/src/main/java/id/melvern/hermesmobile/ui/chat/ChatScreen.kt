@@ -713,12 +713,21 @@ fun ChatScreen(
                 loading = false
             }
         } else null
-        val c = app.client ?: return@LaunchedEffect
+        val c = app.client ?: run { tailJob?.cancel(); tailOnly = false; return@LaunchedEffect }
         var waited = 0
         // v27: HP tanpa internet → jangan tunggu 25s, langsung salinan tersimpan
         val limit = if (id.melvern.hermesmobile.core.store.NetState.hasInternet(app)) 25000 else 1500
         while (c.state.value != ConnState.OPEN && waited < limit) { delay(250); waited += 250 }
         if (c.state.value != ConnState.OPEN) {
+            // review v28 P0: the tail fetch must not land after the offline copy is shown, and a
+            // tail that already landed is just a (fresh) offline copy — never leave tailOnly stuck
+            // (it gates the offline-queue flush).
+            tailJob?.cancel()
+            if (tailOnly) {
+                tailOnly = false
+                items = items + ChatItem.NoticeLine("Offline — showing the latest messages. The rest loads when you're back online.")
+                loading = false
+            }
             if (items.isEmpty()) {
                 // v27: offline → tampilkan salinan tersimpan (bisa dibaca + ketik; kirim masuk antrean)
                 val saved = id.melvern.hermesmobile.core.store.OfflineStore.loadChat(app, actualStoredId) { RelTime.clock(it) }
@@ -1067,9 +1076,7 @@ fun ChatScreen(
                         running -> {
                             id.melvern.hermesmobile.ui.components.TallyLabel(id.melvern.hermesmobile.ui.components.Tally.LIVE, "On air", style = Type.Meta)
                             Text(" · ", style = Type.Meta.copy(color = Ink.Text4))
-                            id.melvern.hermesmobile.ui.components.LiveTimecode(onAirSince, Type.Timecode.copy(color = Ink.Text))
-                            Text(" · " + Pretty.model(headerModel), style = Type.Meta.copy(color = Ink.Text3), maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            id.melvern.hermesmobile.ui.components.LiveTimecode(onAirSince, Type.Timecode.copy(color = Ink.Text2))
                         }
                         else -> {
                             OneLine(Pretty.model(headerModel).ifBlank { "Choose model" }, Type.Meta, Modifier.weight(1f, fill = false))
@@ -1239,10 +1246,10 @@ fun ChatScreen(
                     Box(
                         Modifier
                             .size(Dim.ScrollFab)
-                            .shadow(8.dp, Radius.Full, ambientColor = Ink.Bg, spotColor = Ink.Bg)
-                            .clip(Radius.Full)
-                            .background(Ink.Raised)
-                            .border(hairline(), Ink.HairlineStrong, Radius.Full)
+                            .shadow(8.dp, Radius.Key, ambientColor = Ink.Bg, spotColor = Ink.Bg)
+                            .clip(Radius.Key)
+                            .background(Ink.KeyFace)
+                            .border(1.dp, Ink.KeyBezel, Radius.Key)
                             .pressClickable {
                                 hasNew = false
                                 scope.launch { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }

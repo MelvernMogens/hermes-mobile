@@ -103,12 +103,24 @@ def _turn_info(con, sid: str, act: str) -> dict:
     """
     info: dict = {}
     has_fin = _has_col(con, "finish_reason")
-    stop = "OR (role = 'assistant' AND finish_reason = 'stop') " if has_fin else ""
     anchor = con.execute(
-        "SELECT id, role, timestamp FROM messages WHERE session_id = ? AND (role = 'user' " + stop + ") " + act +
+        "SELECT id, role, timestamp FROM messages WHERE session_id = ? AND (role = 'user' " +
+        ("OR (role = 'assistant' AND finish_reason = 'stop') " if has_fin else "") + ") " + act +
         "ORDER BY id DESC LIMIT 1",
         (sid,),
     ).fetchone()
+    # Old DB (no finish_reason): a finished answer can't be told from mid-turn prose, so a
+    # continuation turn after a days-old prompt would anchor on that prompt. Floor the turn
+    # start at the agent's newest prose row — worst case the timecode restarts at its last
+    # words, never a days-old prompt.
+    floor = None
+    if not has_fin:
+        p = con.execute(
+            "SELECT MAX(timestamp) FROM messages WHERE session_id = ? AND role = 'assistant' "
+            "AND content IS NOT NULL AND TRIM(content) != '' " + act,
+            (sid,),
+        ).fetchone()
+        floor = p[0] if p else None
     if anchor:
         nxt = con.execute(
             "SELECT timestamp FROM messages WHERE session_id = ? AND id > ? " + act + "ORDER BY id LIMIT 1",
@@ -118,6 +130,8 @@ def _turn_info(con, sid: str, act: str) -> dict:
             info["turn_at"] = nxt[0]
         elif anchor[1] == "user":
             info["turn_at"] = anchor[2]
+        if floor is not None and info.get("turn_at") is not None and floor > info["turn_at"]:
+            info["turn_at"] = floor
         if _has_col(con, "tool_name"):
             t = con.execute(
                 "SELECT tool_name FROM messages WHERE session_id = ? AND id > ? AND role = 'tool' "

@@ -84,3 +84,41 @@ class Tasks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GatewayTasks(unittest.TestCase):
+    """v28 fix: Give task from the phone runs IN the gateway (source='desktop'), not as a bot-run CLI —
+    it must still show in the task log, and finish → done so the phone can notify."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self.qa = make_db(self.home, "qa")
+        now = 10_000.0
+        self.now = now
+        session(self.qa, "g_done", source="desktop", title="v28 task notif test", started=now - 60, count=2)
+        msg(self.qa, "g_done", "user", "Reply exactly OK", now - 60)
+        msg(self.qa, "g_done", "assistant", "OK", now - 55)
+        session(self.qa, "g_run", source="desktop", title="long task", started=now - 120, count=2)
+        msg(self.qa, "g_run", "user", "do the long thing", now - 120)
+        msg(self.qa, "g_run", "tool", "{}", now - 30)
+        session(self.qa, "bc", source="desktop", title="Bot Chat", started=now - 500, count=5)
+        msg(self.qa, "bc", "user", "hi", now - 500)
+        session(self.qa, "empty", source="desktop", title="", started=now - 10, count=0)
+        session(self.qa, "sub", source="subagent", title="child", started=now - 10, count=3)
+        msg(self.qa, "sub", "assistant", "child answer", now - 9)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_gateway_task_done_and_running_and_exclusions(self):
+        tasks = {t["id"]: t for t in mt.list_tasks(home=self.home, running=set(), now=self.now)}
+        self.assertEqual(tasks["g_done"]["status"], "done")
+        self.assertEqual(tasks["g_done"]["via"], "chat")
+        self.assertEqual(tasks["g_run"]["status"], "running")
+        for gone in ("bc", "empty", "sub"):
+            self.assertNotIn(gone, tasks)
+
+    def test_stale_unfinished_gateway_task_is_stopped_not_running(self):
+        tasks = {t["id"]: t for t in mt.list_tasks(home=self.home, running=set(), now=self.now + 3 * 3600)}
+        self.assertEqual(tasks["g_run"]["status"], "stopped")
+

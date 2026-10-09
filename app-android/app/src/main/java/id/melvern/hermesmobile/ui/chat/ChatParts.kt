@@ -432,12 +432,12 @@ private fun toolLook(name: String): ToolLook {
             ToolLook(Icons.Outlined.Hub, "Ran subagents", "Running subagents")
         "execute_code" in n || n == "python" ->
             ToolLook(Icons.Outlined.Code, "Ran code", "Running code")
-        listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } ->
-            ToolLook(Icons.Outlined.Terminal, "Ran terminal", "Running terminal")
-        listOf("search", "grep", "find").any { it in n } && "web" !in n ->
-            ToolLook(Icons.Outlined.Search, "Searched files", "Searching files")
         "web" in n || "browser" in n || "fetch" in n || "http" in n ->
             ToolLook(Icons.Outlined.Language, "Browsed the web", "Browsing the web")
+        listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } ->
+            ToolLook(Icons.Outlined.Terminal, "Ran terminal", "Running terminal")
+        listOf("search", "grep", "find").any { it in n } ->
+            ToolLook(Icons.Outlined.Search, "Searched files", "Searching files")
         listOf("write", "patch", "edit", "replace").any { it in n } ->
             ToolLook(Icons.Outlined.Edit, "Edited file", "Editing file")
         listOf("read", "file", "cat", "view").any { it in n } ->
@@ -458,8 +458,8 @@ fun toolShort(name: String): String {
         "vision" in n || "image" in n -> "Looking"
         "delegate" in n || "subagent" in n -> "Delegating"
         "execute_code" in n -> "Coding"
-        listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } -> "Running"
         "web" in n || "browser" in n || "fetch" in n || "http" in n -> "Browsing"
+        listOf("terminal", "shell", "bash", "exec", "command", "process").any { it in n } -> "Running"
         listOf("write", "patch", "edit", "replace").any { it in n } -> "Editing"
         listOf("search", "grep", "find").any { it in n } -> "Searching"
         listOf("read", "file", "cat", "view").any { it in n } -> "Reading"

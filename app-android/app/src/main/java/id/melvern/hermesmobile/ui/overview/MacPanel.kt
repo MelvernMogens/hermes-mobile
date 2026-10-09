@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Coffee
 import androidx.compose.material.icons.outlined.DesktopAccessDisabled
@@ -41,6 +42,7 @@ import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.repo.LimitsRepo
 import id.melvern.hermesmobile.core.repo.MacRepo
 import id.melvern.hermesmobile.ui.components.StatusDot
+import id.melvern.hermesmobile.ui.components.KeyCap
 import id.melvern.hermesmobile.ui.theme.Ink
 import id.melvern.hermesmobile.ui.theme.Radius
 import id.melvern.hermesmobile.ui.theme.Type
@@ -85,30 +87,25 @@ fun MacPanel(app: HermesApp, onPreview: (url: String, title: String) -> Unit) {
         }
     }
 
-    Column(
-        Modifier.fillMaxWidth().clip(Radius.Card).background(Ink.Surface1).padding(horizontal = 16.dp, vertical = 14.dp),
-    ) {
-        val s = status
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(s?.host ?: "Your Mac", style = Type.Callout.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f),
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (s != null) {
-                StatusDot(Ink.Live)
-                Spacer(Modifier.width(6.dp))
-                Text("Online", style = Type.Caption.copy(color = Ink.Text2))
-            }
-        }
+    val s = status
+    id.melvern.hermesmobile.ui.components.RackUnit(s?.host ?: "Your Mac", trailing = {
+        if (s != null) id.melvern.hermesmobile.ui.components.TallyLabel(id.melvern.hermesmobile.ui.components.Tally.LIVE, "Online")
+        else id.melvern.hermesmobile.ui.components.TallyLabel(id.melvern.hermesmobile.ui.components.Tally.OFF, "Checking…")
+    }) {
         if (s != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                listOfNotNull(
-                    s.batteryPct?.let { "Battery $it%" + if (s.onAc) " · plugged in" else "" },
-                    s.load1?.let { "CPU ${((it / s.cpus) * 100).toInt().coerceAtMost(999)}%" },
-                    "Disk ${LimitsRepo.gb(s.diskFree)} free",
-                    s.uptimeDays?.let { "Up ${it.toInt()}d" },
-                ).joinToString(" · "),
-                style = Type.Caption.copy(color = Ink.Text3),
-            )
+            // vitals as a readout row: label over mono value, four equal columns
+            Row(Modifier.fillMaxWidth()) {
+                @Composable fun Readout(label: String, value: String) {
+                    Column(Modifier.weight(1f)) {
+                        Text(label, style = Type.Caption.copy(color = Ink.Text3))
+                        Text(value, style = Type.TimecodeLarge.copy(color = Ink.Text))
+                    }
+                }
+                Readout(if (s.onAc) "Battery · AC" else "Battery", s.batteryPct?.let { "$it%" } ?: "—")
+                Readout("CPU", s.load1?.let { "${((it / s.cpus) * 100).toInt().coerceAtMost(999)}%" } ?: "—")
+                Readout("Disk free", LimitsRepo.gb(s.diskFree))
+                Readout("Uptime", s.uptimeDays?.let { "${it.toInt()}d" } ?: "—")
+            }
             val down = s.services.filterNot { it.running }
             if (down.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -121,15 +118,15 @@ fun MacPanel(app: HermesApp, onPreview: (url: String, title: String) -> Unit) {
         Spacer(Modifier.height(12.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val awake = s?.keepAwake == true
-            Action(if (awake) "Awake · on" else "Keep awake", Icons.Outlined.Coffee, selected = awake) {
+            KeyCap(if (awake) "Awake · on" else "Keep awake", icon = Icons.Outlined.Coffee, lit = awake) {
                 act("awake", "keep_awake", if (awake) "off" else "on")
             }
-            Action(if (armed == "lock") "Confirm lock" else "Lock screen", Icons.Outlined.Lock) { act("lock", "lock", confirm = true) }
-            Action("Display off", Icons.Outlined.DesktopAccessDisabled) { act("disp", "display_sleep") }
+            KeyCap(if (armed == "lock") "Tap to lock" else "Lock screen", icon = Icons.Outlined.Lock, armed = armed == "lock") { act("lock", "lock", confirm = true) }
+            KeyCap("Display off", icon = Icons.Outlined.DesktopAccessDisabled) { act("disp", "display_sleep") }
             s?.botTabs?.takeIf { it > 1 }?.let { n ->
-                Action("Close $n bot tabs", Icons.Outlined.Tab) { act("tabs", "close_bot_tabs") }
+                KeyCap("Close $n bot tabs", icon = Icons.Outlined.Tab) { act("tabs", "close_bot_tabs") }
             }
-            Action(if (armed == "rs") "Confirm restart" else "Restart server", Icons.Outlined.RestartAlt) {
+            KeyCap(if (armed == "rs") "Tap to restart" else "Restart server", icon = Icons.Outlined.RestartAlt, armed = armed == "rs") {
                 act("rs", "restart_service", "com.hermes.mobile-serve", confirm = true)
             }
         }
@@ -141,7 +138,7 @@ fun MacPanel(app: HermesApp, onPreview: (url: String, title: String) -> Unit) {
         val p = ports
         if (p != null && p.first.any { it.html }) {
             Spacer(Modifier.height(14.dp))
-            Text("WEB PREVIEW", style = Type.Caption.copy(color = Ink.Text3, fontWeight = FontWeight.Medium))
+            Text("Web preview", style = Type.Section.copy(color = Ink.Text2))
             Spacer(Modifier.height(4.dp))
             p.first.filter { it.html }.forEach { port ->
                 Row(
@@ -160,7 +157,7 @@ fun MacPanel(app: HermesApp, onPreview: (url: String, title: String) -> Unit) {
                         Text(port.title.ifBlank { "Untitled page" }, style = Type.Callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("localhost:${port.port} · ${port.process}", style = Type.Caption.copy(color = Ink.Text3))
                     }
-                    Text("Open", style = Type.Caption.copy(color = Ink.Text2))
+                    Icon(androidx.compose.material.icons.Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Open", tint = Ink.Text3, modifier = Modifier.size(16.dp))
                 }
             }
         }

@@ -133,7 +133,7 @@ fun TallyLamp(
                 .graphicsLayer { alpha = if (lit) (0.6f + 0.4f * (breathe?.value ?: 1f)) else 1f }
                 .clip(Radius.Led)
                 .background(if (lit) c else Ink.LampOff)
-                .then(if (!lit) Modifier.border(hairline(), Ink.Hairline, Radius.Led) else Modifier),
+                .then(if (!lit) Modifier.border(1.dp, Ink.KeyBezel, Radius.Led) else Modifier),
         )
     }
 }
@@ -269,21 +269,24 @@ fun KeyCap(
     lit: Boolean = false,
     armed: Boolean = false,
     enabled: Boolean = true,
+    /** Selector key that is ON (filter/segment): raised face + bright bezel, NOT the white lit fill. */
+    selected: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val face = if (lit) Ink.Text else Ink.KeyFace
+    val face = when { lit -> Ink.Text; selected -> Ink.Raised; else -> Ink.KeyFace }
     val legend = when {
         !enabled -> Ink.Text4
         lit -> Ink.OnAccent
         armed -> Ink.Warn
-        else -> Ink.Text
+        selected -> Ink.Text
+        else -> Ink.Text2
     }
     Row(
         modifier
             .heightIn(min = Dim.KeyH)
             .clip(Radius.Key)
             .background(face)
-            .border(hairline().coerceAtLeast(1.dp), if (armed) Ink.Warn else if (lit) Ink.Text else Ink.KeyBezel, Radius.Key)
+            .border(1.dp, when { armed -> Ink.Warn; lit -> Ink.Text; selected -> Ink.Text2; else -> Ink.KeyBezel }, Radius.Key)
             .pressClickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -336,7 +339,7 @@ fun MonitorTile(
                 .background(Brush.verticalGradient(listOf(Ink.GlassSheen, Ink.Glass)))
                 .scanlines()
                 .recess()
-                .graphicsLayer { alpha = if (dim) 0.55f else 1f }
+                .graphicsLayer { alpha = if (dim) 0.72f else 1f }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             content = screen,
         )
@@ -419,8 +422,6 @@ fun RackUnit(
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            RackScrews()
-            Spacer(Modifier.width(8.dp))
             Text(title, style = Type.RackLabel, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             trailing?.invoke()
         }

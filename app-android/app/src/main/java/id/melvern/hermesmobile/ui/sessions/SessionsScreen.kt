@@ -294,8 +294,12 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                 val l = lastMsgs[s.id]
                 LiveFeed(
                     key = "c-" + s.id,
-                    title = s.displayTitle,
-                    text = if (l != null && l.role == "assistant") Pretty.preview(l.text) else "",
+                    title = Pretty.preview(s.displayTitle).ifBlank { s.displayTitle },
+                    text = when {
+                        l == null -> ""
+                        l.role == "assistant" -> Pretty.preview(l.text)
+                        else -> "You: " + Pretty.preview(l.text)
+                    },
                     startAt = l?.turnAt,
                     tally = if (s.id in waitingKeys) Tally.WAIT else Tally.LIVE,
                     arg = "${s.id}|t=${Uri.encode(s.displayTitle)}",
@@ -303,7 +307,10 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                     sessionId = s.id,
                 )
             }
-        val botFeeds = fleet.orEmpty().filter { it.status == id.melvern.hermesmobile.core.repo.BotStatus.RUNNING && it.task != null && it.name != profile }
+        val botFeeds = fleet.orEmpty().filter {
+            it.status == id.melvern.hermesmobile.core.repo.BotStatus.RUNNING && it.task != null && it.name != profile &&
+                (it.taskSessionId != null || it.botChatStoredId != null)   // nothing to open yet → no monitor
+        }
             .map { b ->
                 val task = b.task.orEmpty()
                 LiveFeed(
@@ -311,7 +318,7 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
                     title = Pretty.profile(b.label),
                     text = task,
                     startAt = b.taskSecs?.let { System.currentTimeMillis() / 1000.0 - it },
-                    tally = Tally.LIVE,
+                    tally = if (b.taskSessionId != null && b.taskSessionId in waitingKeys) Tally.WAIT else Tally.LIVE,
                     arg = (b.taskSessionId?.let { "$it|t=${Uri.encode(task)}" } ?: "${b.botChatStoredId}|t=${Uri.encode("Bot Chat")}") +
                         (if (b.isDefault) "" else "|p=${b.name}"),
                     source = "Bot task",
@@ -738,7 +745,7 @@ private fun SessionRowView(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OneLine(
-                        s.displayTitle,
+                        Pretty.preview(s.displayTitle).ifBlank { s.displayTitle },
                         if (unread) Type.RowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) else Type.RowTitle,
                         Modifier.weight(1f, fill = false),
                     )

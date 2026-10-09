@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.outlined.PermMedia
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.repo.LimitsRepo
 import id.melvern.hermesmobile.ui.theme.Dim
@@ -50,7 +51,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LimitsScreen(app: HermesApp) {
+fun LimitsScreen(app: HermesApp, onOpenFiles: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var data by remember { mutableStateOf<LimitsRepo.Limits?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -80,8 +81,14 @@ fun LimitsScreen(app: HermesApp) {
         modifier = Modifier.fillMaxSize().background(Ink.Bg),
     ) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Text("Mac", style = Type.Display,
-                modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(top = 6.dp, bottom = 4.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(start = Dim.ScreenH, end = Dim.ScreenH).padding(top = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Mac", style = Type.Display, modifier = Modifier.weight(1f))
+                id.melvern.hermesmobile.ui.components.KeyCap("Files", icon = androidx.compose.material.icons.Icons.Outlined.PermMedia, onClick = onOpenFiles)
+            }
+            Box(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Column(
                     Modifier.weight(1f, fill = false).widthIn(max = 640.dp)
@@ -105,6 +112,9 @@ fun LimitsScreen(app: HermesApp) {
                     }
                 }
             }
+            Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(16.dp)
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Ink.Bg, Ink.Bg.copy(alpha = 0f)))))
+            }
         }
     }
     preview?.let { (url, t) ->
@@ -116,32 +126,26 @@ fun LimitsScreen(app: HermesApp) {
 }
 
 @Composable
-private fun Card(content: @Composable () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clip(Radius.Card).background(Ink.Surface1)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-    ) { content() }
-}
-
-@Composable
 private fun RamCard(r: LimitsRepo.Ram) {
-    Card {
-        CardTitle("Mac memory", null)
-        Spacer(Modifier.height(12.dp))
+    id.melvern.hermesmobile.ui.components.RackUnit("Memory", trailing = {
+        Text("${Math.round(r.usedPercent)}%", style = Type.Timecode.copy(color = levelColor(r.usedPercent)))
+    }) {
         Meter(
             label = "${LimitsRepo.gb(r.usedBytes)} of ${LimitsRepo.gb(r.totalBytes)}",
             percent = r.usedPercent,
             sub = r.swapUsedBytes?.takeIf { it > 256L * 1024 * 1024 }?.let { "Swap ${LimitsRepo.gb(it)}" },
+            showPct = false,
         )
     }
 }
 
 @Composable
 private fun PlanCard(p: LimitsRepo.Plan, now: Long) {
-    Card {
-        CardTitle(p.label, p.plan)
-        p.windows.forEach { w ->
-            Spacer(Modifier.height(12.dp))
+    id.melvern.hermesmobile.ui.components.RackUnit(p.label, trailing = {
+        p.plan?.let { Text(it, style = Type.Catalog.copy(color = Ink.Text2)) }
+    }) {
+        p.windows.forEachIndexed { i, w ->
+            if (i > 0) Spacer(Modifier.height(12.dp))
             Meter(label = windowLabel(w.label), percent = w.usedPercent, sub = LimitsRepo.resetIn(w.resetsAtEpochMs, now))
         }
         p.note?.let {
@@ -153,37 +157,23 @@ private fun PlanCard(p: LimitsRepo.Plan, now: Long) {
     }
 }
 
-@Composable
-private fun CardTitle(title: String, badge: String?) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = Type.Callout.copy(fontWeight = FontWeight.SemiBold))
-        badge?.let {
-            Spacer(Modifier.padding(start = 8.dp))
-            Text(it, style = Type.Caption.copy(color = Ink.Text2),
-                modifier = Modifier.clip(Radius.Full).background(Ink.Surface3).padding(horizontal = 8.dp, vertical = 2.dp))
-        }
-    }
+private fun levelColor(pct: Double) = when {
+    pct >= 95 -> Ink.Danger
+    pct >= 80 -> Ink.Warn
+    else -> Ink.Text
 }
 
-/** Baris: label kiri, % kanan, bar 6dp, keterangan reset di bawah. */
+/** Label left, % right (mono), segmented level meter, reset/sub line under. */
 @Composable
-private fun Meter(label: String, percent: Double, sub: String?) {
+private fun Meter(label: String, percent: Double, sub: String?, showPct: Boolean = true) {
     val pct = percent.coerceIn(0.0, 100.0)
-    val color = when {
-        pct >= 95 -> Ink.Danger
-        pct >= 80 -> Ink.Warn
-        else -> Ink.Text
-    }
-    val anim by animateFloatAsState((pct / 100.0).toFloat(), tween(500), label = "meter")
     Column {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(label, style = Type.Callout.copy(color = Ink.Text2), modifier = Modifier.weight(1f))
-            Text("${Math.round(pct)}%", style = Type.Callout.copy(color = if (pct >= 80) color else Ink.Text, fontWeight = FontWeight.SemiBold))
+            if (showPct) Text("${Math.round(pct)}%", style = Type.Timecode.copy(color = levelColor(pct)))
         }
         Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(6.dp).clip(Radius.Full).background(Color(0xFF34343A))) {
-            Box(Modifier.fillMaxWidth(anim.coerceAtLeast(if (pct > 0) 0.01f else 0f)).height(6.dp).clip(Radius.Full).background(color))
-        }
+        id.melvern.hermesmobile.ui.components.SegmentMeter((pct / 100.0).toFloat())
         sub?.let {
             Spacer(Modifier.height(6.dp))
             Text(it, style = Type.Caption.copy(color = Ink.Text3))
@@ -193,7 +183,7 @@ private fun Meter(label: String, percent: Double, sub: String?) {
 
 @Composable
 private fun SkeletonCard() {
-    Box(Modifier.fillMaxWidth().height(112.dp).clip(Radius.Card).background(Ink.Surface1))
+    Box(Modifier.fillMaxWidth().height(112.dp).clip(Radius.Rack).background(Ink.Surface1))
 }
 
 /** Label jendela seragam antar provider: Session / Week (+ varian model). */

@@ -76,6 +76,15 @@ class LastMessages(unittest.TestCase):
         self.assertEqual(got["s4"]["turn_at"], 90_000)
         self.assertEqual(got["s4"]["tool"], "terminal")
 
+    def test_old_db_without_finish_reason_never_reports_stale_prompt(self):
+        # continuation turn on an old DB: last user row is days old, agent spoke 30s ago
+        self._msg("s6", "user", "ancient prompt", 100)
+        self._msg("s6", "assistant", "answered days ago", 110)
+        self._msg("s6", "assistant", "continuing the goal", 500_000)
+        self._msg("s6", "tool", "{}", 500_010)
+        got = mi.last_messages(self.db, ["s6"])
+        self.assertGreaterEqual(got["s6"]["turn_at"], 500_000)
+
     def test_just_submitted_turn_uses_user_row(self):
         self._msg("s5", "assistant", "previous", 5)
         self._msg("s5", "user", "new prompt", 50)

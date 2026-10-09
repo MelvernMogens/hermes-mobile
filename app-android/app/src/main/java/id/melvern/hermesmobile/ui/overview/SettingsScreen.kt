@@ -1,6 +1,7 @@
 package id.melvern.hermesmobile.ui.overview
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -133,9 +134,17 @@ fun SettingsScreen(app: HermesApp, onSignOut: () -> Unit) {
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Text(title.uppercase(), style = Type.Caption.copy(color = Ink.Text3, fontWeight = FontWeight.Medium),
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp))
-    Column(Modifier.fillMaxWidth().clip(Radius.Card).background(Ink.Surface1)) { content() }
+    // v28: settings panel = a rack unit (bezel + screw mark + sentence-case label)
+    Spacer(Modifier.height(12.dp))
+    Column(
+        Modifier.fillMaxWidth().clip(Radius.Rack).background(Ink.Surface1)
+            .border(1.dp, Ink.Bezel, Radius.Rack),
+    ) {
+        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = Type.RackLabel.copy(color = Ink.Text2))
+        }
+        content()
+    }
 }
 
 @Composable
@@ -163,7 +172,7 @@ private fun Toggle(title: String, sub: String?, value: Boolean, onChange: (Boole
             checked = value, onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Ink.Bg, checkedTrackColor = Ink.Text, checkedBorderColor = Ink.Text,
-                uncheckedThumbColor = Ink.Text3, uncheckedTrackColor = Ink.Surface3, uncheckedBorderColor = Ink.HairlineStrong,
+                uncheckedThumbColor = Ink.Text2, uncheckedTrackColor = Ink.LampOff, uncheckedBorderColor = Ink.KeyBezel,
             ),
         )
     }
@@ -174,17 +183,9 @@ private fun <T> Segmented(title: String, options: List<T>, selected: T, label: (
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(title, style = Type.Callout)
         Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().clip(Radius.Chip).background(Ink.Surface3).padding(3.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
             options.forEach { o ->
-                val on = o == selected
-                Text(
-                    label(o),
-                    style = Type.Callout.copy(color = if (on) Ink.Bg else Ink.Text2,
-                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.weight(1f).clip(Radius.Chip).background(if (on) Ink.Text else Ink.Transparent)
-                        .pressClickable { onPick(o) }.padding(vertical = 8.dp),
-                )
+                id.melvern.hermesmobile.ui.components.KeyCap(label(o), selected = o == selected, modifier = Modifier.weight(1f)) { onPick(o) }
             }
         }
     }

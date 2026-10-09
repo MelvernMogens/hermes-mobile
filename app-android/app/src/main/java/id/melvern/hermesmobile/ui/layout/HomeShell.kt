@@ -104,6 +104,7 @@ private fun BottomBar(tab: Int, onTab: (Int) -> Unit, running: Int) {
     // Surface terangkat (bukan hitam + garis) — konten scroll di belakangnya
     // kebaca sebagai lapisan, bukan dipotong.
     Column(Modifier.fillMaxWidth().background(Ink.Bg).navigationBarsPadding()) {
+        Hairline()
         Row(Modifier.fillMaxWidth().height(Dim.NavBar).padding(horizontal = 8.dp)) {
             TabItem(Icons.Rounded.ChatBubble, Icons.Outlined.ChatBubbleOutline, "Chats", selected = tab == HomeTabs.CHATS,
                 badge = null, modifier = Modifier.weight(1f).fillMaxHeight()) { onTab(HomeTabs.CHATS) }
@@ -154,8 +155,9 @@ private fun TabItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    // v28: a selector key — the active tab lights a white segment above its icon (like a lit bus key)
     val tint by animateColorAsState(if (selected) Ink.Text else Ink.Text3, tween(Motion.NavMs), label = "tabTint")
-    val pill by animateColorAsState(if (selected) Ink.Surface3 else Ink.Transparent, tween(Motion.NavMs), label = "tabPill")
+    val lamp by animateColorAsState(if (selected) Ink.Text else Ink.Transparent, tween(Motion.NavMs), label = "tabLamp")
     Column(
         modifier.clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick,
@@ -163,14 +165,13 @@ private fun TabItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Box(
-            Modifier.size(width = 56.dp, height = 30.dp).clip(Radius.Full).background(pill),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(if (selected) iconOn else iconOff, label, tint = tint, modifier = Modifier.size(20.dp))
-            if (badge != null && badge > 0) CountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-8).dp, y = 1.dp))
+        Box(Modifier.size(width = 18.dp, height = 3.dp).clip(Radius.Led).background(lamp))
+        Spacer(Modifier.height(7.dp))
+        Box(Modifier.size(width = 56.dp, height = 24.dp), contentAlignment = Alignment.Center) {
+            Icon(if (selected) iconOn else iconOff, label, tint = tint, modifier = Modifier.size(21.dp))
+            if (badge != null && badge > 0) CountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-8).dp, y = (-2).dp))
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(3.dp))
         Text(label, style = Type.Caption.copy(color = tint))
     }
 }

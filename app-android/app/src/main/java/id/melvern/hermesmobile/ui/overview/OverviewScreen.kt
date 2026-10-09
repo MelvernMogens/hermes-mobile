@@ -105,6 +105,9 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
     var userPull by remember { mutableStateOf(false) }
     var actionBot by remember { mutableStateOf<BotCard?>(null) }
     var taskFor by remember { mutableStateOf<TaskTarget?>(null) }
+    // v28: as-run log — every task given to a bot, newest first (from /api/mobile-tasks)
+    var tasks by remember { mutableStateOf<List<id.melvern.hermesmobile.core.repo.BotTask>?>(null) }
+    var showAllTasks by remember { mutableStateOf(false) }
     val connState by app.client?.state?.collectAsState()
         ?: remember { mutableStateOf(ConnState.CLOSED) }
 
@@ -118,6 +121,7 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
             try { usage = OverviewRepo(c).usage() } catch (_: Throwable) { usage = UsageUi.UNAVAILABLE }
             app.connection?.let { conn ->
                 id.melvern.hermesmobile.core.repo.InsightsRepo(conn).usage(app.profile.value)?.let { tokens = it }
+                id.melvern.hermesmobile.core.repo.TasksRepo(conn).list(60)?.let { tasks = it }
             }
             usageLoaded = true
             refreshing = false
@@ -164,13 +168,17 @@ fun OverviewScreen(app: HermesApp, onOpenChat: (arg: String) -> Unit) {
                 when (val b = bots) {
                     null -> Column { repeat(5) { SkeletonSessionRow(shimmerAlpha()) } }
                     else -> {
-                        SummaryStrip(b, tokens)
-                        BotsSection(app, b, onOpen = { openBotChat(it) }, onLongPress = { actionBot = it })
+                        MultiviewWall(app, b, tasks, onOpen = { openBotChat(it) }, onLongPress = { actionBot = it })
+                        AsRunLog(tasks, showAll = showAllTasks, onToggleAll = { showAllTasks = !showAllTasks },
+                            onOpen = { t -> onOpenChat(t.chatRoute) })
                         SchedulesSection(app)
                     }
                 }
             }
-            val usageBlock: @Composable () -> Unit = { UsageSection(usage, usageLoaded, tokens) }
+            val usageBlock: @Composable () -> Unit = {
+                bots?.let { SummaryStrip(it, tokens) }
+                UsageSection(usage, usageLoaded, tokens)
+            }
             val winSize = currentWinSize()
             if (winSize.isExpanded) {
                 Row(
@@ -226,14 +234,9 @@ private fun OverviewHeader(onGiveTask: (() -> Unit)? = null) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Agents", style = Type.Display, modifier = Modifier.weight(1f))
-        // v27: kasih tugas ke bot — aksi teks kecil, bukan tombol besar
-        if (onGiveTask != null) Text(
-            "Give task",
-            style = Type.Callout.copy(color = Ink.Text),
-            modifier = Modifier
-                .clip(Radius.Chip)
-                .pressClickable(onClick = onGiveTask)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+        // v28: the screen's one lit key
+        if (onGiveTask != null) id.melvern.hermesmobile.ui.components.KeyCap(
+            "Give task", icon = Icons.Outlined.AssignmentTurnedIn, lit = true, onClick = onGiveTask,
         )
     }
 }
@@ -242,29 +245,21 @@ private fun OverviewHeader(onGiveTask: (() -> Unit)? = null) {
 @Composable
 private fun SummaryStrip(bots: List<BotCard>, tokens: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage?) {
     val c = id.melvern.hermesmobile.core.repo.InsightsRepo
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = Dim.GroupInset).padding(top = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Stat("Tokens today", tokens?.let { c.compact(it.todayTokens) } ?: "—", modifier = Modifier.weight(1f))
-        Stat("Tokens 30d", tokens?.let { c.compact(it.totalTokens) } ?: "—", modifier = Modifier.weight(1f))
-        Stat("Chats 30d", tokens?.totalSessions?.toString() ?: "—", modifier = Modifier.weight(1f))
+    Spacer(Modifier.height(16.dp))
+    id.melvern.hermesmobile.ui.components.RackUnit("Today", Modifier.padding(horizontal = Dim.ScreenH)) {
+        Row(Modifier.fillMaxWidth()) {
+            Stat("Tokens today", tokens?.let { c.compact(it.todayTokens) } ?: "—", modifier = Modifier.weight(1f))
+            Stat("Agents live", bots.count { it.status == BotStatus.RUNNING }.toString(), modifier = Modifier.weight(1f),
+                live = bots.any { it.status == BotStatus.RUNNING })
+        }
     }
 }
 
 @Composable
 private fun Stat(label: String, value: String, modifier: Modifier = Modifier, live: Boolean = false, unit: String? = null) {
-    Column(
-        modifier
-            .clip(Radius.Card)
-            .background(Ink.Surface1)
-            .padding(horizontal = Dim.GroupPadH + 4.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (live) { PulsingDot(Ink.Live, size = 6.dp); Spacer(Modifier.width(6.dp)) }
-            Text(label, style = Type.Caption.copy(color = if (live) Ink.Live else Ink.Text3))
-        }
-        Spacer(Modifier.height(6.dp))
+    Column(modifier.padding(vertical = 4.dp)) {
+        Text(label, style = Type.Caption.copy(color = if (live) Ink.Live else Ink.Text3))
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(value, style = Type.Figure)
             if (unit != null) Text(" $unit", style = Type.MonoMeta.copy(color = Ink.Text4), modifier = Modifier.padding(bottom = 4.dp))
@@ -361,7 +356,7 @@ private fun UsageSection(usage: UsageUi?, loaded: Boolean, tokens: id.melvern.he
                 UsageCard(usage)
             }
             tokens != null && tokens.providers.isNotEmpty() -> {
-                SectionHeader("Usage", trailing = "last ${tokens.days} days")
+                Spacer(Modifier.height(12.dp))
                 TokenCard(tokens)
             }
             !loaded -> { SectionHeader("Usage"); SkeletonUsageCard(shimmerAlpha()) }
@@ -375,36 +370,37 @@ private fun UsageSection(usage: UsageUi?, loaded: Boolean, tokens: id.melvern.he
 private fun TokenCard(u: id.melvern.hermesmobile.core.repo.InsightsRepo.Usage) {
     val total = u.totalTokens.coerceAtLeast(1)
     val providers = u.providers.sortedByDescending { it.tokens }
-    GroupSurface {
-        Column(Modifier.padding(horizontal = Dim.GroupPadH, vertical = 16.dp)) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(u.totalTokens), style = Type.Figure)
-                Text(" tokens", style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.padding(bottom = 4.dp))
-                Spacer(Modifier.weight(1f))
-                Text("${u.totalSessions} chats", style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.padding(bottom = 4.dp))
-            }
-            Spacer(Modifier.height(14.dp))
-            // bar tersegmen: tiap provider satu segmen, abu bertingkat (warna = status saja)
-            val shades = listOf(Ink.Text, Ink.Text3, Ink.HairlineStrong, Ink.Text4, Ink.Raised)
-            Row(Modifier.fillMaxWidth().height(8.dp).clip(Radius.Full).background(Ink.Surface3)) {
-                providers.forEachIndexed { i, p ->
-                    val f = p.tokens.toFloat() / total
-                    if (f > 0.004f) Box(Modifier.weight(f).fillMaxSize().background(shades[i.coerceAtMost(shades.lastIndex)]))
-                }
-            }
-            Spacer(Modifier.height(14.dp))
+    // tones step clearly apart (white → mid → dim) so legend + bar read without colour
+    val shades = listOf(Ink.Text, Ink.Text2.copy(alpha = 0.75f), Ink.Text4, Ink.KeyBezel, Ink.LampOff)
+    id.melvern.hermesmobile.ui.components.RackUnit(
+        "Usage · ${u.days} days", Modifier.padding(horizontal = Dim.ScreenH),
+        trailing = { Text("${u.totalSessions} chats", style = Type.Timecode.copy(color = Ink.Text3)) },
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(u.totalTokens), style = Type.Figure)
+            Text(" tokens", style = Type.Meta.copy(color = Ink.Text3), modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().height(10.dp).clip(Radius.Led).background(Ink.LampOff)) {
             providers.forEachIndexed { i, p ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(Radius.Full).background(shades[i.coerceAtMost(shades.lastIndex)]))
-                    Spacer(Modifier.width(10.dp))
-                    Text(id.melvern.hermesmobile.core.repo.InsightsRepo.providerName(p.provider), style = Type.Callout, modifier = Modifier.weight(1f))
-                    Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(p.tokens), style = Type.FigureSmall)
-                    Text(
-                        (p.tokens * 1000 / total).let { pm -> if (pm < 10) "<1%" else "${(pm + 5) / 10}%" },
-                        style = Type.MonoMeta.copy(color = Ink.Text4),
-                        modifier = Modifier.widthIn(min = 44.dp).padding(start = 10.dp),
-                    )
-                }
+                val f = p.tokens.toFloat() / total
+                if (f > 0.004f) Box(Modifier.weight(f).fillMaxSize().padding(end = 2.dp).background(shades[i.coerceAtMost(shades.lastIndex)]))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        providers.forEachIndexed { i, p ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(width = Dim.LampW, height = Dim.LampH).clip(Radius.Led)
+                    .background(shades[i.coerceAtMost(shades.lastIndex)]).border(1.dp, Ink.KeyBezel, Radius.Led))
+                Spacer(Modifier.width(10.dp))
+                Text(id.melvern.hermesmobile.core.repo.InsightsRepo.providerName(p.provider), style = Type.Callout, modifier = Modifier.weight(1f))
+                Text(id.melvern.hermesmobile.core.repo.InsightsRepo.compact(p.tokens), style = Type.FigureSmall)
+                Text(
+                    (p.tokens * 1000 / total).let { pm -> if (pm < 10) "<1%" else "${(pm + 5) / 10}%" },
+                    style = Type.Timecode.copy(color = Ink.Text3),
+                    modifier = Modifier.widthIn(min = 48.dp).padding(start = 10.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                )
             }
         }
     }
@@ -550,6 +546,184 @@ private fun BotActionSheet(
                     onDismiss()
                 }
             }
+        }
+    }
+}
+
+
+// ── v28 Multiview wall ──────────────────────────────────────────────
+
+/**
+ * One monitor per agent, 2-up. Live monitors are lit (lamp + live timecode +
+ * the task on screen); idle monitors sit dim with the model and last task.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun MultiviewWall(
+    app: HermesApp,
+    bots: List<BotCard>,
+    tasks: List<id.melvern.hermesmobile.core.repo.BotTask>?,
+    onOpen: (BotCard) -> Unit,
+    onLongPress: (BotCard) -> Unit,
+) {
+    if (bots.isEmpty()) {
+        Text("No agents found", style = Type.Callout.copy(color = Ink.Text3),
+            modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 24.dp))
+        return
+    }
+    val live = bots.count { it.status == BotStatus.RUNNING }
+    id.melvern.hermesmobile.ui.components.LogHeader("Multiview", trailing = if (live > 0) "$live live · ${bots.size}" else "${bots.size}")
+    // live first, then idle — the wall reads left→right, top→bottom by activity
+    val ordered = bots.sortedWith(compareBy({ it.status != BotStatus.RUNNING }, { !it.isDefault }, { it.label }))
+    Column(Modifier.padding(horizontal = Dim.ScreenH), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ordered.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                pair.forEach { b ->
+                    val lastTask = tasks?.firstOrNull { it.profile == b.name }
+                    BotMonitor(app, b, lastTask, Modifier.weight(1f), onOpen = { onOpen(b) }, onLongPress = { onLongPress(b) })
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BotMonitor(
+    app: HermesApp,
+    b: BotCard,
+    lastTask: id.melvern.hermesmobile.core.repo.BotTask?,
+    modifier: Modifier,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val running = b.status == BotStatus.RUNNING
+    val tally = when {
+        running -> id.melvern.hermesmobile.ui.components.Tally.LIVE
+        b.status == BotStatus.OFFLINE -> id.melvern.hermesmobile.ui.components.Tally.OFF
+        else -> id.melvern.hermesmobile.ui.components.Tally.OFF
+    }
+    id.melvern.hermesmobile.ui.components.MonitorTile(
+        modifier = modifier.height(Dim.WallTileH),
+        tally = tally,
+        onClick = onOpen,
+        onLongClick = onLongPress,
+        umd = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                id.melvern.hermesmobile.ui.components.TallyLamp(tally)
+                Spacer(Modifier.width(5.dp))
+                OneLine(Pretty.profile(b.label), Type.Umd, Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                if (running) {
+                    val start = b.taskSecs?.let { System.currentTimeMillis() / 1000.0 - it }
+                    if (start != null) id.melvern.hermesmobile.ui.components.LiveTimecode(start, Type.Timecode.copy(color = Ink.Text))
+                    else Text("On air", style = Type.Caption.copy(color = Ink.Live))
+                } else {
+                    Text("Idle", style = Type.Caption.copy(color = Ink.Text3))
+                }
+            }
+        },
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ProfileAvatar(app, b.name, 26.dp)
+                Spacer(Modifier.weight(1f))
+                b.model?.let { Text(Pretty.model(it), style = Type.Catalog, maxLines = 1) }
+            }
+            Spacer(Modifier.height(8.dp))
+            val body = when {
+                running && b.task != null -> b.task
+                running -> "Working in a chat"
+                lastTask != null -> "Last: " + lastTask.title
+                else -> "Ready for a task"
+            }
+            Text(
+                body,
+                style = Type.Meta.copy(color = if (running) Ink.Text else Ink.Text2),
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// ── v28 As-run log (bot task history) ───────────────────────────────
+
+@Composable
+private fun AsRunLog(
+    tasks: List<id.melvern.hermesmobile.core.repo.BotTask>?,
+    showAll: Boolean,
+    onToggleAll: () -> Unit,
+    onOpen: (id.melvern.hermesmobile.core.repo.BotTask) -> Unit,
+) {
+    val list = tasks ?: return
+    val shown = if (showAll) list else list.take(6)
+    id.melvern.hermesmobile.ui.components.LogHeader(
+        "Task log", trailing = list.size.toString(),
+        action = if (list.size > 6) (if (showAll) "Less" else "All") else null,
+        onAction = if (list.size > 6) onToggleAll else null,
+    )
+    if (list.isEmpty()) {
+        Text(
+            "Tasks you give a bot show up here with their result.",
+            style = Type.Callout.copy(color = Ink.Text3),
+            modifier = Modifier.padding(horizontal = Dim.ScreenH, vertical = 8.dp),
+        )
+        return
+    }
+    val now = System.currentTimeMillis() / 1000.0
+    Column(
+        Modifier
+            .padding(horizontal = Dim.ScreenH)
+            .fillMaxWidth()
+            .clip(Radius.Rack)
+            .border(1.dp, Ink.Bezel, Radius.Rack),
+    ) {
+        shown.forEachIndexed { i, t ->
+            val tally = when (t.status) {
+                "running" -> id.melvern.hermesmobile.ui.components.Tally.LIVE
+                "failed" -> id.melvern.hermesmobile.ui.components.Tally.FAULT
+                "stopped" -> id.melvern.hermesmobile.ui.components.Tally.WAIT
+                else -> id.melvern.hermesmobile.ui.components.Tally.OFF
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .pressClickable { onOpen(t) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                // time column (mono) — when it went on air
+                Column(Modifier.width(54.dp)) {
+                    Text(id.melvern.hermesmobile.ui.components.RelTime.clock(t.startedAt), style = Type.Timecode.copy(color = Ink.Text2))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (t.isRunning) id.melvern.hermesmobile.ui.components.Timecode.short((now - t.startedAt).toLong())
+                        else id.melvern.hermesmobile.ui.components.Timecode.short(((t.endedAt ?: t.lastActivity) - t.startedAt).toLong()),
+                        style = Type.Catalog,
+                    )
+                }
+                Box(Modifier.padding(top = 4.dp)) { id.melvern.hermesmobile.ui.components.TallyLamp(tally) }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(Pretty.profile(t.profile), style = Type.MetaMedium.copy(color = Ink.Text))
+                        Text(
+                            "  " + when (t.status) { "running" -> "On air"; "done" -> "Done"; "failed" -> "Failed"; else -> "Stopped" },
+                            style = Type.Caption.copy(color = when (t.status) {
+                                "running" -> Ink.Live; "failed" -> Ink.Danger; "stopped" -> Ink.Warn; else -> Ink.Text3
+                            }),
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Text(t.title, style = Type.Callout, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (t.result.isNotBlank()) {
+                        Spacer(Modifier.height(3.dp))
+                        Text(t.result, style = Type.Meta.copy(color = Ink.Text3), maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            if (i < shown.lastIndex) Hairline(Modifier.padding(start = 12.dp))
         }
     }
 }
