@@ -40,7 +40,7 @@ def _connect(db: Path) -> sqlite3.Connection:
 _OOB_RE = re.compile(r"^\s*\[OUT-OF-BAND USER MESSAGE[^\]]*\]\s*(.*?)\s*\[/OUT-OF-BAND USER MESSAGE\]\s*$", re.S)
 
 
-def _flatten(text: str) -> str:
+def _flatten(text: str, limit: int = PREVIEW_MAX) -> str:
     """One display line: collapse whitespace, strip markdown noise, MEDIA/@file lines and
     the server-inlined "--- Attached Context ---" block (model-only, desktop hides it too)."""
     text = re.split(r"(?:^|\n)--- Attached Context ---\s*\n", text, maxsplit=1)[0]
@@ -54,7 +54,7 @@ def _flatten(text: str) -> str:
         flat = "Attachment"
     flat = re.sub(r"!?\[([^\]]*)\]\([^)\s]*\)?", r"\1", flat)  # [label](url) -> label
     flat = re.sub(r"[*_`#>|]+", "", flat).strip()
-    return flat[:PREVIEW_MAX]
+    return flat[:limit]
 
 
 def last_messages(db: Path, ids: list[str]) -> dict[str, dict]:

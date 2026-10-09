@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mobile_insights  # noqa: E402  (sibling module, read-only state.db queries)
 import mobile_limits  # noqa: E402  (plan limits via hermes-agent + Mac RAM)
 import mobile_mac  # noqa: E402  (v24: Mac panel, diff, web preview)
+import mobile_tasks  # noqa: E402  (v28: bot task history)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -448,6 +449,23 @@ async def handle_mobile_bot_work(request: web.Request) -> web.Response:
     return web.json_response({"bots": await asyncio.get_running_loop().run_in_executor(None, mobile_mac.bot_work)})
 
 
+def _int_q(request: web.Request, key: str, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(int(request.query.get(key, default)), hi))
+    except ValueError:
+        return default
+
+
+async def handle_mobile_tasks(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-tasks?limit=60 → {tasks:[{profile,id,title,started_at,ended_at,message_count,
+    last_activity,status,result}]} — bot task sessions (source='tool') across all bot profiles."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    limit = _int_q(request, "limit", 60, 1, 200)
+    tasks = await asyncio.get_running_loop().run_in_executor(None, mobile_tasks.list_tasks, limit)
+    return web.json_response({"tasks": tasks})
+
+
 async def handle_mobile_ports(request: web.Request) -> web.Response:
     """GET /api/mobile-ports → dev servers listening locally (for web preview)."""
     if (r := await _authed_or_401(request)) is not None:
@@ -623,6 +641,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-diff", handle_mobile_diff)
     app.router.add_get("/api/mobile-ports", handle_mobile_ports)
     app.router.add_get("/api/mobile-bot-work", handle_mobile_bot_work)
+    app.router.add_get("/api/mobile-tasks", handle_mobile_tasks)
     app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)
