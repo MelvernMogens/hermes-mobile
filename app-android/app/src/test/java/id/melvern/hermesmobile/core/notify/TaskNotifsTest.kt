@@ -56,4 +56,17 @@ class TaskNotifsTest {
         assertEquals("Coder stopped", TaskNotifs.title("Coder", t("a", "failed")))
         assertEquals("Fix login · 5 min", TaskNotifs.text(t("a", "done", startedAgo = 600.0, lastAgo = 300.0), now))
     }
+
+    @Test fun review_fix_partial_response_does_not_erase_dedupe() {
+        // notified dipangkas berdasar umur, bukan keanggotaan respons terakhir
+        val m = mapOf("a" to 1_000L, "old" to 1_000L - 4 * 86400)
+        assertEquals(setOf("a"), TaskNotifs.prune(m, nowSecs = 1_000L).keys)
+        assertEquals(m.filterKeys { it == "a" }, TaskNotifs.decode(TaskNotifs.encode(TaskNotifs.prune(m, 1_000L))))
+        // prev mengingat id yang hilang sementara dari respons (DB satu profile terkunci)
+        val prev = TaskNotifs.mergePrev(mapOf("x" to "done", "y" to "running"), listOf(t("y", "done")))
+        assertEquals(mapOf("x" to "done", "y" to "done"), prev)
+        // tugas yang kembali muncul: sudah di notified → tidak dinotif ulang
+        val back = listOf(t("a", "done", startedAgo = 60.0))
+        assertEquals(0, TaskNotifs.decideTaskNotifs(emptyMap(), back, setOf("a"), now).size)
+    }
 }

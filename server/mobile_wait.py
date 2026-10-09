@@ -75,11 +75,16 @@ def message_events(grown: dict[str, int], home: Path | None = None) -> list[dict
         try:
             con = mobile_insights._connect(db)
             try:
+                cols = {r[1] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
+                # review fix (baterai): hanya jawaban FINAL (tanpa tool_calls) di session non-tool —
+                # prosa di tengah turn & session tugas bot (diliput event "task") tidak membangunkan HP.
+                final = "AND (m.tool_calls IS NULL OR TRIM(m.tool_calls) IN ('', '[]', 'null')) " \
+                    if "tool_calls" in cols else ""
                 rows = con.execute(
                     "SELECT m.session_id, MAX(m.timestamp), COALESCE(s.title,'') FROM messages m "
                     "LEFT JOIN sessions s ON s.id = m.session_id WHERE m.id > ? AND m.role='assistant' "
-                    "AND m.content IS NOT NULL AND TRIM(m.content) != '' " +
-                    mobile_insights._active_sql(con).replace("active", "m.active") +
+                    "AND m.content IS NOT NULL AND TRIM(m.content) != '' AND COALESCE(s.source,'') != 'tool' " +
+                    final + mobile_insights._active_sql(con).replace("active", "m.active") +
                     "GROUP BY m.session_id ORDER BY MAX(m.id) DESC LIMIT ?", (after, MAX_EVENTS)).fetchall()
             finally:
                 con.close()
@@ -117,11 +122,15 @@ RUN_TTL = 5.0
 
 
 def _running_cached() -> set[str]:
-    """`ps` maks tiap 5 dtk — satu long-poll 25 dtk tidak boleh spawn ps 17x."""
+    """`ps` maks tiap 5 dtk — satu long-poll 25 dtk tidak boleh spawn ps 17x.
+    ps gagal → pakai hasil terakhir (bukan set kosong: itu akan terbaca sebagai \"semua bot berhenti\")."""
     import time
     now = time.monotonic()
     if now - _run_cache[0] > RUN_TTL:
-        _run_cache[0], _run_cache[1] = now, mobile_tasks.running_profiles()
+        got = mobile_tasks.running_profiles()
+        _run_cache[0] = now
+        if got is not None:
+            _run_cache[1] = got
     return set(_run_cache[1])
 
 

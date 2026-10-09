@@ -165,6 +165,8 @@ fun ChatScreen(
     var title by remember { mutableStateOf(initialTitle ?: "") }
     var running by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(preattachedRuntime == null) }
+    // v28 E: yang tampil baru tail HTTP (resume belum mendarat) — antrean offline jangan dikirim dulu.
+    var tailOnly by remember { mutableStateOf(false) }
     // M9 (item 6): draft input selamat dari rotate (transcript via TranscriptCache).
     var input by rememberSaveable { mutableStateOf(id.melvern.hermesmobile.core.repo.DraftStore.get(app, actualStoredId)) }
     // M3.3: thinking indicator — event thinking.delta / reasoning.delta
@@ -382,8 +384,8 @@ fun ChatScreen(
     }
 
     // v25: kirim antrean offline begitu koneksi OPEN + runtime siap (urut, satu per satu)
-    LaunchedEffect(connState, runtimeId, offlineQueued.size, loading) {
-        if (connState != ConnState.OPEN || runtimeId.isBlank() || offlineQueued.isEmpty() || loading) return@LaunchedEffect
+    LaunchedEffect(connState, runtimeId, offlineQueued.size, loading, tailOnly) {
+        if (connState != ConnState.OPEN || runtimeId.isBlank() || offlineQueued.isEmpty() || loading || tailOnly) return@LaunchedEffect
         val q = offlineQueued.first()
         // Review fix: keluarkan dari antrean SEBELUM kirim (effect bisa restart di tengah kirim →
         // jangan kirim dobel); gagal → kembalikan ke antrean.
@@ -705,6 +707,7 @@ fun ChatScreen(
             val t = app.connection?.let { id.melvern.hermesmobile.core.repo.TailRepo(it).tail(actualStoredId, chatProfile) }
             if (t != null && t.messages.isNotEmpty() && loading && items.isEmpty()) {
                 items = id.melvern.hermesmobile.core.repo.TailRepo.withPartialNotice(mapTranscript(t.messages), t.hasMore)
+                tailOnly = true
                 loading = false
             }
         } else null
@@ -763,7 +766,7 @@ fun ChatScreen(
                 }
             } else {
                 val out = SessionRepo(c, chatProfile).resume(actualStoredId)
-                tailJob?.cancel()
+                tailJob?.cancel(); tailOnly = false
                 runtimeId = out.runtimeId
                 running = out.running
                 items = withQueued(mapTranscript(out.messages), serverFresh = !out.running)
@@ -796,7 +799,7 @@ fun ChatScreen(
         } catch (e: Throwable) {
             items = listOf(ChatItem.NoticeLine("Couldn't load this chat (${e.message})."))
             loadFailed = true
-        } finally { tailJob?.cancel(); loading = false }
+        } finally { tailJob?.cancel(); tailOnly = false; loading = false }
     }
 
     val liveClient by app.clientFlow.collectAsState()

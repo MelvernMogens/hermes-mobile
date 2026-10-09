@@ -58,6 +58,11 @@ class Check(unittest.TestCase):
         res = mw.check(c, home=self.home, running=set())  # coder juga berhenti
         kinds = {(e["kind"], e["profile"], e["session_id"]) for e in res["events"]}
         self.assertEqual(kinds, {("message", "default", "d1"), ("task", "coder", "t1")})
+        # review fix: prosa bertool_calls & jawaban di session tugas (source=tool) tidak membangunkan HP
+        c2 = res["cursor"]
+        msg(self.default, "d1", "assistant", "Now running tests", 6, tool_calls='[{"id":"x"}]')
+        msg(self.coder, "t1", "assistant", "step done", 7)
+        self.assertEqual(mw.check(c2, home=self.home, running=set())["events"], [])
         task = next(e for e in res["events"] if e["kind"] == "task")
         self.assertEqual(task["title"], "build")
         self.assertNotEqual(res["cursor"], c)

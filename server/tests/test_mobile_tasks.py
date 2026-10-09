@@ -38,10 +38,10 @@ class Tasks(unittest.TestCase):
         self.tmp.cleanup()
 
     def _tasks(self, running=frozenset()):
-        return {t["id"]: t for t in mt.list_tasks(60, home=self.home, running=set(running))}
+        return {t["id"]: t for t in mt.list_tasks(60, home=self.home, running=set(running), now=10_000)}
 
     def test_running_done_stopped_and_order(self):
-        rows = mt.list_tasks(60, home=self.home, running={"coder"})
+        rows = mt.list_tasks(60, home=self.home, running={"coder"}, now=10_000)
         self.assertEqual([r["id"] for r in rows], ["c_new", "q1", "c_old"])
         t = {r["id"]: r for r in rows}
         self.assertEqual(t["c_new"]["status"], "running")  # proses hidup + session terbaru profile itu
@@ -61,6 +61,21 @@ class Tasks(unittest.TestCase):
 
     def test_profile_without_db_skipped(self):
         self.assertEqual([p for p, _ in mt.bot_dbs(self.home)], ["coder", "qa"])
+
+    def test_review_fix_mid_turn_prose_is_not_done(self):
+        # prosa yang menyertai tool_calls = turn belum selesai → bukan "done"
+        self.assertEqual(mt.task_status("assistant", "Now I'll run tests", None, live=False,
+                                        last_tool_calls='[{"id":"c1"}]'), "stopped")
+        self.assertEqual(mt.task_status("assistant", "All green", None, live=False, last_tool_calls="[]"), "done")
+
+    def test_review_fix_parallel_and_ps_unknown_stay_running(self):
+        # c_old masih aktif < 10 menit tanpa ended_at → running juga (bot-run paralel di profile yang sama)
+        t = {r["id"]: r for r in mt.list_tasks(60, home=self.home, running={"coder"}, now=170)}
+        self.assertEqual((t["c_new"]["status"], t["c_old"]["status"]), ("running", "running"))
+        # ps gagal (None) → session aktif baru tetap running, bukan tiba-tiba "done"/"stopped"
+        t = {r["id"]: r for r in mt.list_tasks(60, home=self.home, running=None, now=800)}
+        self.assertEqual(t["c_new"]["status"], "running")
+        self.assertEqual(t["c_old"]["status"], "done")  # sepi > 10 menit
 
     def test_failed_end_reason(self):
         self.assertEqual(mt.task_status("tool", "x", "error: provider timeout", live=False), "failed")

@@ -514,11 +514,12 @@ async def handle_mobile_wait(request: web.Request) -> web.Response:
     deadline = loop.time() + timeout
     while True:
         res = await loop.run_in_executor(None, mobile_wait.check, cursor)
-        if res["events"] or res.get("baseline") or loop.time() + WAIT_STEP > deadline:
+        remaining = deadline - loop.time()
+        if res["events"] or res.get("baseline") or remaining <= 0.05:
             res.pop("baseline", None)
             return web.json_response(res)
         cursor = res["cursor"]  # rows tanpa event (tool/user) — maju, jangan dilaporkan ulang
-        await asyncio.sleep(WAIT_STEP)
+        await asyncio.sleep(min(WAIT_STEP, remaining))
 
 
 async def handle_mobile_ports(request: web.Request) -> web.Response:

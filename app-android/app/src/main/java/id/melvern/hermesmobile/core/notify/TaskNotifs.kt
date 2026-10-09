@@ -55,13 +55,35 @@ object TaskNotifs {
             ?: profile.replaceFirstChar { it.uppercase() }
 
     private fun sp(c: Context) = c.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-    fun loadNotified(c: Context): Set<String> = sp(c).getStringSet(KEY, emptySet())?.toSet() ?: emptySet()
+    private const val KEEP_SECS = 3 * 86400L
 
-    /** Simpan; pangkas ke id yang masih ada di daftar terbaru (+ batas) supaya tidak tumbuh terus. */
-    fun saveNotified(c: Context, ids: Set<String>, current: List<BotTask>) {
-        val live = current.map { it.id }.toSet()
-        val kept = ids.filter { it in live }.take(MAX_KEPT).toSet()
-        sp(c).edit().putStringSet(KEY, kept).apply()
+    /** Disimpan sebagai "<epochDetik>|<id>" → {id: epoch}. */
+    fun loadNotified(c: Context): Map<String, Long> = decode(sp(c).getStringSet(KEY, emptySet()).orEmpty())
+
+    fun saveNotified(c: Context, m: Map<String, Long>, nowSecs: Long) {
+        sp(c).edit().putStringSet(KEY, encode(prune(m, nowSecs))).apply()
+    }
+
+    fun decode(raw: Set<String>): Map<String, Long> = raw.mapNotNull { e ->
+        val i = e.indexOf('|')
+        if (i <= 0) null else e.substring(i + 1) to (e.substring(0, i).toLongOrNull() ?: return@mapNotNull null)
+    }.toMap()
+
+    fun encode(m: Map<String, Long>): Set<String> = m.map { (id, at) -> "$at|$id" }.toSet()
+
+    /**
+     * Pure. Pangkas berdasar UMUR (3 hari > jendela 2 jam) + batas jumlah — BUKAN berdasar "ada di respons
+     * terakhir": satu respons parsial (DB satu profile terkunci) tidak boleh menghapus memori dedupe.
+     */
+    fun prune(m: Map<String, Long>, nowSecs: Long): Map<String, Long> =
+        m.filterValues { it >= nowSecs - KEEP_SECS }.entries.sortedByDescending { it.value }
+            .take(MAX_KEPT).associate { it.key to it.value }
+
+    /** Pure: status poll baru di atas yang lama — id yang hilang sementara dari respons tetap diingat. */
+    fun mergePrev(prev: Map<String, String>, list: List<BotTask>): Map<String, String> {
+        val cur = list.associate { it.id to it.status }
+        val kept = prev.filterKeys { it !in cur }.entries.take(MAX_KEPT).associate { it.key to it.value }
+        return kept + cur
     }
 
     /** State poller (satu instance per loop poller). */
@@ -80,12 +102,9 @@ object TaskNotifs {
             if (list == null) return
             val nowEpoch = nowMs / 1000.0
             val notified = loadNotified(app)
-            val fire = decideTaskNotifs(prev, list, notified, nowEpoch)
-            prev = list.associate { it.id to it.status }
-            if (fire.isEmpty()) {
-                if (notified.isNotEmpty()) saveNotified(app, notified, list)
-                return
-            }
+            val fire = decideTaskNotifs(prev, list, notified.keys, nowEpoch)
+            prev = mergePrev(prev, list)
+            if (fire.isEmpty()) return
             for (t in fire) {
                 // chat tugas sedang terbuka di layar → tidak perlu notif (tetap ditandai)
                 if (app.isForeground && app.openChatStoredId == t.id) continue
@@ -94,7 +113,8 @@ object TaskNotifs {
                     Log.i(TAG, "task notif: ${t.profile}/${t.id} ${t.status}")
                 } catch (e: Throwable) { Log.w(TAG, "post task notif gagal: ${e.message}") }
             }
-            saveNotified(app, notified + fire.map { it.id }, list)
+            val nowSecs = nowMs / 1000
+            saveNotified(app, notified + fire.associate { it.id to nowSecs }, nowSecs)
         }
     }
 }

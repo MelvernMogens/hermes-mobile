@@ -1,4 +1,6 @@
 """Temp HOME dengan ~/.hermes/state.db + profiles/<bot>/state.db (skema minimal yang dipakai v28)."""
+from __future__ import annotations
+
 import sqlite3
 from pathlib import Path
 
