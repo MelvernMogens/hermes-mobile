@@ -211,7 +211,9 @@ fun LiveTimecode(startEpochSec: Double?, style: TextStyle = Type.Timecode, modif
     LaunchedEffect(startEpochSec) {
         while (true) { now = System.currentTimeMillis(); delay(1000L - (now % 1000L)) }
     }
-    val secs = ((now / 1000.0) - startEpochSec).toLong()
+    // phone clock can trail the Mac by seconds: never show a frozen 0:00:00 next to a lamp —
+    // count from the first visible second instead.
+    val secs = ((now / 1000.0) - startEpochSec).toLong().coerceAtLeast(1)
     Text(Timecode.of(secs), style = style, maxLines = 1, modifier = modifier)
 }
 
@@ -242,7 +244,7 @@ fun SegmentMeter(
         val r = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
         for (i in 0 until segments) {
             val pos = (i + 1f) / segments
-            val lit = pos <= f + 0.0001f || (i == 0 && f > 0f)
+            val lit = i < kotlin.math.round(f * segments).toInt() || (i == 0 && f > 0f)
             val c = when {
                 !lit -> off
                 pos > faultAt -> fault

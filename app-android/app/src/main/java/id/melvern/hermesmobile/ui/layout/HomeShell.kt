@@ -169,7 +169,7 @@ private fun TabItem(
         Spacer(Modifier.height(7.dp))
         Box(Modifier.size(width = 56.dp, height = 24.dp), contentAlignment = Alignment.Center) {
             Icon(if (selected) iconOn else iconOff, label, tint = tint, modifier = Modifier.size(21.dp))
-            if (badge != null && badge > 0) CountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-8).dp, y = (-2).dp))
+            if (badge != null && badge > 0) CountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = (-5).dp))
         }
         Spacer(Modifier.height(3.dp))
         Text(label, style = Type.Caption.copy(color = tint))
@@ -214,7 +214,7 @@ private fun CountBadge(count: Int, modifier: Modifier = Modifier) {
             .heightIn(min = 15.dp)
             .widthIn(min = 15.dp)
             .clip(Radius.Full)
-            .background(Ink.Live)
+            .background(Ink.Text)
             .border(1.5.dp, Ink.Bg, Radius.Full)
             .padding(horizontal = 3.dp),
         contentAlignment = Alignment.Center,

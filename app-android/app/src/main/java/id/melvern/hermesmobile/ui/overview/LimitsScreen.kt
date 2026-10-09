@@ -34,7 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.outlined.PermMedia
+import androidx.compose.material.icons.outlined.FolderOpen
 import id.melvern.hermesmobile.HermesApp
 import id.melvern.hermesmobile.core.repo.LimitsRepo
 import id.melvern.hermesmobile.ui.theme.Dim
@@ -86,7 +86,7 @@ fun LimitsScreen(app: HermesApp, onOpenFiles: () -> Unit = {}) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Mac", style = Type.Display, modifier = Modifier.weight(1f))
-                id.melvern.hermesmobile.ui.components.KeyCap("Files", icon = androidx.compose.material.icons.Icons.Outlined.PermMedia, onClick = onOpenFiles)
+                id.melvern.hermesmobile.ui.components.KeyCap("Files", icon = androidx.compose.material.icons.Icons.Outlined.FolderOpen, onClick = onOpenFiles)
             }
             Box(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {

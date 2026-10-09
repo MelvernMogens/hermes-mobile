@@ -70,9 +70,9 @@ fun SettingsScreen(app: HermesApp, onSignOut: () -> Unit) {
                     Hint(if (AppPrefs.softEnter == AppPrefs.EnterKey.NEWLINE) "Enter adds a new line. Send with the arrow button."
                          else "Enter sends. You can't type multi-line messages on the phone keyboard.")
                     Divider()
-                    Toggle("Enter sends on tablet keyboard", "Use Shift + Enter for a new line", AppPrefs.hardwareEnterSends) {
-                        AppPrefs.hardwareEnterSends = it; persist()
-                    }
+                    Segmented("Enter key on tablet keyboard", listOf(false, true), AppPrefs.hardwareEnterSends,
+                        { if (it) "Send" else "New line" }) { AppPrefs.hardwareEnterSends = it; persist() }
+                    Hint(if (AppPrefs.hardwareEnterSends) "Enter sends. Shift + Enter adds a new line." else "Enter adds a new line.")
                 }
                 Section("Appearance") {
                     Segmented("Theme", AppPrefs.Theme.entries, AppPrefs.theme, { it.label }) { AppPrefs.theme = it; persist() }

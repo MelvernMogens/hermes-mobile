@@ -44,7 +44,7 @@ fun GiveTaskSheet(
     val fr = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
 
-    QuietSheet(onDismiss = onDismiss, title = "Give a task") {
+    QuietSheet(onDismiss = onDismiss, title = "Give task") {
         // pilih bot — chip rapat satu baris
         Box(Modifier.fillMaxWidth()) {
         Row(
@@ -59,7 +59,7 @@ fun GiveTaskSheet(
                 .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Ink.Surface2.copy(alpha = 0f), Ink.Surface2))))
         }
         target?.task?.let {
-            Text("Busy now: $it", style = Type.Meta.copy(color = Ink.Warn),
+            Text("Busy now: $it", style = Type.Meta.copy(color = Ink.Warn), maxLines = 2,
                 modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(top = 8.dp))
         }
         BasicTextField(

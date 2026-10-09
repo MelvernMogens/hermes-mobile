@@ -77,7 +77,7 @@ fun LiveRail(feeds: List<LiveFeed>, onOpen: (LiveFeed) -> Unit, onLongPress: (Li
             val tileW: Dp = when (feeds.size) {
                 1 -> avail
                 2 -> (avail - gap) / 2
-                else -> (avail - gap) / 1.55f
+                else -> (avail - gap) / 1.75f
             }
             // plain scrolling row (not lazy): a handful of monitors, and the scroll offset
             // stays at the first monitor when feeds come and go (no key-anchored drift).
@@ -95,7 +95,7 @@ fun LiveRail(feeds: List<LiveFeed>, onOpen: (LiveFeed) -> Unit, onLongPress: (Li
             if (feeds.size > 2) {
                 // right-edge fade: the peek reads as "more monitors", not as overflow
                 Box(
-                    Modifier.align(Alignment.CenterEnd).width(48.dp).height(Dim.MonitorH)
+                    Modifier.align(Alignment.CenterEnd).width(24.dp).height(Dim.MonitorH)
                         .background(Brush.horizontalGradient(listOf(Ink.Bg.copy(alpha = 0f), Ink.Bg))),
                 )
             }

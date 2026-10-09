@@ -258,9 +258,13 @@ private fun SummaryStrip(bots: List<BotCard>, tokens: id.melvern.hermesmobile.co
 @Composable
 private fun Stat(label: String, value: String, modifier: Modifier = Modifier, live: Boolean = false, unit: String? = null) {
     Column(modifier.padding(vertical = 4.dp)) {
-        Text(label, style = Type.Caption.copy(color = if (live) Ink.Live else Ink.Text3))
+        Text(label, style = Type.Caption.copy(color = Ink.Text3))
         Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (live) {
+                id.melvern.hermesmobile.ui.components.TallyLamp(id.melvern.hermesmobile.ui.components.Tally.LIVE)
+                Spacer(Modifier.width(8.dp))
+            }
             Text(value, style = Type.Figure)
             if (unit != null) Text(" $unit", style = Type.MonoMeta.copy(color = Ink.Text4), modifier = Modifier.padding(bottom = 4.dp))
         }
@@ -451,7 +455,7 @@ private fun UsageCard(u: UsageUi) {
 @Composable
 private fun UsageBarBlock(bar: UsageBarUi, big: Boolean) {
     Row(verticalAlignment = Alignment.Bottom) {
-        Text(bar.spent.ifBlank { "$0" }, style = if (big) Type.Display else Type.Title)
+        Text(bar.spent.ifBlank { "$0" }, style = if (big) Type.Figure else Type.FigureSmall)
         Spacer(Modifier.width(8.dp))
         Text("of ${bar.total}", style = Type.Meta.copy(color = Ink.Text2))
     }
@@ -517,7 +521,7 @@ private fun BotActionSheet(
         notice?.let {
             Text(it, style = Type.Meta.copy(color = Ink.Danger), modifier = Modifier.padding(horizontal = Dim.ScreenH).padding(bottom = 8.dp))
         }
-        SheetActionRow("Give a task", Icons.Outlined.AssignmentTurnedIn, enabled = !busy) { onGiveTask() }
+        SheetActionRow("Give task", Icons.Outlined.AssignmentTurnedIn, enabled = !busy) { onGiveTask() }
         SheetActionRow("New chat", Icons.Outlined.AddComment, enabled = !busy) {
             run {
                 val c = app.client ?: return@run

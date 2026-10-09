@@ -359,10 +359,11 @@ fun ThoughtRow(text: String, secs: Int?, steps: Int = 1) {
         Row(
             Modifier
                 .heightIn(min = Dim.ToolRow)
-                .clip(Radius.Full)
+                .clip(Radius.Key)
                 .background(Ink.Surface1)
+                .border(hairline(), Ink.Bezel, Radius.Key)
                 .pressClickable { open = !open }
-                .padding(start = 10.dp, end = 8.dp),
+                .padding(start = 8.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Outlined.Psychology, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))

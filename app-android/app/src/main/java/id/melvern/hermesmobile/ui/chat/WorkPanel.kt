@@ -1,5 +1,7 @@
 package id.melvern.hermesmobile.ui.chat
 
+import androidx.compose.foundation.border
+import id.melvern.hermesmobile.ui.theme.hairline
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +69,8 @@ fun WorkStrip(todos: List<AgentWorkRepo.Todo>, subs: List<AgentWorkRepo.Subagent
         Row(
             Modifier.then(if (wide) Modifier.width(Dim.ChatMaxW) else Modifier.fillMaxWidth())
                 .padding(horizontal = 12.dp, vertical = 4.dp)
-                .clip(Radius.Chip).background(Ink.Surface1)
+                .clip(Radius.Key).background(Ink.Surface1)
+                .border(hairline(), Ink.Bezel, Radius.Key)
                 .pressClickable(onClick = onOpen)
                 .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -78,9 +81,9 @@ fun WorkStrip(todos: List<AgentWorkRepo.Todo>, subs: List<AgentWorkRepo.Subagent
                 Text(
                     current?.content ?: "All tasks done",
                     style = Type.Callout.copy(color = if (current == null) Ink.Text3 else Ink.Text),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
-                Text(" $done/${visibleTodos.size}", style = Type.Caption.copy(color = Ink.Text3))
+                Text(" $done/${visibleTodos.size}", style = Type.Timecode.copy(color = Ink.Text2))
             } else {
                 PulsingDot(Ink.Live, size = 7.dp)
                 Spacer(Modifier.width(10.dp))
@@ -103,7 +106,7 @@ private fun ProgressRing(done: Int, total: Int) {
     val frac = if (total == 0) 0f else done / total.toFloat()
     androidx.compose.foundation.Canvas(Modifier.size(16.dp)) {
         val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-        drawCircle(Ink.Hairline, style = stroke, radius = size.minDimension / 2 - 1.dp.toPx())
+        drawCircle(Ink.Text3, style = stroke, radius = size.minDimension / 2 - 1.dp.toPx())
         drawArc(Ink.Text, -90f, 360f * frac, false, style = stroke,
             topLeft = androidx.compose.ui.geometry.Offset(1.dp.toPx(), 1.dp.toPx()),
             size = androidx.compose.ui.geometry.Size(size.width - 2.dp.toPx(), size.height - 2.dp.toPx()))

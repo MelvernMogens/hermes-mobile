@@ -143,8 +143,8 @@ fun FilesScreen(app: HermesApp, onBack: () -> Unit, onOpenChat: (String) -> Unit
                 GridCells.Adaptive(116.dp),
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = Dim.ScreenH, end = Dim.ScreenH, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 var lastDay: String? = null
                 list.forEach { f ->
@@ -213,6 +213,7 @@ private fun BinCell(app: HermesApp, f: AgentFile, onTap: () -> Unit, onLong: () 
             .aspectRatio(1f)
             .clip(Radius.Thumb)
             .background(Ink.Glass)
+            .border(hairline(), Ink.KeyBezel, Radius.Thumb)
             .scanlines()
             .androidx_combined(onTap, onLong),
     ) {
