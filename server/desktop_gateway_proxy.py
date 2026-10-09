@@ -41,6 +41,7 @@ import mobile_mac  # noqa: E402  (v24: Mac panel, diff, web preview)
 import mobile_tasks  # noqa: E402  (v28: bot task history)
 import mobile_files  # noqa: E402  (v28: all-files gallery)
 import mobile_wait  # noqa: E402  (v28: long-poll wake-up)
+import mobile_tail  # noqa: E402  (v28: fast tail of huge chats)
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = int(os.environ.get("HERMES_PROXY_PORT", "8790"))
@@ -482,6 +483,22 @@ async def handle_mobile_files(request: web.Request) -> web.Response:
     return web.json_response({"files": files})
 
 
+async def handle_mobile_tail(request: web.Request) -> web.Response:
+    """v28: GET /api/mobile-tail?profile=&id=<stored>&limit=120 → {messages (session.resume shape), has_more,
+    total_active} — last N active messages so huge chats render before the full resume lands."""
+    if (r := await _authed_or_401(request)) is not None:
+        return r
+    db = mobile_insights.state_db(request.query.get("profile"))
+    if db is None:
+        return web.json_response({"detail": "unknown profile"}, status=404)
+    sid = request.query.get("id", "")
+    if not mobile_insights._SESSION_RE.match(sid):
+        return web.json_response({"detail": "bad id"}, status=400)
+    limit = _int_q(request, "limit", 120, 1, 500)
+    res = await asyncio.get_running_loop().run_in_executor(None, mobile_tail.tail, db, sid, limit)
+    return web.json_response(res)
+
+
 WAIT_STEP = 1.5
 
 
@@ -682,6 +699,7 @@ def main() -> None:
     app.router.add_get("/api/mobile-tasks", handle_mobile_tasks)
     app.router.add_get("/api/mobile-files", handle_mobile_files)
     app.router.add_get("/api/mobile-wait", handle_mobile_wait)
+    app.router.add_get("/api/mobile-tail", handle_mobile_tail)
     app.router.add_post("/api/mobile-preview-ticket", handle_preview_ticket)
     app.router.add_get("/api/ws", proxy_ws)
     app.router.add_route("*", "/{tail:.*}", proxy_http)

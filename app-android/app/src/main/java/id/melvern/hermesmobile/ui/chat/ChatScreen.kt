@@ -699,6 +699,15 @@ fun ChatScreen(
             }
             cacheHydrated = true
         }
+        // v28 E: belum ada cache → N pesan terakhir via HTTP dulu (chat raksasa tampil instan);
+        // resume penuh di bawah MENGGANTI daftar ini seluruhnya (tidak pernah digabung).
+        val tailJob = if (cachedEntry == null && items.isEmpty()) launch {
+            val t = app.connection?.let { id.melvern.hermesmobile.core.repo.TailRepo(it).tail(actualStoredId, chatProfile) }
+            if (t != null && t.messages.isNotEmpty() && loading && items.isEmpty()) {
+                items = id.melvern.hermesmobile.core.repo.TailRepo.withPartialNotice(mapTranscript(t.messages), t.hasMore)
+                loading = false
+            }
+        } else null
         val c = app.client ?: return@LaunchedEffect
         var waited = 0
         // v27: HP tanpa internet → jangan tunggu 25s, langsung salinan tersimpan
@@ -754,6 +763,7 @@ fun ChatScreen(
                 }
             } else {
                 val out = SessionRepo(c, chatProfile).resume(actualStoredId)
+                tailJob?.cancel()
                 runtimeId = out.runtimeId
                 running = out.running
                 items = withQueued(mapTranscript(out.messages), serverFresh = !out.running)
@@ -786,7 +796,7 @@ fun ChatScreen(
         } catch (e: Throwable) {
             items = listOf(ChatItem.NoticeLine("Couldn't load this chat (${e.message})."))
             loadFailed = true
-        } finally { loading = false }
+        } finally { tailJob?.cancel(); loading = false }
     }
 
     val liveClient by app.clientFlow.collectAsState()
