@@ -694,6 +694,9 @@ async def _stop_preview(app: web.Application) -> None:
 async def on_startup(app: web.Application) -> None:
     app["client"] = aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=None, connect=5))
+    # Load Hermes' provider registry once, off the loop: a lookup racing a half-finished
+    # discovery returns no provider and the effort menu would fall back to "unknown".
+    asyncio.get_running_loop().run_in_executor(None, mobile_efforts.warm)
 
 async def on_cleanup(app: web.Application) -> None:
     await app["client"].close()
