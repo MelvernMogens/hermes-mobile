@@ -1,4 +1,4 @@
-# v28 handoff (paused again 10 Oct ~09:20, user request — Mac overloaded)
+# v28 handoff — RELEASED 10 Oct 17:05 (v28 = versionCode 31). Kept for history.
 
 ## Status 09:20
 - Server effort fixes DONE + committed (8c7b89a), proxy live with them (P1 1-3, P2 5-7, 10 done).
