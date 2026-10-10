@@ -11,6 +11,7 @@ Kept out of desktop_gateway_proxy.py so it can be unit-tested without aiohttp.
 """
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import time
@@ -161,8 +162,11 @@ def user_messages_after(db: Path, session_id: str, after: float, limit: int = 20
     con = _connect(db)
     try:
         _ACTIVE_SQL = _active_sql(con)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
+        kind = "display_kind" if "display_kind" in cols else "NULL"
+        meta = "display_metadata" if "display_metadata" in cols else "NULL"
         rows = con.execute(
-            "SELECT id, content, timestamp FROM messages "
+            f"SELECT id, content, timestamp, {kind}, {meta} FROM messages "
             "WHERE session_id = ? AND role = 'user' AND timestamp > ? "
             "AND content IS NOT NULL AND TRIM(content) != '' " + _ACTIVE_SQL +
             "ORDER BY id DESC LIMIT ?",
@@ -170,7 +174,21 @@ def user_messages_after(db: Path, session_id: str, after: float, limit: int = 20
         ).fetchall()
     finally:
         con.close()
-    return [{"row_id": r[0], "text": r[1], "at": r[2]} for r in reversed(rows)]
+    out = []
+    for r in reversed(rows):
+        if r[3] == "hidden":
+            continue
+        m = {"row_id": r[0], "text": r[1], "at": r[2]}
+        if r[3]:
+            m["display_kind"] = r[3]
+            try:
+                md = json.loads(r[4]) if r[4] else None
+            except (ValueError, TypeError):
+                md = None
+            if isinstance(md, dict) and isinstance(md.get("display_text"), str):
+                m["display_text"] = md["display_text"]
+        out.append(m)
+    return out
 
 
 def usage_summary(db: Path, days: int = 30, now: float | None = None) -> dict:

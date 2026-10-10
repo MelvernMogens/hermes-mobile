@@ -48,7 +48,7 @@ class InsightsRepo(private val settings: ConnectionSettings) {
         parseLast(body)
     }
 
-    data class UserMsg(val rowId: Int?, val text: String, val at: Double)
+    data class UserMsg(val rowId: Int?, val text: String, val at: Double, val kind: String? = null, val displayText: String? = null)
 
     /** Prompt user di session ini setelah [after] (epoch s) — termasuk yang diketik di desktop. */
     suspend fun userTail(profile: String, storedId: String, after: Double): List<UserMsg>? = withContext(Dispatchers.IO) {
@@ -86,7 +86,8 @@ class InsightsRepo(private val settings: ConnectionSettings) {
                 val o = e.jsonObject
                 val text = (o["text"] as? JsonPrimitive)?.content.orEmpty()
                 val at = (o["at"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
-                if (text.isBlank()) null else UserMsg((o["row_id"] as? JsonPrimitive)?.intOrNull, text, at)
+                if (text.isBlank()) null else UserMsg((o["row_id"] as? JsonPrimitive)?.intOrNull, text, at,
+                    (o["display_kind"] as? JsonPrimitive)?.content, (o["display_text"] as? JsonPrimitive)?.content)
             } ?: emptyList()
         } catch (_: Throwable) { null }
 
@@ -99,10 +100,12 @@ class InsightsRepo(private val settings: ConnectionSettings) {
                           clock: (Double) -> String): List<id.melvern.hermesmobile.core.model.ChatItem> {
             if (tail.isEmpty()) return items
             val users = items.filterIsInstance<id.melvern.hermesmobile.core.model.ChatItem.User>()
-            val haveIds = users.mapNotNull { it.rowId }.toSet()
+            val haveIds = users.mapNotNull { it.rowId }.toSet() +
+                items.mapNotNull { (it as? id.melvern.hermesmobile.core.model.ChatItem.Event)?.rowId }
             val recentTexts = users.takeLast(12).map { it.text.trim() }.toMutableList()
             val missing = tail.filter { m ->
                 if (m.rowId != null && m.rowId in haveIds) return@filter false
+                if (id.melvern.hermesmobile.core.model.SystemEvent.kindOf(m.kind, m.text) != null) return@filter true
                 // pesan dari HP: teks yang dikirim bisa diawali "> quote" / berisi ref lampiran — cocokkan kunci
                 val t = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text).first.trim()
                 val hit = recentTexts.indexOfFirst { id.melvern.hermesmobile.core.model.UserMatch.same(it, t) }
@@ -110,8 +113,13 @@ class InsightsRepo(private val settings: ConnectionSettings) {
             }
             if (missing.isEmpty()) return items
             val add = missing.map {
-                val (txt, steered) = id.melvern.hermesmobile.core.model.SteerText.unwrap(it.text)
-                id.melvern.hermesmobile.core.model.ChatItem.User(txt, it.rowId, time = clock(it.at), at = it.at, steered = steered)
+                val kind = id.melvern.hermesmobile.core.model.SystemEvent.kindOf(it.kind, it.text)
+                if (kind != null) id.melvern.hermesmobile.core.model.ChatItem.Event(kind,
+                    id.melvern.hermesmobile.core.model.SystemEvent.label(kind, it.displayText, it.text), it.text, it.rowId, it.at)
+                else {
+                    val (txt, steered) = id.melvern.hermesmobile.core.model.SteerText.unwrap(it.text)
+                    id.melvern.hermesmobile.core.model.ChatItem.User(txt, it.rowId, time = clock(it.at), at = it.at, steered = steered)
+                }
             }
             val streamingIdx = items.indexOfLast { it is id.melvern.hermesmobile.core.model.ChatItem.Assistant && !it.done }
             return if (streamingIdx >= 0) items.take(streamingIdx) + add + items.drop(streamingIdx) else items + add

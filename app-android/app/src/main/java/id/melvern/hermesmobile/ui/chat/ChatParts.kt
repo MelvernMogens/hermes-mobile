@@ -141,6 +141,7 @@ fun buildRows(items: List<ChatItem>, dayOf: (Double?) -> java.time.LocalDate?, l
         val at = when (it) {
             is ChatItem.User -> it.at
             is ChatItem.Assistant -> it.at
+            is ChatItem.Event -> it.at
             else -> null
         }
         val day = dayOf(at)
@@ -380,6 +381,49 @@ fun ThoughtRow(text: String, secs: Int?, steps: Int = 1) {
             Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
         }
         if (open && text.isNotBlank()) QuoteText(text)
+    }
+}
+
+/**
+ * System report (subagent / background process finished, model switched…) — one small collapsed
+ * line in the reasoning-pill style, NOT a user bubble. Tap opens the full report.
+ */
+@Composable
+fun EventRow(e: ChatItem.Event) {
+    var open by remember(e.rowId, e.body.length) { mutableStateOf(false) }
+    val icon = when (e.kind) {
+        "async_delegation_complete" -> Icons.Outlined.Psychology
+        else -> Icons.Rounded.ExpandMore
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.ScreenH)) {
+        Row(
+            Modifier
+                .heightIn(min = Dim.ToolRow)
+                .clip(Radius.Key)
+                .background(Ink.Surface1)
+                .border(hairline(), Ink.Bezel, Radius.Key)
+                .pressClickable { open = !open }
+                .padding(start = 8.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (e.kind == "async_delegation_complete") {
+                Icon(icon, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+            } else {
+                StatusDot(Ink.Text3)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                e.label,
+                style = Type.Caption.copy(color = Ink.Text2),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(2.dp))
+            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = Ink.Text3, modifier = Modifier.size(14.dp))
+        }
+        if (open && e.body.isNotBlank()) QuoteText(e.body.take(20_000))
     }
 }
 

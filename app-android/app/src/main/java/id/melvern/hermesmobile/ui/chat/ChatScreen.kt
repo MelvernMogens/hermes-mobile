@@ -647,6 +647,12 @@ fun ChatScreen(
 
     fun mapTranscript(msgs: List<TranscriptMessage>): List<ChatItem> = msgs.flatMap { m ->
         when {
+            m.isUser && id.melvern.hermesmobile.core.model.SystemEvent.kindOf(m.displayKind, m.text ?: "") != null -> {
+                val raw = m.text ?: ""
+                val kind = id.melvern.hermesmobile.core.model.SystemEvent.kindOf(m.displayKind, raw)!!
+                listOf(ChatItem.Event(kind, id.melvern.hermesmobile.core.model.SystemEvent.label(kind,
+                    id.melvern.hermesmobile.core.model.SystemEvent.displayText(m.displayMetadata), raw), raw, m.rowId, m.timestamp))
+            }
             m.isUser -> {
                 val (txt, steered) = id.melvern.hermesmobile.core.model.SteerText.unwrap(m.text ?: "")
                 listOf(ChatItem.User(txt, m.rowId, time = RelTime.clock(m.timestamp), at = m.timestamp, steered = steered))
@@ -1166,6 +1172,7 @@ fun ChatScreen(
                                 is ChatItem.User -> UserBubble(item, onLongPress = { userActionTarget = item }, mediaFetch = mediaFetch, videoFetch = videoFetch,
                                     onRetry = item.outboxId?.let { oid -> { id.melvern.hermesmobile.core.repo.Outbox.get(context, oid)?.let { deliver(it) } } })
                                 is ChatItem.Assistant -> AssistantBlock(item, onLongPress = { copyTarget = it }, mediaFetch = mediaFetch, videoFetch = videoFetch, onReply = { replyQuote = it.take(280) }, showMeta = row.index in turnEnds)
+                                is ChatItem.Event -> EventRow(item)
                                 is ChatItem.NoticeLine -> NoticeRow(
                                     item.text,
                                     onRetry = if (loadFailed) ({ loading = true; items = emptyList(); reloadKey++ }) else null,

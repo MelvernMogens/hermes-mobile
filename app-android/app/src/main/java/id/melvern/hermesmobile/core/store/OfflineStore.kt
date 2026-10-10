@@ -51,7 +51,8 @@ object OfflineStore {
     fun loadChat(c: Context, storedId: String, clock: (Double) -> String): List<id.melvern.hermesmobile.core.model.ChatItem> =
         runCatching {
             val f = file(c, storedId); if (!f.exists()) return emptyList()
-            json.decodeFromString(msgSer, f.readText()).map { m ->
+            json.decodeFromString(msgSer, f.readText()).mapNotNull { m ->
+                if (m.u && id.melvern.hermesmobile.core.model.SystemEvent.kindOf(null, m.t) != null) return@mapNotNull null
                 if (m.u) id.melvern.hermesmobile.core.model.ChatItem.User(m.t, time = m.at?.let(clock) ?: "", at = m.at)
                 else id.melvern.hermesmobile.core.model.ChatItem.Assistant(m.t, done = true, time = m.at?.let(clock) ?: "", at = m.at)
             }

@@ -66,6 +66,9 @@ data class TranscriptMessage(
      *  dan SEMUA baris tool di transcript lama hilang diam-diam. */
     val args: kotlinx.serialization.json.JsonElement? = null,
     val id: String? = null,
+    /** Gateway timeline marker on a role=user row (subagent done, process done, model switch…). */
+    @SerialName("display_kind") val displayKind: String? = null,
+    @SerialName("display_metadata") val displayMetadata: kotlinx.serialization.json.JsonElement? = null,
 ) {
     /** Args tool sebagai teks tampilan (pretty JSON / string mentah). */
     val argsText: String?
@@ -116,6 +119,9 @@ sealed interface ChatItem {
     /** M8: [toolId] = tool_id event live (match start↔complete); [detail] = args + output → code block saat expand. */
     data class Tool(val name: String, val status: String, val detail: String? = null, val toolId: String? = null) : ChatItem
     data class NoticeLine(val text: String) : ChatItem
+    /** System report injected as a user turn (subagent finished, background process done, model
+     *  switched…). Shown as one small collapsed line; tap opens [body]. Never a user bubble. */
+    data class Event(val kind: String, val label: String, val body: String, val rowId: Int? = null, val at: Double? = null) : ChatItem
     /** Output slash command (lokal, tidak masuk transcript agent). */
     data class Command(val command: String, val output: String?, val failed: Boolean = false) : ChatItem
 }
@@ -167,4 +173,39 @@ object UserMatch {
         // "ok" tidak boleh cocok dengan "book"/"hook".
         return a.isNotEmpty() && b.endsWith("\n" + a)
     }
+}
+
+
+/** Which role=user rows are system reports, and the one-line label for them (same wording as desktop). */
+object SystemEvent {
+    private val KINDS = setOf("async_delegation_complete", "process_complete", "auto_continue", "model_switch", "personality_switch")
+    private val ASYNC = Regex("""^\s*\[ASYNC DELEGATION BATCH COMPLETE""")
+    private val PROC = Regex("""^\s*\[(IMPORTANT: )?Background process""", RegexOption.IGNORE_CASE)
+    private val AUTO = Regex("""^\s*\[System note: Your previous turn was interrupted""")
+
+    /** Kind of a role=user row, or null when it's a real message from the user. */
+    fun kindOf(displayKind: String?, text: String): String? = when {
+        displayKind in KINDS -> displayKind
+        displayKind != null -> null
+        ASYNC.containsMatchIn(text) -> "async_delegation_complete"
+        PROC.containsMatchIn(text) -> "process_complete"
+        AUTO.containsMatchIn(text) -> "auto_continue"
+        else -> null
+    }
+
+    fun label(kind: String, displayText: String?, text: String): String {
+        displayText?.trim()?.takeIf { it.isNotEmpty() }?.let { return it.replace(Regex("\\s+"), " ") }
+        return when (kind) {
+            "async_delegation_complete" -> Regex("""TASK \d+/\d+: (.+?)\s*\(status=""").find(text)?.groupValues?.get(1)
+                ?.let { "Subagent finished: $it" } ?: "Background agent work finished"
+            "process_complete" -> "Background process finished"
+            "auto_continue" -> "Resumed interrupted turn"
+            "model_switch" -> "Model changed"
+            "personality_switch" -> "Personality changed"
+            else -> "System update"
+        }
+    }
+
+    fun displayText(meta: kotlinx.serialization.json.JsonElement?): String? =
+        ((meta as? kotlinx.serialization.json.JsonObject)?.get("display_text") as? kotlinx.serialization.json.JsonPrimitive)?.content
 }
