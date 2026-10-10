@@ -104,6 +104,11 @@ class RealBuilders(unittest.TestCase):
         self.assertFalse(me.effort_menu("openai-codex", "gpt-5.6-sol")["can_off"])
         self.assertFalse(me.effort_menu("copilot", "gpt-5.4")["can_off"])
 
+    def test_gateway_provider_aliases_resolve(self):
+        # the gateway reports Copilot chats as "github-copilot"
+        self.assertEqual(me.effort_menu("github-copilot", "gpt-5.4")["levels"],
+                         me.effort_menu("copilot", "gpt-5.4")["levels"])
+
     def test_copilot_gpt5_uses_the_responses_route(self):
         # Hermes sends GPT-5 Copilot models over Responses, where max/ultra land on medium
         by = {l["level"]: l for l in me.effort_menu("copilot", "gpt-5.4")["levels"]}

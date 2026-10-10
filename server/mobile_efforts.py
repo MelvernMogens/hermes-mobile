@@ -116,6 +116,19 @@ def _has_content(payload: Any) -> bool:
 
 # ── route per model (mirrors agent_init._resolve_api_mode) ─────────────────────────────────
 
+def canonical_provider(slug: str) -> str:
+    """Hermes' own alias resolution: the gateway reports some providers by an alias
+    (``github-copilot`` for ``copilot``, ``claude`` for ``anthropic``…)."""
+    slug = (slug or "").strip().lower()
+    if not slug or slug.startswith("custom"):
+        return slug
+    try:
+        from hermes_cli.models import normalize_provider
+        return normalize_provider(slug)
+    except Exception:
+        return slug
+
+
 def _route(slug: str, model: str, base_url: Optional[str]) -> tuple[str, Any]:
     """(api_mode, provider profile or None) the agent would use for this provider/model."""
     from providers import get_provider_profile
@@ -238,7 +251,7 @@ def hermes_fns(provider: str, model: str, base_url: Optional[str] = None
                ) -> tuple[Optional[Callable[[str], Optional[str]]], bool, bool]:
     """(``level -> wire effort`` from Hermes' real builders or None,
     Off really turns thinking off, On/Off is a real toggle for a model with no levels)."""
-    slug = (provider or "").strip().lower()
+    slug = canonical_provider(provider)
     mode, profile = _route(slug, model, base_url)
     if mode == "anthropic_messages":
         wire = _anthropic_wire(model)
@@ -310,7 +323,7 @@ def build_menu(model: str, wire: Optional[Callable[[str], Optional[str]]], can_o
 
 
 def effort_menu(provider: str, model: str, base_url: Optional[str] = None) -> dict:
-    key = ((provider or "").strip().lower()[:120], (model or "").strip()[:200], (base_url or "").strip().lower()[:300])
+    key = (canonical_provider(provider)[:120], (model or "").strip()[:200], (base_url or "").strip().lower()[:300])
     with _LOCK:
         hit = _CACHE.get(key)
         if hit is not None:
