@@ -64,9 +64,18 @@ object AvatarCache {
     fun isPixel(name: String): Boolean = pixel.containsKey(name)
     fun pixelBg(name: String): Int? = pixel[name]
 
+    /** When each avatar was fetched. An avatar changed on the Mac (or a bad one that got
+     *  fixed there) must reach the phone without killing the app: entries older than
+     *  [MAX_AGE_MS] are re-fetched on the next compose, and [expireAll] runs on app resume. */
+    private val fetchedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val MAX_AGE_MS = 10 * 60_000L
+
     fun lockFor(name: String): Mutex = locks.computeIfAbsent(name) { Mutex() }
     fun get(name: String): ImageBitmap? = cache.get(name)
-    fun put(name: String, bmp: ImageBitmap) { cache.put(name, bmp) }
+    fun fresh(name: String): ImageBitmap? =
+        cache.get(name)?.takeIf { System.currentTimeMillis() - (fetchedAt[name] ?: 0L) < MAX_AGE_MS }
+    fun put(name: String, bmp: ImageBitmap) { cache.put(name, bmp); fetchedAt[name] = System.currentTimeMillis() }
+    fun expireAll() { fetchedAt.clear() }
 }
 
 /**
@@ -80,8 +89,20 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
     var bmp by remember(profile) { mutableStateOf(AvatarCache.get(profile)) }
     var failed by remember(profile) { mutableStateOf(false) }
 
-    LaunchedEffect(profile) {
-        if (bmp != null || failed) return@LaunchedEffect
+    val resumed = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var resumeTick by remember { mutableStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(resumed) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        resumed.lifecycle.addObserver(obs)
+        onDispose { resumed.lifecycle.removeObserver(obs) }
+    }
+    LaunchedEffect(profile, resumeTick) {
+        if (resumeTick > 1) AvatarCache.expireAll()   // back from background → re-check the Mac
+        AvatarCache.fresh(profile)?.let { bmp = it; return@LaunchedEffect }
+        // stale or missing: keep showing what we have while re-fetching
+        failed = false
         try {
             // tunggu client tersedia (compose pertama sering mendahului load
             // DataStore) DAN koneksi OPEN — cap 15 detik seperti pola ChatScreen.
@@ -97,7 +118,7 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
 
             // dedup: header + row sheet minta profile sama bersamaan → 1 RPC
             AvatarCache.lockFor(profile).withLock {
-                AvatarCache.get(profile)?.let { bmp = it; return@withLock }
+                AvatarCache.fresh(profile)?.let { bmp = it; return@withLock }
                 // 3 attempt — flap reconnect pas startup jangan bikin placeholder permanen
                 var lastErr: Throwable? = null
                 var asset: MetaRepo.ProfileAsset? = null
@@ -108,7 +129,7 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
                 }
                 if (lastErr != null) throw lastErr
                 val bytes = asset?.bytes
-                    ?: run { failed = true; return@withLock } // found=false → inisial, bukan error
+                    ?: run { if (bmp == null) failed = true; return@withLock } // found=false → inisial, bukan error
                 // decode di background + downsampling: bounds dulu, inSampleSize
                 // ke ~256px — avatar 1024² full RGBA x 12 bakal makan puluhan MB.
                 val decoded = withContext(Dispatchers.Default) {
@@ -141,7 +162,7 @@ fun ProfileAvatar(app: HermesApp, profile: String, size: Dp, modifier: Modifier 
         } catch (e: CancellationException) {
             throw e // effect dibatalkan (recompose/leave) — bukan kegagalan load
         } catch (_: Throwable) {
-            failed = true
+            if (bmp == null) failed = true
         }
     }
 
