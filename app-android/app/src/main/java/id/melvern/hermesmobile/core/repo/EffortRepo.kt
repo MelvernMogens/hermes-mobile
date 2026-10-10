@@ -94,7 +94,7 @@ class EffortRepo(private val settings: ConnectionSettings) {
         /** The chip a stored effort lights up: its own chip, else the native level it runs as. */
         fun selectedChip(menu: Menu, effort: String?): String? {
             if (effort.isNullOrBlank()) return null
-            if (effort == "none") return "none"
+            if (effort == "none") return if (menu.canOff) "none" else null
             val shown = chips(menu).map { it.word }
             if (effort in shown) return effort
             return menu.levels.firstOrNull { it.word == effort }?.runsAs?.takeIf { it in shown }

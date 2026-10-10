@@ -89,5 +89,7 @@ class EffortRepoTest {
             {"level":"low","wire":"low","native":true,"runs_as":"low"},
             {"level":"ultra","wire":"max","native":false,"runs_as":"max"}]}""")!!
         assertFalse(codex.canOff)
+        // a stored "none" on such a model lights no (non-existent) Off key
+        assertNull(EffortRepo.selectedChip(codex, "none"))
     }
 }

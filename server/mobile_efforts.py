@@ -22,30 +22,47 @@ the hermes-agent venv (the proxy does). Fails open: if Hermes can't say, every l
 from __future__ import annotations
 
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 LADDER: tuple[str, ...] = ("minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 _RANK = {lv: i for i, lv in enumerate(("none",) + LADDER)}
 
-# (provider, model, base_url) -> menu. Only DEFINITE answers are cached (known=True).
-_CACHE: dict[tuple[str, str, str], dict] = {}
+# (provider, model, base_url) -> (monotonic time, menu). Only DEFINITE answers are cached
+# (known=True, no cold catalog), and only for _TTL_S so Hermes' own catalog refreshes
+# (a model turning reasoning-mandatory, …) reach the phone.
+_CACHE: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _CACHE_MAX = 256
-_LOCK = threading.Lock()
+_TTL_S = 20 * 60
+_LOCK = threading.Lock()            # cache only — builders run outside it
+_DISCOVERY_LOCK = threading.Lock()
+_discovered = False
 _PROBE_SESSION = "mobile-effort-probe"
 
 Wire = Callable[[dict], Any]   # reasoning_config -> wire payload (anything we can search)
 
 
-def warm() -> None:
-    """Load Hermes' provider registry once (call at proxy startup, off the event loop).
-    Provider discovery is not thread-safe: a lookup during a half-finished discovery returns None."""
-    with _LOCK:
+def _discovery_ready() -> None:
+    """Hermes' provider discovery isn't thread-safe (a lookup during a half-finished discovery
+    returns None), so the first one runs alone; afterwards lookups are plain dict reads."""
+    global _discovered
+    if _discovered:
+        return
+    with _DISCOVERY_LOCK:
+        if _discovered:
+            return
         try:
             from providers import list_providers
             list_providers()
         except Exception:
-            pass
+            return
+        _discovered = True
+
+
+def warm() -> None:
+    """Load Hermes' provider registry once (call at proxy startup, off the event loop)."""
+    _discovery_ready()
 
 
 # ── reading the wire ───────────────────────────────────────────────────────────────────────
@@ -209,25 +226,52 @@ def _responses_wire(slug: str, model: str, base_url: Optional[str]) -> Wire:
     return wire
 
 
-def _supports_reasoning(slug: str, model: str) -> bool:
-    """The agent's gate for sending reasoning on chat routes (cache-only catalog lookups)."""
-    if slug != "openrouter":
-        return True
+class _Provisional(Exception):
+    """The answer depends on a catalog that isn't loaded yet — don't pin it in the cache."""
+
+
+_provisional = threading.local()
+
+
+def _catalog_cold(slug: str, model: str) -> bool:
+    """OpenRouter / Nous reasoning catalogs warm in the background; a cold lookup means the
+    menu we'd build now (prefix guesses, no 'mandatory' flag) may differ once it's warm."""
     try:
-        from hermes_cli.models_reasoning_caps import openrouter_model_reasoning_capabilities
-        caps = openrouter_model_reasoning_capabilities(model)
+        from hermes_cli import models_reasoning_caps as caps
+        if slug == "openrouter":
+            return caps.openrouter_model_reasoning_capabilities(model) is None
+        if slug in ("nous", "nous-portal", "nousresearch"):
+            return caps.nous_model_reasoning_capabilities(model) is None
     except Exception:
-        caps = None
-    if caps is not None:
-        return bool(caps.get("supports_reasoning"))
-    from agent.reasoning_params import _OPENROUTER_REASONING_PREFIXES
-    return (model or "").lower().startswith(_OPENROUTER_REASONING_PREFIXES)
+        return False
+    return False
+
+
+def _supports_reasoning(slug: str, model: str, base_url: Optional[str], profile) -> bool:
+    """The agent's OWN gate (``ReasoningParamsMixin._supports_reasoning_extra_body``) evaluated
+    on a stand-in, so every host it special-cases (OpenRouter catalog, Nous/Vercel, GitHub,
+    Ollama Cloud /api/show, LM Studio, everything else False) behaves exactly as in a turn.
+    Network-backed probes (Ollama /api/show, LM Studio) are never run here: those routes are
+    reported as unknown instead."""
+    from agent.reasoning_params import ReasoningParamsMixin
+    from utils import base_url_host_matches
+
+    url = (base_url or getattr(profile, "base_url", "") or "").lower()
+    if slug == "lmstudio" or base_url_host_matches(url, "ollama.com"):
+        raise _Provisional()            # the agent asks the server live; we won't from the proxy
+    if _catalog_cold(slug, model):
+        _provisional.flag = True
+    stand_in = SimpleNamespace(
+        model=model, provider=slug, base_url=url, _base_url_lower=url,
+        _is_openrouter_url=lambda: base_url_host_matches(url, "openrouter.ai"),
+    )
+    return bool(ReasoningParamsMixin._supports_reasoning_extra_body(stand_in))
 
 
 def _chat_wire(profile, slug: str, model: str, base_url: Optional[str]) -> Wire:
     from agent.transports.chat_completions import _reasoning_config_for_model
 
-    supports = _supports_reasoning(slug, model)
+    supports = _supports_reasoning(slug, model, base_url, profile)
 
     def wire(cfg: dict):
         cfg = _reasoning_config_for_model(model, cfg)
@@ -253,6 +297,8 @@ def hermes_fns(provider: str, model: str, base_url: Optional[str] = None
     Off really turns thinking off, On/Off is a real toggle for a model with no levels)."""
     slug = canonical_provider(provider)
     mode, profile = _route(slug, model, base_url)
+    if mode != "chat_completions" and _catalog_cold(slug, model):
+        _provisional.flag = True
     if mode == "anthropic_messages":
         wire = _anthropic_wire(model)
     elif mode == "codex_responses":
@@ -324,17 +370,24 @@ def build_menu(model: str, wire: Optional[Callable[[str], Optional[str]]], can_o
 
 def effort_menu(provider: str, model: str, base_url: Optional[str] = None) -> dict:
     key = (canonical_provider(provider)[:120], (model or "").strip()[:200], (base_url or "").strip().lower()[:300])
+    now = time.monotonic()
     with _LOCK:
         hit = _CACHE.get(key)
-        if hit is not None:
-            return hit
-        try:
-            fn, can_off, toggle = hermes_fns(key[0], key[1], base_url or None)
-        except Exception:
-            fn, can_off, toggle = None, True, True
-        menu = {"provider": key[0], **build_menu(key[1], fn, can_off, toggle)}
-        if menu["known"]:                       # never pin an "I don't know" answer
+        if hit is not None and now - hit[0] < _TTL_S:
+            return hit[1]
+    _discovery_ready()
+    _provisional.flag = False
+    try:
+        fn, can_off, toggle = hermes_fns(key[0], key[1], base_url or None)
+    except _Provisional:
+        fn, can_off, toggle = None, True, True
+    except Exception:
+        fn, can_off, toggle = None, True, True
+    menu = {"provider": key[0], **build_menu(key[1], fn, can_off, toggle)}
+    # never pin an "I don't know" answer, nor one built while a catalog was still cold
+    if menu["known"] and not getattr(_provisional, "flag", False):
+        with _LOCK:
             while len(_CACHE) >= _CACHE_MAX:
                 _CACHE.pop(next(iter(_CACHE)))
-            _CACHE[key] = menu
-        return menu
+            _CACHE[key] = (now, menu)
+    return menu

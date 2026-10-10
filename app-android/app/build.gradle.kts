@@ -13,8 +13,8 @@ android {
         applicationId = "id.melvern.hermesmobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        versionName = "27"
+        versionCode = 31
+        versionName = "28"
     }
 
     buildTypes {

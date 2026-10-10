@@ -445,7 +445,11 @@ fun ModelSheet(
         } catch (_: Throwable) { null }) ?: id.melvern.hermesmobile.core.repo.EffortRepo.Menu.fallback
     }
     LaunchedEffect(Unit) {
-        val c = app.client ?: return@LaunchedEffect
+        val c = app.client ?: run {
+            error = "Not connected to your Mac"
+            effortMenu = id.melvern.hermesmobile.core.repo.EffortRepo.Menu.fallback
+            return@LaunchedEffect
+        }
         try { options = MetaRepo(c).modelOptions(sessionId = sessionId.ifBlank { null }, profile = profile) }
         catch (e: Throwable) {
             error = e.message
@@ -454,7 +458,10 @@ fun ModelSheet(
         }
         // chat kosong: pakai pilihan yang diingat; session live: tanya server.
         effort = if (sessionId.isBlank()) pendingEffort
-        else try { MetaRepo(c).reasoningEffort(sessionId) } catch (_: Throwable) { null }
+        else try {
+            val meta = MetaRepo(c)
+            if (meta.isLive(sessionId, profile)) meta.reasoningEffort(sessionId) else null
+        } catch (_: Throwable) { null }
     }
 
     /** Terapkan effort: live → config.set session-scoped; chat baru → remembered. */
@@ -468,7 +475,13 @@ fun ModelSheet(
                     effort = word
                 } else {
                     val c = app.client ?: return@launch
-                    MetaRepo(c).setReasoningEffort(sessionId, word, profile)
+                    val meta = MetaRepo(c)
+                    meta.setReasoningEffort(sessionId, word, profile)
+                    if (!meta.isLive(sessionId, profile)) {
+                        // the chat dropped between the check and the change: the gateway may have
+                        // applied it to the default for new chats instead of this chat
+                        actionError = "This chat disconnected while changing effort. Your default effort may have changed. Check it on your Mac."
+                    }
                     effort = word
                 }
             } catch (e: MetaRepo.ChatNotLiveException) {
