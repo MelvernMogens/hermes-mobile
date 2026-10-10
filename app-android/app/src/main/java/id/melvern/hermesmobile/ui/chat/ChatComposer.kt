@@ -420,6 +420,8 @@ private var pendingEffort: String? = null
 fun ModelSheet(
     app: HermesApp,
     sessionId: String,
+    /** the chat's own profile (bot chats live in another profile than the app's) */
+    profile: String = app.profile.value,
     onDismiss: () -> Unit,
     onSwitched: (model: String, deferred: Boolean) -> Unit,
     onNewChat: (String, String) -> Unit,
@@ -444,8 +446,12 @@ fun ModelSheet(
     }
     LaunchedEffect(Unit) {
         val c = app.client ?: return@LaunchedEffect
-        try { options = MetaRepo(c).modelOptions(sessionId = sessionId.ifBlank { null }, profile = app.profile.value) }
-        catch (e: Throwable) { error = e.message }
+        try { options = MetaRepo(c).modelOptions(sessionId = sessionId.ifBlank { null }, profile = profile) }
+        catch (e: Throwable) {
+            error = e.message
+            // no model list → still let the user set effort (Hermes adjusts levels a model lacks)
+            effortMenu = id.melvern.hermesmobile.core.repo.EffortRepo.Menu.fallback
+        }
         // chat kosong: pakai pilihan yang diingat; session live: tanya server.
         effort = if (sessionId.isBlank()) pendingEffort
         else try { MetaRepo(c).reasoningEffort(sessionId) } catch (_: Throwable) { null }
@@ -462,9 +468,11 @@ fun ModelSheet(
                     effort = word
                 } else {
                     val c = app.client ?: return@launch
-                    MetaRepo(c).setReasoningEffort(sessionId, word)
+                    MetaRepo(c).setReasoningEffort(sessionId, word, profile)
                     effort = word
                 }
+            } catch (e: MetaRepo.ChatNotLiveException) {
+                actionError = "This chat isn't connected right now. Close it and open it again, then set the effort."
             } catch (e: Throwable) {
                 actionError = "Couldn't set effort: ${e.message}"
             } finally { effortBusy = null }
@@ -477,7 +485,7 @@ fun ModelSheet(
             val c = app.client ?: run { busy = null; return@launch }
             try {
                 if (sessionId.isBlank()) {
-                    val (newRuntime, _) = SessionRepo(c, app.profile.value).createSession(
+                    val (newRuntime, _) = SessionRepo(c, profile).createSession(
                         model = model, provider = provider, reasoningEffort = pendingEffort,
                     )
                     onDismiss(); onNewChat(newRuntime, "")
@@ -583,6 +591,13 @@ fun ModelSheet(
                     Modifier.fillMaxWidth().height(Dim.KeyH).clip(Radius.Key)
                         .background(Ink.Surface1.copy(alpha = shimmerAlpha())),
                 )
+                !menu.dial && menu.canOff -> {
+                    // thinking is on/off only: two keys, On = Hermes' default level
+                    EffortKeys(listOf("none", "medium"), if (effort == "none") "none" else if (effort != null) "medium" else null,
+                        effortBusy, enabled = effortBusy == null, labels = mapOf("medium" to "On")) { pickEffort(it) }
+                    Text("This model can only turn thinking on or off", style = Type.Caption.copy(color = Ink.Text3),
+                        modifier = Modifier.padding(top = 8.dp))
+                }
                 !menu.dial -> Text(
                     "This model has no effort levels",
                     style = Type.Callout.copy(color = Ink.Text3),
@@ -598,6 +613,10 @@ fun ModelSheet(
                     val ultraRunsAs = menu.levels.firstOrNull { it.word == "ultra" }?.runsAs
                     val note = when {
                         !menu.known -> "Levels this model lacks are adjusted by Hermes"
+                        ultraRunsAs != null && ultraRunsAs != "ultra" &&
+                            !id.melvern.hermesmobile.core.repo.EffortRepo.ultraIsStrongest(menu) ->
+                            "Ultra runs at ${id.melvern.hermesmobile.core.repo.EffortRepo.label(ultraRunsAs)} on this model. " +
+                                "Pick ${id.melvern.hermesmobile.core.repo.EffortRepo.label(id.melvern.hermesmobile.core.repo.EffortRepo.strongest(menu) ?: ultraRunsAs)} for its strongest"
                         ultraRunsAs != null && ultraRunsAs != "ultra" ->
                             "Ultra runs at ${id.melvern.hermesmobile.core.repo.EffortRepo.label(ultraRunsAs)} on this model"
                         else -> null
@@ -628,7 +647,10 @@ private fun effortKeyLabel(word: String) = when (word) {
  * the rest are dark key caps. Equal widths, so 3 keys and 8 keys both read as one panel.
  */
 @Composable
-private fun EffortKeys(keys: List<String>, lit: String?, busy: String?, enabled: Boolean, onPick: (String) -> Unit) {
+private fun EffortKeys(
+    keys: List<String>, lit: String?, busy: String?, enabled: Boolean,
+    labels: Map<String, String> = emptyMap(), onPick: (String) -> Unit,
+) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         keys.forEach { word ->
             val on = word == lit
@@ -643,7 +665,7 @@ private fun EffortKeys(keys: List<String>, lit: String?, busy: String?, enabled:
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    if (busy == word) "…" else effortKeyLabel(word),
+                    if (busy == word) "…" else labels[word] ?: effortKeyLabel(word),
                     style = Type.Key.copy(
                         color = if (on) Ink.OnAccent else Ink.Text2,
                         fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,

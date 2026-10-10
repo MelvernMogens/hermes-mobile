@@ -80,6 +80,17 @@ class EffortRepo(private val settings: ConnectionSettings) {
             return native + ultra
         }
 
+        /** The model's strongest native level (ladder order). */
+        fun strongest(menu: Menu): String? =
+            menu.levels.filter { it.word != "ultra" && it.runsAs == it.word }.maxByOrNull { LADDER.indexOf(it.word) }?.word
+
+        /** False when Ultra runs WEAKER than the model's strongest level (legacy budget Claude). */
+        fun ultraIsStrongest(menu: Menu): Boolean {
+            val runs = menu.levels.firstOrNull { it.word == "ultra" }?.runsAs ?: return true
+            val top = strongest(menu) ?: return true
+            return LADDER.indexOf(runs) >= LADDER.indexOf(top)
+        }
+
         /** The chip a stored effort lights up: its own chip, else the native level it runs as. */
         fun selectedChip(menu: Menu, effort: String?): String? {
             if (effort.isNullOrBlank()) return null

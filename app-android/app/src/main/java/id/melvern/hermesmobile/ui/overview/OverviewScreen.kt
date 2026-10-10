@@ -622,7 +622,8 @@ private fun BotMonitor(
                 if (running) {
                     // one footer format on every live monitor: lamp · name · elapsed timecode.
                     // A chat-only run (no task clock) counts from when the wall first saw it live.
-                    val start = remember(b.name, b.taskSecs == null) {
+                    // keyed on the task itself: a chained bot-run (new task, still RUNNING) restarts the clock
+                    val start = remember(b.name, b.taskSessionId, b.task, b.taskSecs == null) {
                         b.taskSecs?.let { System.currentTimeMillis() / 1000.0 - it } ?: (System.currentTimeMillis() / 1000.0)
                     }
                     id.melvern.hermesmobile.ui.components.LiveTimecode(start, Type.Timecode.copy(color = Ink.Text))

@@ -66,4 +66,28 @@ class EffortRepoTest {
     @Test fun garbageBodyIsNull() {
         assertNull(EffortRepo.parse("not json"))
     }
+
+    // legacy budget Claude: max/ultra fall back to the MEDIUM budget in Hermes
+    private val claude37 = """{"known":true,"dial":true,"can_off":true,"levels":[
+        {"level":"minimal","wire":"medium","native":false,"runs_as":"medium"},
+        {"level":"low","wire":"low","native":true,"runs_as":"low"},
+        {"level":"medium","wire":"medium","native":true,"runs_as":"medium"},
+        {"level":"high","wire":"high","native":true,"runs_as":"high"},
+        {"level":"xhigh","wire":"xhigh","native":true,"runs_as":"xhigh"},
+        {"level":"max","wire":"medium","native":false,"runs_as":"medium"},
+        {"level":"ultra","wire":"medium","native":false,"runs_as":"medium"}]}"""
+
+    @Test fun ultraWeakerThanTheTopLevelIsFlagged() {
+        val m = EffortRepo.parse(claude37)!!
+        assertEquals("xhigh", EffortRepo.strongest(m))
+        assertFalse(EffortRepo.ultraIsStrongest(m))
+        assertTrue(EffortRepo.ultraIsStrongest(EffortRepo.parse(opus)!!))
+    }
+
+    @Test fun cannotTurnOffMeansNoOffKeyData() {
+        val codex = EffortRepo.parse("""{"known":true,"dial":true,"can_off":false,"levels":[
+            {"level":"low","wire":"low","native":true,"runs_as":"low"},
+            {"level":"ultra","wire":"max","native":false,"runs_as":"max"}]}""")!!
+        assertFalse(codex.canOff)
+    }
 }

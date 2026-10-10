@@ -1,4 +1,13 @@
-# v28 handoff (paused 10 Oct ~01:20, user request)
+# v28 handoff (paused again 10 Oct ~09:20, user request — Mac overloaded)
+
+## Status 09:20
+- Server effort fixes DONE + committed (8c7b89a), proxy live with them (P1 1-3, P2 5-7, 10 done).
+- App fixes written but NOT built/committed yet (uncommitted in working tree):
+  MetaRepo.isLive + setReasoningEffort guard (stale runtime → refuse, no global write),
+  ModelSheet profile=chatProfile, fallback menu on model.options failure, On/Off keys for
+  no-dial models, Ultra-weaker-than-top note, EffortRepo.strongest/ultraIsStrongest,
+  BotMonitor clock keyed on task, EffortRepoTest +2. → Next: build + tests, emulator check, commit.
+
 
 ## Done (committed)
 - Control Room redesign all screens + 5 data features + bug-review fixes (550236d, 67d29b6).

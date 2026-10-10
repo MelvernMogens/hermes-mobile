@@ -95,8 +95,27 @@ class MetaRepo(private val client: GatewayClient) {
         return v.takeIf { it.isNotBlank() }   // "none" = thinking off (the Off key)
     }
 
-    /** `config.set key=reasoning value=<none|minimal|…|max|ultra>` — session-scoped. */
-    suspend fun setReasoningEffort(sessionId: String, effort: String) {
+    /** The chat isn't live in the gateway (reaped / stale runtime id). */
+    class ChatNotLiveException : Exception("This chat isn't connected right now")
+
+    /** True when [sessionId] is a live runtime in the gateway (`session.title` read: 4001 = gone). */
+    suspend fun isLive(sessionId: String, profile: String? = null): Boolean = try {
+        client.call("session.title", buildJsonObject {
+            put("session_id", sessionId)
+            if (profile != null && profile != "default") put("profile", profile)
+        })
+        true
+    } catch (e: RpcException) {
+        if (e.code == 4001) false else throw e
+    }
+
+    /**
+     * `config.set key=reasoning value=<none|minimal|…|max|ultra>` — THIS chat only.
+     * The gateway writes the GLOBAL `agent.reasoning_effort` (every chat, bot and cron job)
+     * when the session id isn't live, so check first and refuse instead.
+     */
+    suspend fun setReasoningEffort(sessionId: String, effort: String, profile: String? = null) {
+        if (!isLive(sessionId, profile)) throw ChatNotLiveException()
         client.call("config.set", buildJsonObject {
             put("session_id", sessionId)
             put("key", "reasoning")

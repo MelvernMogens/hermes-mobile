@@ -1564,6 +1564,7 @@ fun ChatScreen(
         ModelSheet(
             app = app,
             sessionId = runtimeId,
+            profile = chatProfile,
             onDismiss = { modelSheet = false },
             onSwitched = { m, deferred ->
                 activeModel = m
