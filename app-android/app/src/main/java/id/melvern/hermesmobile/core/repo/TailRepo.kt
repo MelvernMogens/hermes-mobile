@@ -10,6 +10,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import java.net.URLEncoder
 
@@ -19,7 +20,7 @@ import java.net.URLEncoder
  * resume penuh menyusul dan MENGGANTI daftar ini seluruhnya.
  */
 class TailRepo(private val settings: ConnectionSettings) {
-    data class Tail(val messages: List<TranscriptMessage>, val hasMore: Boolean)
+    data class Tail(val messages: List<TranscriptMessage>, val hasMore: Boolean, val total: Int = -1)
 
     private val base get() = settings.baseUrl.trim().trimEnd('/')
 
@@ -27,6 +28,16 @@ class TailRepo(private val settings: ConnectionSettings) {
         val a = withContext(Dispatchers.IO) { SharedAuth.get(base, settings.username, settings.password) } ?: return null
         val p = profile?.takeIf { it.isNotBlank() && it != "default" }?.let { "&profile=" + URLEncoder.encode(it, "UTF-8") } ?: ""
         return a.getJson("$base/api/mobile-tail?id=${URLEncoder.encode(storedId, "UTF-8")}&limit=$limit$p")?.let { parse(it) }
+    }
+
+    /**
+     * Cheap staleness probe for the delta path when our runtime is detached: the display
+     * row count of this chat as the Mac's DB sees it now. Differs from what the cache
+     * snapshotted → someone wrote to the chat from another surface → full resume.
+     */
+    suspend fun fingerprint(storedId: String, profile: String?): Int? {
+        val t = tail(storedId, profile, limit = 1) ?: return null
+        return t.total
     }
 
     companion object {
@@ -39,7 +50,8 @@ class TailRepo(private val settings: ConnectionSettings) {
             val msgs = arr.mapNotNull { el ->
                 try { json.decodeFromJsonElement(TranscriptMessage.serializer(), el.jsonObject) } catch (_: Throwable) { null }
             }
-            Tail(msgs, (o["has_more"] as? JsonPrimitive)?.booleanOrNull ?: false)
+            Tail(msgs, (o["has_more"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                (o["total_active"] as? JsonPrimitive)?.intOrNull ?: -1)
         }.getOrNull()
 
         /** Daftar sementara: baris "Loading earlier messages…" di atas kalau masih ada pesan lebih lama. */

@@ -502,12 +502,12 @@ fun ChatScreen(
         }
     }
 
-    fun cacheSnapshot() {
+    fun cacheSnapshot(dbCount: Int = TranscriptCache.get(actualStoredId)?.dbCount ?: -1) {
         id.melvern.hermesmobile.core.store.OfflineStore.saveChat(app, effectiveStoredId, items)
         // app.client (bukan val client lama) — instance bisa diganti HermesApp saat reconnect.
         TranscriptCache.snapshot(
             effectiveStoredId, items, runtimeId,
-            app.client?.lastSeenSeq(runtimeId) ?: TranscriptCache.CURSOR_UNKNOWN, running,
+            app.client?.lastSeenSeq(runtimeId) ?: TranscriptCache.CURSOR_UNKNOWN, running, dbCount,
         )
     }
 
@@ -717,6 +717,8 @@ fun ChatScreen(
                 items = id.melvern.hermesmobile.core.repo.TailRepo.withPartialNotice(mapTranscript(t.messages), t.hasMore)
                 tailOnly = true
                 loading = false
+                // remember the DB fingerprint the tail came from — the delta path's probe
+                TranscriptCache.setDbCount(actualStoredId, t.total)
             }
         } else null
         val c = app.client ?: run { tailJob?.cancel(); tailOnly = false; return@LaunchedEffect }
@@ -751,7 +753,16 @@ fun ChatScreen(
             // (resume dari surface lain) — epoch sama, ring baru, delta count=0 palsu.
             // Percaya delta HANYA kalau runtime server == runtime cache.
             val serverRt = c.serverRuntimeFor(actualStoredId)
-            val runtimeFresh = serverRt == null || serverRt == runtimeId
+            // Detached runtime (desktop took over / reaped): its ring may be dead while the
+            // session moved on — a delta against it can prove nothing. Check the DB row
+            // count fingerprint instead: one cheap HTTP call that doesn't attach anything.
+            val detachedFingerprint: Int? = if (serverRt == null && cachedEntry != null) {
+                app.connection?.let { id.melvern.hermesmobile.core.repo.TailRepo(it).fingerprint(actualStoredId, chatProfile) }
+            } else null
+            val runtimeFresh = when {
+                serverRt == null -> detachedFingerprint == null || detachedFingerprint == (cachedEntry?.dbCount ?: -1)
+                else -> serverRt == runtimeId
+            }
             if (cached != null && cached.runtimeId == runtimeId && runtimeFresh &&
                 cached.cursor != TranscriptCache.CURSOR_UNKNOWN
             ) {

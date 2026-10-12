@@ -308,7 +308,11 @@ class GatewayClient(
                 val payload = p["payload"]?.jsonObject
                 _inbound.tryEmit(GatewayInbound.RpcEvent(type, sid, payload))
             }
-            (res["latest_seq"]?.jsonPrimitive?.intOrNull)?.let { lastSeenBySession[sessionId] = it }
+            val latest = res["latest_seq"]?.jsonPrimitive?.intOrNull ?: 0
+            val known = lastSeenBySession[sessionId] ?: 0
+            if (latest >= known) lastSeenBySession[sessionId] = latest
+            // latest=0 on a dead/unknown ring: keep the old watermark so the cursor
+            // never regresses to "nothing seen" while the cache still holds items.
             ReplayResult(
                 res["count"]?.jsonPrimitive?.intOrNull ?: 0,
                 res["truncated"]?.jsonPrimitive?.booleanOrNull ?: false,
@@ -323,13 +327,15 @@ class GatewayClient(
     fun lastSeenSeq(sessionId: String): Int? = lastSeenBySession[sessionId]
 
     /**
-     * M12: runtime id server untuk stored id — dari session.list (satu call ringan).
+     * M12: runtime id server untuk stored id — dari session.active_list (satu call ringan).
+     * (session.list rows carry the STORED id as `id` and no `session_key`, so matching
+     * there never hits — the old check silently always failed open.)
      * Dipakai anti-stale: kalau runtime server BERBEDA dari yang di TranscriptCache,
      * event ring berjalan di runtime baru; replay dengan runtime lama count=0 palsu.
      * Return null kalau tidak ditemukan / gagal (fail-open: biarkan jalur lama).
      */
     suspend fun serverRuntimeFor(storedId: String): String? = try {
-        val res = call("session.list", buildJsonObject { put("limit", 100) }, timeoutMs = 15_000)
+        val res = call("session.active_list", buildJsonObject { }, timeoutMs = 15_000)
         res["sessions"]?.jsonArray?.firstOrNull { el ->
             (el as? JsonObject)?.get("session_key")?.jsonPrimitive?.contentOrNull == storedId
         }?.let { (it as JsonObject)["id"]?.jsonPrimitive?.contentOrNull }

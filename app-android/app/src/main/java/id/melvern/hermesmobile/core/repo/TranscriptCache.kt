@@ -28,6 +28,8 @@ object TranscriptCache {
         /** Replay-epoch gateway saat snapshot diambil — berubah tiap restart gateway;
          *  epoch beda = ring replay kosong → delta count=0 TIDAK bisa dipercaya → full resume. */
         val epoch: Int = 0,
+        /** Display-row count in the Mac's DB at snapshot time (staleness probe). */
+        val dbCount: Int = -1,
         val at: Long = System.currentTimeMillis(),
     )
 
@@ -48,9 +50,16 @@ object TranscriptCache {
     }
 
     @Synchronized
-    fun snapshot(storedId: String, items: List<ChatItem>, runtimeId: String, cursor: Int, running: Boolean) {
-        map[storedId] = Entry(items.toList(), runtimeId, cursor, running)
+    fun snapshot(storedId: String, items: List<ChatItem>, runtimeId: String, cursor: Int, running: Boolean,
+                 dbCount: Int = -1) {
+        map[storedId] = Entry(items.toList(), runtimeId, cursor, running, 0, dbCount)
         trim()
+    }
+
+    /** Record the DB fingerprint without touching items (set after a tail/resume lands). */
+    @Synchronized
+    fun setDbCount(storedId: String, dbCount: Int) {
+        map[storedId]?.let { map[storedId] = it.copy(dbCount = dbCount, at = System.currentTimeMillis()) }
     }
 
     @Synchronized
