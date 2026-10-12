@@ -104,6 +104,8 @@ fun Composer(
     focusKey: Int = 0,
 ) {
     val focus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
+    // Tablet keyboards that drop the Shift bit on the Enter event: track it from Shift's own keys.
+    var shiftHeld by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(focusKey) { if (focusKey > 0) runCatching { focus.requestFocus() } }
     // v25: offline tetap bisa "kirim" teks — masuk antrean lokal, terkirim saat Mac terjangkau.
     val canSend = !readOnly && !attaching && ((connected && (value.isNotBlank() || attachments.isNotEmpty())) ||
@@ -207,11 +209,19 @@ fun Composer(
                     // Keyboard fisik (tablet): Enter kirim, Shift+Enter baris baru (Settings).
                     // Dicegat di KeyDown sebelum field menyisipkan "\n".
                     .onPreviewKeyEvent { e ->
+                        if (e.key == Key.ShiftLeft || e.key == Key.ShiftRight) {
+                            when (e.type) {
+                                KeyEventType.KeyUp -> shiftHeld = false
+                                KeyEventType.KeyDown -> shiftHeld = true
+                            }
+                            return@onPreviewKeyEvent false
+                        }
                         if (e.key != Key.Enter && e.key != Key.NumPadEnter) return@onPreviewKeyEvent false
                         val ne = e.nativeKeyEvent
                         val hardware = ne.deviceId != android.view.KeyCharacterMap.VIRTUAL_KEYBOARD &&
                             ne.device?.isVirtual != true
-                        if (!AppPrefs.enterShouldSend(hardwareKey = hardware, shift = e.isShiftPressed)) return@onPreviewKeyEvent false
+                        val shift = e.isShiftPressed || shiftHeld
+                        if (!AppPrefs.enterShouldSend(hardwareKey = hardware, shift = shift)) return@onPreviewKeyEvent false
                         if (e.type == KeyEventType.KeyDown && canSend) onSend()
                         true
                     },
