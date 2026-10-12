@@ -166,8 +166,13 @@ fun SessionsScreen(app: HermesApp, onOpen: (String) -> Unit, initialSelection: S
         scope.launch {
             try {
                 val repo = SessionRepo(c, profile)
-                val visible = repo.listSessions(includeHidden = false)
-                val all = repo.listSessions(includeHidden = true)
+                // v28.4: hidden-detection = diff dua list. Dulu dua window 60-baris yang
+                // urutannya digeser last_active/tip-merge kompresi — session aktif
+                // (139 total > 60) kadang cuma kecelak di satu list → false "Hidden"
+                // yang flicker. Sekarang: ambil SEMUA dulu, baru list visible — row baru
+                // yang lahir di sela masuk ke list visible (diri sendiri), bukan all.
+                val all = repo.listSessions(limit = 500, includeHidden = true)
+                val visible = repo.listSessions(limit = 500, includeHidden = false)
                 // v26: "Bot Chat" disembunyikan otomatis oleh plugin bots di desktop —
                 // di HP tetap tampil sebagai chat biasa.
                 val forced = all.filter { isBotChat(it) && visible.none { v -> v.id == it.id } &&
